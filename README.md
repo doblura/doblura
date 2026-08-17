@@ -317,6 +317,41 @@ They are ClusterRoles so you can bind them cluster-wide **or** per namespace,
 which is how you scope an external consultant to three customers without
 inventing a scoping feature.
 
+### And a quota, because `support` can create
+
+`support` opening an environment per ticket is the whole point of the role, and it
+is also how a cluster dies on a Friday. So there are two limits, enforced by an
+admission webhook — a rejected `kubectl apply`, not a cleanup task:
+
+```console
+$ kubectl apply -f ticket-4501.yaml
+Error from server (Forbidden): admission webhook "quota.odooenvironment.doblura.dev"
+denied the request: customer "acme" is at its ephemeral-environment quota: 3 of 3
+open (3 of them yours): demo/ticket-4411, demo/ticket-4418, demo/ticket-4423.
+Delete one that is no longer needed (kubectl delete odooenvironment <name> -n demo),
+or ask someone with the doblura-platform profile to raise
+spec.maxEphemeralEnvironments on OdooTenant/acme -n demo
+```
+
+| Limit | Where | Stops |
+| --- | --- | --- |
+| Per customer | `OdooTenant.spec.maxEphemeralEnvironments` (default 3) | one demanding customer starving the others |
+| Per person | `webhook.maxEnvironmentsPerCreator` (default 5), cluster-wide | fifty environments spread over twenty customers, which passes every per-customer limit |
+
+Who "you" are is not the object's word for it: the creator is taken from the
+authenticated identity in the AdmissionRequest and stamped on the object by the
+webhook, so the per-person count is arithmetic on server data. The operator's own
+ServiceAccount is exempt — it creates environments on the cluster's behalf and must
+not be throttled by a person's allowance.
+
+**`failurePolicy` is `Fail`.** With `Ignore`, a webhook that is down silently stops
+enforcing the limit, which is the same as not having one. The cost is bounded and
+worth stating: while the webhook is down, `create odooenvironment` is refused —
+`delete` is not intercepted, so the way out of a full quota stays open, and nothing
+else in the cluster is affected. There is **no cert-manager dependency**: the
+operator issues its own CA, keeps it in a Secret so every replica serves the same
+one, and publishes the public half into its own `caBundle`.
+
 Two consequences worth stating, since they are the reason for doing it this way:
 **adding a profile touches no code**, and any interface built on top impersonates
 the person rather than holding permissions of its own — so Kubernetes RBAC is the
@@ -417,9 +452,11 @@ what `make e2e-real` does. What is in place:
 - [x] `RunboatLink`: mirrors a [Runboat](https://github.com/sbidoul/runboat)'s
       builds and proxies start/stop/reset through Kubernetes RBAC
 - [x] Five RBAC profiles — viewer, support, qa, consultancy, platform
+- [x] Environment quota enforced at admission — per customer and per person, with
+      a self-signed CA and no cert-manager dependency
 - [x] Company-level subsetting for multi-tenant databases
 - [x] **A real end-to-end rehearsal against Odoo 19**
-- [x] 22 CEL rules and 34 guardrail checks, verified against a real API server
+- [x] 22 CEL rules and 49 guardrail checks, verified against a real API server
 - [ ] The web console (designed, not written — the operator is the product today)
 - [ ] Prometheus metrics: migration duration per release
 - [ ] `OdooRelease`: staged rollout of one release across many customers
@@ -432,12 +469,17 @@ See [ROADMAP.md](ROADMAP.md) for where this is going.
 make all           # generate + build + test + chart lint
 make e2e           # kind + CRDs + the guardrails against a real API server
 make e2e-chart     # a real helm install + helm test
+make e2e-quota     # the operator actually serving admission: the quota, denied for real
 ```
 
 `make chart-sync` copies the generated CRD into the chart. It matters: if they
 diverge, `helm install` leaves a stale CRD and **the CEL guardrails silently stop
 being enforced**. That is the quietest possible failure here, which is why it has
 its own target instead of being done by hand.
+
+The quota is not a CEL rule — it has to read other objects — so `make e2e` cannot
+test it and says so rather than skipping quietly. `make e2e-quota` builds the image,
+installs the chart for real and denies an actual create.
 
 ## Non-goals
 

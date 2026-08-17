@@ -18,7 +18,13 @@ import pathlib
 import yaml
 
 CRD_DIR = pathlib.Path("config/crd")
+WEBHOOK_MANIFEST = pathlib.Path("config/webhook/manifests.yaml")
 TPL_DIR = pathlib.Path("charts/doblura/templates")
+
+
+def flow(value):
+    """Render a list the way the rest of the chart writes them: on one line."""
+    return yaml.dump(value, default_flow_style=True).strip()
 
 KEEP_NOTE = (
     "  annotations:\n"
@@ -76,3 +82,54 @@ generated = (
 )
 rbac.write_text(text[:start] + generated + text[end:])
 print(f"  RBAC {len(rules)} rules from controller-gen")
+
+# ── Webhooks: the rules, failurePolicy and paths come from the markers ──
+#
+# The third thing that must not be hand-copied. The path a webhook is served on is
+# a string in a Go marker and a string in this manifest, and if they disagree the
+# API server calls a route that does not exist — which, with failurePolicy Fail,
+# means every OdooEnvironment create is refused. Nothing else in the system would
+# say why.
+#
+# The clientConfig is NOT taken from the generated manifest: the Service name and
+# namespace depend on the release, so they are written as Helm expressions here.
+# Everything that describes WHAT is intercepted comes from controller-gen.
+docs = [d for d in yaml.safe_load_all(WEBHOOK_MANIFEST.read_text()) if d]
+webhook_tpl = TPL_DIR / "webhook.yaml"
+text = webhook_tpl.read_text()
+
+for doc in docs:
+    kind = "mutating" if doc["kind"].startswith("Mutating") else "validating"
+    lines = []
+    for wh in doc["webhooks"]:
+        lines.append(f"  - name: {wh['name']}")
+        lines.append("    clientConfig:")
+        lines.append("      service:")
+        lines.append('        name: {{ include "doblura.fullname" . }}-webhook')
+        lines.append("        namespace: {{ .Release.Namespace }}")
+        lines.append(f"        path: {wh['clientConfig']['service']['path']}")
+        lines.append("        port: 443")
+        for field in ("failurePolicy", "matchPolicy", "sideEffects", "timeoutSeconds",
+                      "reinvocationPolicy"):
+            if field in wh:
+                lines.append(f"    {field}: {wh[field]}")
+        lines.append("    admissionReviewVersions: " + flow(wh["admissionReviewVersions"]))
+        lines.append("    rules:")
+        for r in wh["rules"]:
+            lines.append("      - apiGroups: " + flow(r["apiGroups"]))
+            lines.append("        apiVersions: " + flow(r["apiVersions"]))
+            lines.append("        operations: " + flow(r["operations"]))
+            lines.append("        resources: " + flow(r["resources"]))
+            if "scope" in r:
+                lines.append(f"        scope: {r['scope']}")
+
+    begin = f"  # doblura:webhooks-begin {kind}\n"
+    end = f"  # doblura:webhooks-end {kind}"
+    if begin not in text or end not in text:
+        raise SystemExit(f"charts/doblura/templates/webhook.yaml has no {kind} markers")
+    head, rest = text.split(begin, 1)
+    _, tail = rest.split(end, 1)
+    text = head + begin + "\n".join(lines) + "\n" + end + tail
+    print(f"  WH   {kind}: {len(doc['webhooks'])} webhook(s) from controller-gen")
+
+webhook_tpl.write_text(text)

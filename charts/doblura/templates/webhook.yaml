@@ -1,0 +1,90 @@
+{{- if and .Values.webhook.enabled (gt (int .Values.replicaCount) 0) }}
+{{/*
+The quota webhook.
+
+Gated on replicaCount as well as webhook.enabled, and that is not defensive
+tidiness. These configurations have failurePolicy Fail, so installing them with
+nothing running behind them means every `kubectl create odooenvironment` in the
+cluster is refused with a TLS error. A release with replicaCount 0 is a chart being
+rendered, tested or parked — never a cluster that should reject work.
+
+Certificates: there is no cert-manager dependency here, on purpose. The manager
+issues its own CA at startup, keeps it in a Secret so every replica serves the same
+one, and a controller publishes the public half into the caBundle below. The
+argument for doing it that way rather than depending on cert-manager is in
+internal/webhook/certs.go.
+
+Which is why NO caBundle appears in this template: at template time there is no CA
+to put in one. The field is absent until the manager fills it in, and while it is
+absent the API server cannot verify the webhook — so OdooEnvironment creates are
+refused until the operator is up. That is the fail-closed behaviour this whole
+thing is for, and it converges within a reconcile of the manager starting.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "doblura.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "doblura.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: 443
+      # By NAME, so changing webhook.port does not silently point the API server
+      # at a closed port.
+      targetPort: webhook
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "doblura.fullname" . }}-creator
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+webhooks:
+  # doblura:webhooks-begin mutating
+  - name: creator.odooenvironment.doblura.dev
+    clientConfig:
+      service:
+        name: {{ include "doblura.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-doblura-dev-v1alpha1-odooenvironment
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    sideEffects: None
+    timeoutSeconds: 5
+    admissionReviewVersions: [v1]
+    rules:
+      - apiGroups: [doblura.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE]
+        resources: [odooenvironments]
+  # doblura:webhooks-end mutating
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "doblura.fullname" . }}-quota
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+webhooks:
+  # doblura:webhooks-begin validating
+  - name: quota.odooenvironment.doblura.dev
+    clientConfig:
+      service:
+        name: {{ include "doblura.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /validate-doblura-dev-v1alpha1-odooenvironment
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    sideEffects: None
+    timeoutSeconds: 5
+    admissionReviewVersions: [v1]
+    rules:
+      - apiGroups: [doblura.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE]
+        resources: [odooenvironments]
+  # doblura:webhooks-end validating
+{{- end }}

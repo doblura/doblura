@@ -64,7 +64,9 @@ way Kubernetes RBAC is the single source of truth, a bug in the interface grants
 nothing, and the audit log comes for free.
 
 Self-service **with quotas**, enforced by an admission webhook: if support spins
-up an environment per ticket, the cluster dies on Friday.
+up an environment per ticket, the cluster dies on Friday. That part is **done** and
+does not need the interface — the limits are enforced against `kubectl` too, which
+is the only way they can be, since the interface has no permissions of its own.
 
 ## Phases
 
@@ -74,7 +76,7 @@ up an environment per ticket, the cluster dies on Friday.
 | **0b** | A real end-to-end rehearsal against a real Odoo | **done** — Odoo 19, 7 bugs found |
 | 1 | `OdooInstance` + `OdooDatabase` + `OdooTenant` + placement | **done** |
 | 2 | Finish the `OdooEnvironment` controller + company subsetting | **done** |
-| 3 | The interface: customer list, OIDC, 4 ClusterRoles, quota webhook | pending |
+| 3 | The interface: customer list, OIDC. The 5 ClusterRoles and the **quota webhook are done** | partly done |
 | 4 | `OdooRelease`: customer batches with soak time — canary across customers | pending |
 | 4b | Metrics: delivery plus the Odoo runtime signals above | pending |
 | 5 | `OdooProject`: consumes a release, adds its own addons | pending |

@@ -26,10 +26,14 @@ import (
 // reading a DIFFERENT object — the OdooDatabase the snapshot came from — and CEL
 // validation only sees the object being admitted.
 //
-// The proper fix is a validating admission webhook, which would restore
-// apply-time rejection. It is not here yet because a webhook needs certificate
-// plumbing and an outage story, and this check gives the same protection one step
-// later. That trade-off is worth writing down rather than discovering.
+// There IS a validating webhook now — internal/webhook enforces the environment
+// quota, which has the same "read another object" problem — and this check
+// deliberately stayed where it is. The quota's answer does not change once the
+// object exists, so refusing at admission is strictly better. This one's does: the
+// catalogue is often filled in after the environment, and refusing at creation
+// would produce a rejection indistinguishable from a typo. So it remains a
+// publication gate, late on purpose, and the reason is the shape of the question
+// rather than missing plumbing.
 
 // HandoverDecision is the outcome of the check.
 type HandoverDecision struct {

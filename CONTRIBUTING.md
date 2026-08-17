@@ -66,10 +66,17 @@ working as intended:
 6. **A `RunboatLink` is read-only until somebody says otherwise.** An empty
    `allowedActions` denies everything, and action requests are idempotency-keyed
    so a reconcile never re-fires a `Reset`.
+7. **The environment quota is enforced at admission, and it fails closed.** Both
+   webhooks are `failurePolicy: Fail`; the reasoning is at the top of
+   `internal/webhook/quota.go`. `Ignore` would turn a restart into a quota that
+   silently stops applying, which is the bug this replaced. And the creator of an
+   environment comes from the AdmissionRequest's UserInfo, never from the
+   annotation the client sent — otherwise the per-person count is arithmetic on a
+   field the caller chose.
 
-## Two traps this codebase has already fallen into
+## Traps this codebase has already fallen into
 
-Both cost real time. Neither is caught by a unit test, so they are written down:
+All of them cost real time. None is caught by a unit test, so they are written down:
 
 **A CEL rule on a field that might be absent errors, it does not return false.**
 `self.foo` where `foo` was omitted is `no such key`, and an erroring rule rejects
@@ -83,6 +90,20 @@ quote for the whole life of that function — the config was never valid YAML �
 all the tests passed, because they asserted with `strings.Contains`. If you
 generate a config, parse the result in the test, or run the real tool against it
 (`make verify-greenmask`).
+
+**"Rejected" is not "rejected by the thing you are testing."** The first version of
+the quota checks in `hack/e2e-guardrails.sh` impersonated users who had no RBAC at
+all. Every check expecting a rejection passed — on a `Forbidden` from RBAC, raised
+before the webhook was ever consulted — so half the section was green while testing
+nothing. A negative check has to assert on *which* thing refused: the live checks
+now require the words the admission webhook itself produces, and the users are
+bound to the real `support` persona.
+
+**A `+kubebuilder:webhook:` marker attached to a declaration is silently ignored.**
+It is package-scoped, so controller-gen only picks it up from a free-floating
+comment — put it in its own block, separated from the type's doc comment by a blank
+line. Get it wrong and there is no error and no manifest: the webhook simply never
+gets installed, and `failurePolicy: Fail` is not there to tell you.
 
 ## Reconciler style
 

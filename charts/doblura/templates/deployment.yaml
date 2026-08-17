@@ -49,11 +49,38 @@ spec:
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
             {{- end }}
+            {{- if and .Values.webhook.enabled (gt (int .Values.replicaCount) 0) }}
+            - --webhook-port={{ .Values.webhook.port }}
+            - --webhook-service={{ include "doblura.fullname" . }}-webhook
+            - --webhook-cert-secret={{ include "doblura.fullname" . }}-webhook-cert
+            - --validating-webhook-config={{ include "doblura.fullname" . }}-quota
+            - --mutating-webhook-config={{ include "doblura.fullname" . }}-creator
+            - --max-environments-per-creator={{ .Values.webhook.maxEnvironmentsPerCreator }}
+            {{- /*
+            The operator's own identity, computed rather than configured: it
+            creates environments on the cluster's behalf and must not be
+            throttled by a person's allowance. Written here because the chart is
+            the only place that knows both halves of the name.
+            */}}
+            - --quota-exempt-users={{ printf "system:serviceaccount:%s:%s" .Release.Namespace (include "doblura.serviceAccountName" .) }}{{ range .Values.webhook.exemptUsers }},{{ . }}{{ end }}
+            {{- else }}
+            # No webhook: the quota is NOT enforced, and
+            # OdooTenant.spec.maxEphemeralEnvironments does nothing.
+            - --webhook-port=0
+            {{- end }}
             - --zap-log-level={{ .Values.logLevel }}
             {{- if eq .Values.logFormat "json" }}
             - --zap-encoder=json
             {{- end }}
           env:
+            # The namespace the certificate's DNS names are built from. From the
+            # pod rather than a value: a Service reachable at a name the
+            # certificate does not carry is a TLS failure at admission time, and
+            # the only place that cannot get this wrong is the pod itself.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             {{- with .Values.watchNamespaces }}
             - name: WATCH_NAMESPACES
               value: {{ join "," . | quote }}
@@ -65,6 +92,10 @@ spec:
           ports:
             - name: probes
               containerPort: 8081
+            {{- if and .Values.webhook.enabled (gt (int .Values.replicaCount) 0) }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}

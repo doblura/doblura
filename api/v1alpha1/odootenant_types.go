@@ -47,15 +47,43 @@ type OdooTenantSpec struct {
 	OdooVersion string `json:"odooVersion,omitempty"`
 
 	// MaxEphemeralEnvironments caps how many throwaway environments may exist
-	// for this customer at once.
+	// for this customer at once. The validating admission webhook refuses the
+	// create that would exceed it.
 	//
 	// A quota, not a limit for its own sake: if support opens an environment per
 	// ticket the cluster dies on Friday. It lives on the tenant rather than
 	// globally so a demanding customer cannot starve the others.
+	//
+	// Zero is a real answer, and it means zero: a customer whose data nobody may
+	// copy any more. Which is why this is a pointer — with a plain int32 and
+	// `omitempty`, a Go client asking for zero would drop the field on the wire
+	// and get the default of 3 instead, silently granting what it tried to deny.
 	// +kubebuilder:default=3
 	// +kubebuilder:validation:Minimum=0
 	// +optional
-	MaxEphemeralEnvironments int32 `json:"maxEphemeralEnvironments,omitempty"`
+	MaxEphemeralEnvironments *int32 `json:"maxEphemeralEnvironments,omitempty"`
+}
+
+// DefaultMaxEphemeralEnvironments is the quota a tenant that never mentioned one
+// gets.
+//
+// It exists twice: here, and as the `+kubebuilder:default=3` marker on the field
+// above, which is the one the API server applies. A marker cannot reference a
+// constant, so the two are kept honest by a test that parses the generated CRD
+// and compares them — a drift would show up as a quota of 3 in the cluster and 0
+// in anything reading the object in Go.
+const DefaultMaxEphemeralEnvironments int32 = 3
+
+// EphemeralQuota is how many ephemeral environments this customer may hold.
+//
+// nil means the field was never set, which only happens to an object that did not
+// come through the API server — a hand-built struct in a test, or a client that
+// predates the field. Everything read from a cluster carries the default.
+func (s *OdooTenantSpec) EphemeralQuota() int32 {
+	if s.MaxEphemeralEnvironments == nil {
+		return DefaultMaxEphemeralEnvironments
+	}
+	return *s.MaxEphemeralEnvironments
 }
 
 // OdooTenantStatus is written by the controller only.

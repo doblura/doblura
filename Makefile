@@ -1,8 +1,11 @@
 CONTROLLER_GEN ?= $(shell go env GOPATH)/bin/controller-gen
 KIND_CLUSTER      ?= doblura-e2e
 KIND_CHART_CLUSTER ?= doblura-e2e-chart
+# Built locally and side-loaded into kind: e2e-quota needs a real image to serve
+# admission from, and the published one does not exist yet.
+WEBHOOK_IMAGE      ?= doblura:e2e
 
-.PHONY: generate build test chart-sync lint-chart verify-image e2e e2e-chart e2e-real e2e-clean all
+.PHONY: generate build test chart-sync lint-chart verify-image e2e e2e-chart e2e-quota e2e-real e2e-clean all
 all: generate build test verify-licence lint-chart
 
 # The licence boundary is a build check, not a paragraph in a document: api/ is
@@ -15,6 +18,7 @@ generate:
 	$(CONTROLLER_GEN) object paths=./api/...
 	$(CONTROLLER_GEN) crd paths=./api/... output:crd:artifacts:config=config/crd
 	$(CONTROLLER_GEN) rbac:roleName=doblura-manager paths=./internal/... output:rbac:artifacts:config=config/rbac
+	$(CONTROLLER_GEN) webhook paths=./internal/... output:webhook:artifacts:config=config/webhook
 
 build:
 	go build ./...
@@ -31,11 +35,13 @@ chart-sync: generate
 lint-chart: chart-sync
 	helm lint charts/doblura
 	helm template t charts/doblura >/dev/null
-	@for c in logLevel=nonsense logFormat=xml replicaCount=-1 metrics.port=99999; do \
+	@for c in logLevel=nonsense logFormat=xml replicaCount=-1 metrics.port=99999 \
+	          webhook.port=99999 webhook.maxEnvironmentsPerCreator=0 webhook.enabled=maybe; do \
 		if helm template t charts/doblura --set $$c >/dev/null 2>&1; then \
 			echo "FAIL: the schema accepted --set $$c"; exit 1; \
 		fi; done
 	@echo "  values.schema.json rejects typos"
+	@python3 hack/verify-webhook-chart.py
 
 ## verify-image: report what Doblura can drive with a candidate image.
 ## Usage: make verify-image IMAGE=odoo:19.0
@@ -71,6 +77,30 @@ e2e-chart: chart-sync
 	helm upgrade --install doblura charts/doblura \
 		-n doblura-system --create-namespace --set replicaCount=0 --wait
 	helm test doblura -n doblura-system
+
+## e2e-quota: the quota webhook, against a real API server, with the operator
+## actually serving admission.
+##
+## `make e2e` runs the CEL guardrails against the CRDs alone, and the quota is not
+## a CEL rule: it needs a webhook, which needs an image, a Service and a CA. So
+## this target builds the image, loads it into the chart cluster and installs the
+## chart for real. Without it the quota section of e2e-guardrails.sh skips itself,
+## which it says out loud.
+##
+## maxEnvironmentsPerCreator is set to 2 so the per-person limit can be reached in
+## three creates instead of six.
+e2e-quota: chart-sync
+	docker build -t $(WEBHOOK_IMAGE) .
+	kind create cluster --name $(KIND_CHART_CLUSTER) --wait 60s || true
+	kind export kubeconfig --name $(KIND_CHART_CLUSTER)
+	kind load docker-image $(WEBHOOK_IMAGE) --name $(KIND_CHART_CLUSTER)
+	helm upgrade --install doblura charts/doblura \
+		-n doblura-system --create-namespace \
+		--set image.repository=doblura --set image.tag=e2e \
+		--set image.pullPolicy=Never \
+		--set webhook.maxEnvironmentsPerCreator=2 --wait
+	kubectl -n doblura-system rollout status deploy/doblura --timeout=120s
+	./hack/e2e-guardrails.sh
 
 ## e2e-real: the phase-0b gate. Builds the fixture image, seeds a real Odoo
 ## database, and runs an actual OdooRehearsal end to end.

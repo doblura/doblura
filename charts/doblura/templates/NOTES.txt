@@ -22,7 +22,28 @@ Doblura {{ .Chart.AppVersion }} installed in namespace {{ .Release.Namespace }}.
 {{- if eq (int .Values.replicaCount) 0 }}
 
   WARNING: replicaCount = 0. The operator is not running and every OdooRehearsal
-  will sit in Pending forever.
+  will sit in Pending forever. The quota webhook is not installed either, so
+  OdooTenant.spec.maxEphemeralEnvironments is not being enforced.
+{{- end }}
+
+{{- if and (not .Values.webhook.enabled) (gt (int .Values.replicaCount) 0) }}
+
+  WARNING: webhook.enabled is false. OdooTenant.spec.maxEphemeralEnvironments is
+  then a number nobody reads: one person can open as many environments as they
+  have patience for, and the cluster runs out first.
+{{- end }}
+
+{{- if and .Values.webhook.enabled (gt (int .Values.replicaCount) 0) }}
+
+The quota webhook is installed with failurePolicy Fail, which means that until the
+manager is up and has published its CA, creating an OdooEnvironment is refused.
+That is on purpose — a quota that disappears when the operator does is not one —
+and it clears itself within a few seconds. Check it with:
+
+    kubectl get validatingwebhookconfiguration {{ include "doblura.fullname" . }}-quota \
+      -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | head -c 20
+
+  An empty caBundle means the manager has not got there yet.
 {{- end }}
 
 {{- if not .Values.rbac.create }}

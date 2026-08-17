@@ -71,11 +71,17 @@ spec:
                 default: 3
                 description: |-
                   MaxEphemeralEnvironments caps how many throwaway environments may exist
-                  for this customer at once.
+                  for this customer at once. The validating admission webhook refuses the
+                  create that would exceed it.
 
                   A quota, not a limit for its own sake: if support opens an environment per
                   ticket the cluster dies on Friday. It lives on the tenant rather than
                   globally so a demanding customer cannot starve the others.
+
+                  Zero is a real answer, and it means zero: a customer whose data nobody may
+                  copy any more. Which is why this is a pointer — with a plain int32 and
+                  `omitempty`, a Go client asking for zero would drop the field on the wire
+                  and get the default of 3 instead, silently granting what it tried to deny.
                 format: int32
                 minimum: 0
                 type: integer

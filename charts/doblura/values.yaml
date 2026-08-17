@@ -41,6 +41,37 @@ serviceAccount:
 # Restricting it reduces cache memory and RBAC scope.
 watchNamespaces: []
 
+# The admission webhook, which is where the environment quota is enforced.
+#
+# `OdooTenant.spec.maxEphemeralEnvironments` is a number on the customer record and
+# nothing else reads it: with the webhook off, that field does nothing and the
+# cluster is bounded only by how much anyone feels like creating.
+#
+# There is deliberately no failurePolicy value here. It is Fail, the reasoning is
+# in internal/webhook/quota.go, and offering Ignore as a value would make "turn the
+# safety limit off" a --set away from anyone with a slow API server. If you need
+# the quota gone, turn the whole webhook off: that at least leaves a trace in the
+# release.
+webhook:
+  enabled: true
+  # The port the manager serves admission on. The Service publishes 443 in front
+  # of it, which is what the API server dials.
+  port: 9443
+  # How many ephemeral environments one person may hold at once, across every
+  # customer AND every namespace.
+  #
+  # Cluster-wide on purpose: the persona ClusterRoles are meant to be bound
+  # cluster-wide, so an allowance that reset per namespace would be this number
+  # multiplied by the number of namespaces. The per-customer limit is a separate
+  # thing and lives on each OdooTenant.
+  maxEnvironmentsPerCreator: 5
+  # Identities the quota does not apply to, as they appear to the API server
+  # ("system:serviceaccount:<namespace>:<name>"). The operator's own
+  # ServiceAccount is always exempt and does not need listing.
+  #
+  # Keep this short. Every entry is somebody who can exhaust the cluster.
+  exemptUsers: []
+
 metrics:
   enabled: true
   port: 8080

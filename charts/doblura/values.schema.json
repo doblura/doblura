@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "Valores de Doblura",
+  "title": "Doblura values",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -84,6 +84,34 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "webhook": {
+      "type": "object",
+      "description": "The admission webhook that enforces the environment quota.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "maxEnvironmentsPerCreator": {
+          "type": "integer",
+          "description": "Ephemeral environments one person may hold at once, across every customer and namespace.",
+          "minimum": 1
+        },
+        "exemptUsers": {
+          "type": "array",
+          "description": "Identities the quota does not apply to. The operator's own ServiceAccount is always exempt.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
     },
     "metrics": {

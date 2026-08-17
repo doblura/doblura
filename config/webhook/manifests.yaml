@@ -1,0 +1,54 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: doblura-creator
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: doblura-webhook
+      namespace: doblura-system
+      path: /mutate-doblura-dev-v1alpha1-odooenvironment
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: creator.odooenvironment.doblura.dev
+  rules:
+  - apiGroups:
+    - doblura.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    resources:
+    - odooenvironments
+  sideEffects: None
+  timeoutSeconds: 5
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: doblura-quota
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: doblura-webhook
+      namespace: doblura-system
+      path: /validate-doblura-dev-v1alpha1-odooenvironment
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: quota.odooenvironment.doblura.dev
+  rules:
+  - apiGroups:
+    - doblura.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    resources:
+    - odooenvironments
+  sideEffects: None
+  timeoutSeconds: 5
