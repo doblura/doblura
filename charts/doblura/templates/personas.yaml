@@ -1,0 +1,198 @@
+{{- if .Values.personas.create }}
+{{/*
+The personas.
+
+This file is the whole "one interface, not three" decision made concrete. Support,
+QA and consultancy do not get their own applications: they get their own
+ClusterRoles, and the interface shows each of them the actions their role permits
+on the same list of customers.
+
+Two consequences worth being explicit about, because they are the reason for
+doing it this way:
+
+  * Adding a persona touches no code. It is a Role.
+  * The interface has no permissions of its own — it impersonates the person, so
+    Kubernetes RBAC is the only authorization in the system. A bug in the UI
+    cannot grant what the human did not already have.
+
+Bind these to your OIDC groups. They are ClusterRoles so you can bind them
+cluster-wide OR per namespace with a RoleBinding, which is how you scope a
+consultant to one customer's namespace.
+*/}}
+---
+{{/*
+VIEWER — authenticated, and nothing more.
+
+This role exists to answer a question that has no good answer without it: what
+happens to somebody who logs in through your identity provider and matches none
+of your group mappings?
+
+The two obvious answers are both wrong. Defaulting them to support means anybody
+with an account in your domain can open environments and spend the quota.
+Defaulting them to nothing is safe and hostile: they authenticate successfully,
+land on an empty screen, and open a ticket about it.
+
+So the default is read-only. They see the customer list and the state of things,
+they create nothing, and the interface says plainly that this is a default rather
+than an assignment — which turns a mystery into a question somebody can answer.
+
+No pods/log here, deliberately. Logs are the one read that carries live customer
+data, so that starts at support and not before.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-viewer
+  labels:
+    {{- include "doblura.labels" . | nindent 4 }}
+    doblura.dev/persona: viewer
+rules:
+  - apiGroups: [doblura.dev]
+    resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots]
+    verbs: [get, list, watch]
+---
+{{/*
+SUPPORT — answers tickets, needs a scratch environment now.
+
+Can create ephemeral environments and read what is going on. Cannot approve a
+promotion, cannot touch production data, cannot see Secrets.
+
+Note what is missing: no `delete` on odoodatabases, no write on odoosnapshots.
+Support asks for a copy; it does not decide what a copy contains.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-support
+  labels:
+    {{- include "doblura.labels" . | nindent 4 }}
+    doblura.dev/persona: support
+rules:
+  # The customer list, which is the landing view for everyone.
+  - apiGroups: [doblura.dev]
+    resources: [odootenants, odoodatabases, odooinstances]
+    verbs: [get, list, watch]
+  # Its own throwaway environments. The quota webhook bounds how many.
+  - apiGroups: [doblura.dev]
+    resources: [odooenvironments]
+    verbs: [get, list, watch, create, delete]
+  # Read-only on everything else, so the list can show state.
+  - apiGroups: [doblura.dev]
+    resources: [odoorehearsals, odoosnapshots]
+    verbs: [get, list, watch]
+  # Logs, because "it does not work" needs an answer.
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch]
+---
+{{/*
+QA — decides whether a release moves.
+
+The one persona with WRITE access to the thing that matters: the approval. It
+patches status on rehearsals and environments, which is how an approval is
+recorded, and it cannot create or destroy anything.
+
+That asymmetry is the point. QA's power is to say yes or no, not to build.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-qa
+  labels:
+    {{- include "doblura.labels" . | nindent 4 }}
+    doblura.dev/persona: qa
+rules:
+  - apiGroups: [doblura.dev]
+    resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots]
+    verbs: [get, list, watch]
+  # The approval itself. Patching the object records the decision; patching
+  # status is how the operator is told about it.
+  - apiGroups: [doblura.dev]
+    resources: [odoorehearsals, odooenvironments]
+    verbs: [patch, update]
+  - apiGroups: [doblura.dev]
+    resources: [odoorehearsals/status, odooenvironments/status]
+    verbs: [get, patch, update]
+  # What changed and why it failed.
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch]
+---
+{{/*
+CONSULTANCY — talks to the customer.
+
+Reads the whole version matrix (who is on what, what migrates when) and can spin
+up an environment FOR a customer. That last verb is why this role is separate
+from support: an environment with spec.forTenant set is a handover, and the
+handover guardrail applies to it.
+
+Can also read rehearsal durations, which is what "how long will our upgrade take"
+is actually asking.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-consultancy
+  labels:
+    {{- include "doblura.labels" . | nindent 4 }}
+    doblura.dev/persona: consultancy
+rules:
+  - apiGroups: [doblura.dev]
+    resources: [odootenants, odoodatabases, odooinstances, odoorehearsals, odoosnapshots]
+    verbs: [get, list, watch]
+  - apiGroups: [doblura.dev]
+    resources: [odooenvironments]
+    verbs: [get, list, watch, create, delete]
+  # The customer record itself: version, product release, contact of record.
+  - apiGroups: [doblura.dev]
+    resources: [odootenants]
+    verbs: [patch, update]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list]
+---
+{{/*
+PLATFORM — runs the thing.
+
+Everything, including the catalogue: instances, capacity, cordoning, and the
+snapshot pipeline that decides what a copy contains.
+
+Deliberately NOT cluster-admin. It is the platform role for Doblura's own
+resources, so binding it does not hand over the cluster.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-platform
+  labels:
+    {{- include "doblura.labels" . | nindent 4 }}
+    doblura.dev/persona: platform
+rules:
+  - apiGroups: [doblura.dev]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: [pods, pods/log, configmaps, events, persistentvolumeclaims]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch]
+  # Secrets are readable but NOT writable, and not by anyone else.
+  #
+  # Platform needs to check that a credential exists and is wired to the right
+  # object. It does not need to read values back out, and Kubernetes cannot
+  # express "list without reading contents" — so this is the honest minimum, and
+  # the reason no other persona gets it at all.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list]
+{{- end }}

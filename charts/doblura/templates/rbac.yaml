@@ -1,0 +1,95 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-manager
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+rules:
+  # Generated from config/rbac/role.yaml by hack/sync-chart.py.
+  # Do NOT edit by hand: the markers in internal/controller are the source.
+  #
+  # Note on secrets: the operator READS git and object-store credentials and
+  # WRITES the ephemeral GitHub App installation token. It is the most
+  # sensitive permission here; if your policy forbids it cluster-wide, set
+  # watchNamespaces and swap this ClusterRole for per-namespace Roles.
+  - apiGroups: ['']
+    resources: [configmaps, secrets, services]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: ['']
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [batch]
+    resources: [cronjobs, jobs]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [doblura.dev]
+    resources: [odoodatabases, odooinstances, odootenants]
+    verbs: [get, list, watch]
+  - apiGroups: [doblura.dev]
+    resources: [odooenvironments, odoorehearsals, odoosnapshots]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [doblura.dev]
+    resources: [odooenvironments/finalizers]
+    verbs: [update]
+  - apiGroups: [doblura.dev]
+    resources: [odooenvironments/status, odoorehearsals/status, odoosnapshots/status, runboatlinks/status]
+    verbs: [get, patch, update]
+  - apiGroups: [doblura.dev]
+    resources: [runboatlinks]
+    verbs: [get, list, patch, update, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [create, delete, get, list, patch, update, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "doblura.fullname" . }}-manager
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "doblura.fullname" . }}-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "doblura.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if .Values.leaderElection.enabled }}
+---
+# Leader election coordinates through a Lease, and only in its own namespace:
+# a Role, not a ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "doblura.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "doblura.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "doblura.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "doblura.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

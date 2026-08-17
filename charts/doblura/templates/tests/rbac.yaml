@@ -1,0 +1,59 @@
+{{- if .Values.crds.install }}
+{{/*
+The tests get their own identity.
+
+The test pod must NOT use the manager's ServiceAccount: the manager does not have
+(and should not have) permission to read CRDs. Widening its RBAC so a test can
+pass is exactly the shortcut that turns an operator into a security problem.
+
+So the test brings its own identity, with the bare minimum, and it is deleted
+afterwards. The negative hook-weight guarantees it exists before the pod.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "doblura.fullname" . }}-test
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-test
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  # Only read the CRD and try a dry-run apply. Nothing else.
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    resourceNames: [odoorehearsals.doblura.dev]
+    verbs: [get, list, watch]
+  - apiGroups: [doblura.dev]
+    resources: [odoorehearsals]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "doblura.fullname" . }}-test
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "doblura.fullname" . }}-test
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "doblura.fullname" . }}-test
+    namespace: {{ .Release.Namespace }}
+{{- end }}

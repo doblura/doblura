@@ -1,0 +1,25 @@
+apiVersion: v2
+name: doblura
+description: Rehearse Odoo migrations against real anonymized data before they become irreversible
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/doblura/doblura
+sources:
+  - https://github.com/doblura/doblura
+keywords:
+  - odoo
+  - erp
+  - migration
+  - upgrade
+  - kubernetes-operator
+maintainers:
+  - name: aromera
+annotations:
+  artifacthub.io/operator: "true"
+  artifacthub.io/crds: |
+    - kind: OdooRehearsal
+      version: v1alpha1
+      name: odoorehearsals.doblura.dev
+      displayName: Odoo Rehearsal
+      description: Restores an anonymized copy of production, migrates, times it and validates

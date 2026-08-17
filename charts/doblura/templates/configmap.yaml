@@ -1,0 +1,15 @@
+{{- if .Values.defaults }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "doblura.fullname" . }}-defaults
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+data:
+  # Images of the auxiliary containers. Here rather than compiled in so you can
+  # pin them to a digest, or point them at an internal mirror in air-gapped
+  # clusters.
+  {{- range $k, $v := .Values.defaults }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}

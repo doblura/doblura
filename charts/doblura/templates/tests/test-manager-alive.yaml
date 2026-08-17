@@ -1,0 +1,37 @@
+{{- if gt (int .Values.replicaCount) 0 }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "doblura.fullname" . }}-test-manager
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: probe
+      image: curlimages/curl:latest
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: ["ALL"]}
+      command: [/bin/sh, -euc]
+      args:
+        - |
+          echo ">> the manager's readyz"
+          curl --fail --silent --retry 10 --retry-delay 3 --retry-connrefused \
+            http://{{ include "doblura.fullname" . }}-metrics.{{ .Release.Namespace }}.svc:8081/readyz \
+            || { echo "the manager does not answer readyz"; exit 1; }
+{{- if .Values.metrics.enabled }}
+          echo ">> metrics endpoint"
+          curl --fail --silent --retry 5 --retry-delay 2 \
+            http://{{ include "doblura.fullname" . }}-metrics.{{ .Release.Namespace }}.svc:{{ .Values.metrics.port }}/metrics \
+            | head -1
+{{- end }}
+{{- end }}

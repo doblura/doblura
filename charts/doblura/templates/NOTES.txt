@@ -1,0 +1,53 @@
+Doblura {{ .Chart.AppVersion }} installed in namespace {{ .Release.Namespace }}.
+
+{{- if not .Values.crds.install }}
+
+  WARNING: crds.install is false. Install the CRDs by hand or every
+  OdooRehearsal will be rejected:
+      kubectl apply -f https://raw.githubusercontent.com/aromera/doblura/v{{ .Chart.AppVersion }}/config/crd/doblura.dev_odoorehearsals.yaml
+{{- end }}
+
+{{- if and (gt (int .Values.replicaCount) 1) (not .Values.leaderElection.enabled) }}
+
+  IMPORTANT WARNING: replicaCount = {{ .Values.replicaCount }} without leader election.
+
+  Two managers reconciling the same OdooRehearsal would create the migration Job
+  TWICE against the same database. An Odoo migration is not idempotent: that
+  corrupts the rehearsal's database.
+
+  Fix it with:
+      --set leaderElection.enabled=true
+{{- end }}
+
+{{- if eq (int .Values.replicaCount) 0 }}
+
+  WARNING: replicaCount = 0. The operator is not running and every OdooRehearsal
+  will sit in Pending forever.
+{{- end }}
+
+{{- if not .Values.rbac.create }}
+
+  WARNING: rbac.create is false. Make sure the ServiceAccount
+  {{ include "doblura.serviceAccountName" . }} already has permissions on
+  odoorehearsals, jobs, configmaps and secrets.
+{{- end }}
+
+Before your first rehearsal you need two things Doblura does NOT create:
+
+  1. An anonymized dump of production, on a PVC, in S3, or anywhere else.
+     Producing it is your problem and your regulator's: Doblura consumes it.
+
+  2. A Postgres server whose user has CREATEDB. Every rehearsal creates its own
+     scratch database and drops it when it finishes.
+
+Check that it started:
+
+    kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "doblura.fullname" . }}
+
+And launch the first one:
+
+    kubectl apply -f https://raw.githubusercontent.com/aromera/doblura/v{{ .Chart.AppVersion }}/config/samples/odoorehearsal-volume.yaml
+    kubectl get rehearsal -w
+
+Remember: neutralize defaults to true, and it should stay that way. A production
+dump restored without neutralization sends real invoices to real customers.

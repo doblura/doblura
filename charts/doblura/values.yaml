@@ -1,0 +1,93 @@
+# The defaults work in production untouched. If ten values were needed just to
+# start, the chart would not be reusable.
+
+# Overrides the chart's base name.
+nameOverride: ""
+
+image:
+  repository: ghcr.io/aromera/doblura
+  # Empty means the chart's appVersion. That way a chart upgrade brings the
+  # matching image, with no second place to keep in sync.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+replicaCount: 1
+
+# Leader election. With replicaCount > 1 it is MANDATORY: two managers creating
+# Jobs for the same rehearsal would run it twice, and a duplicated migration
+# against the same database is not idempotent.
+leaderElection:
+  enabled: false
+
+crds:
+  # The CRDs live in templates/ rather than crds/ so `helm upgrade` updates
+  # them: the ones in crds/ are only ever installed, never upgraded.
+  install: true
+  # And with resource-policy keep, so a `helm uninstall` does not take
+  # everyone's OdooRehearsal objects down with it.
+  keep: true
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# The operator only watches these namespaces. Empty means all of them.
+# Restricting it reduces cache memory and RBAC scope.
+watchNamespaces: []
+
+metrics:
+  enabled: true
+  port: 8080
+  service:
+    enabled: true
+  # ServiceMonitor for the Prometheus Operator. Off by default: if Prometheus's
+  # CRDs are absent, the apply fails.
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# Resources for the manager, not for the rehearsals. The manager is a small
+# controller: the heavy lifting happens in Jobs, whose size is declared through
+# spec.size on each OdooRehearsal.
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    memory: 256Mi
+
+# The personas: one ClusterRole per kind of person who works on the customer
+# list. Bind them to your OIDC groups; templates/personas.yaml says what each one
+# may do and, more usefully, what it deliberately may not.
+#
+# On by default, because they grant nothing on their own: a ClusterRole with no
+# RoleBinding is inert. Having them present is what makes the first binding a
+# one-liner instead of an afternoon spent reading verbs.
+personas:
+  create: true
+
+logLevel: info
+# console to read in a terminal, json to aggregate in Loki or similar.
+logFormat: console
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}
+
+# Cluster-wide defaults for the auxiliary containers. They fill in the fields
+# that are almost always the same, so each OdooRehearsal does not repeat them.
+defaults:
+  # Image of the object-store fetcher. Here so you can pin it to a digest or
+  # point it at an internal mirror in air-gapped environments.
+  objectStoreImage: rclone/rclone:latest
+  httpImage: curlimages/curl:latest
+  gitImage: alpine/git:latest

@@ -1,0 +1,60 @@
+{{- if .Values.crds.install }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "doblura.fullname" . }}-test-crd
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    # Without this, the previous test's pod blocks the next `helm test`.
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # The test's own identity, not the manager's: see tests/rbac.yaml.
+  serviceAccountName: {{ include "doblura.fullname" . }}-test
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: ["ALL"]}
+      command: [/bin/sh, -euc]
+      args:
+        - |
+          echo ">> the CRD must be Established"
+          kubectl wait --for=condition=Established \
+            crd/odoorehearsals.doblura.dev --timeout=60s
+
+          echo ">> and the guardrails must reject what they should"
+          # neutralize:false with no acknowledgement: if this is ACCEPTED, the
+          # chart installed a CRD without the CEL rules and the project's most
+          # important guardrail is not active.
+          if kubectl apply --dry-run=server -f - <<'YAML' 2>/dev/null
+          apiVersion: doblura.dev/v1alpha1
+          kind: OdooRehearsal
+          metadata: {name: helm-test-guardrail, namespace: {{ .Release.Namespace }}}
+          spec:
+            image: img
+            database: {host: h, user: u, passwordSecret: s}
+            snapshot:
+              from: {type: Volume, volume: {claimName: d}}
+              neutralize: false
+          YAML
+          then
+            echo "FAIL: neutralize:false was accepted without an acknowledgement"
+            exit 1
+          fi
+          echo ">> ok, the guardrails are active"
+      volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+  volumes:
+    - name: tmp
+      emptyDir: {sizeLimit: 16Mi}
+{{- end }}
