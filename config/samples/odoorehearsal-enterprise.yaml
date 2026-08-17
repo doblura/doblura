@@ -1,0 +1,39 @@
+# Odoo Enterprise with addons from several sources and a GitHub App.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRehearsal
+metadata:
+  name: release-17-0-3-ee
+spec:
+  image: ghcr.io/acme/odoo@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  snapshot:
+    from:
+      type: Volume
+      volume: {claimName: prod-anon-dump}
+  database:
+    host: pg-rw.db.svc
+    user: odoo
+    passwordSecret: pg-app
+  addons:
+    edition: Enterprise
+    precedence: ExternalFirst        # external sources override the baked ones
+    baked: ["/opt/odoo/addons-custom"]
+    repos:
+      - name: odoo-enterprise
+        url: https://github.com/odoo/enterprise
+        ref: "17.0"
+        auth:
+          type: GitHubApp            # not tied to a person; auditable and revocable
+          secretRef: gh-app-creds    # keys: appID, installationID, privateKey
+      - name: oca-account
+        url: https://github.com/OCA/account-financial-tools
+        ref: 5f2c1a9                 # a commit: the rehearsal is reproducible
+  migration:
+    engine: ClickOdooUpdate          # only the modules whose checksum changed
+  budget:
+    maxUpgradeDuration: 2h
+  assertions:
+    modelCounts:
+      - {model: account.move, minCount: 1000}
+      - {model: sale.order}
+      - {model: stock.picking}
+  size: large

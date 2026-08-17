@@ -1,0 +1,33 @@
+# Your own provider: for when the backup lives wherever it lives.
+#
+# The contract is all of this: leave the dump at /snapshot and exit 0. Doblura
+# needs to know nothing else. An NFS appliance, Bacula, a proprietary API from
+# 2004, a pg_dump against a replica: honour the contract and it works exactly
+# like the built-in providers, because it IS the same mechanism.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRehearsal
+metadata:
+  name: release-17-0-5-from-appliance
+spec:
+  image: ghcr.io/acme/odoo:17.0.5
+  snapshot:
+    from:
+      type: Custom
+      custom:
+        image: registro.interno/traer-backup:3
+        command: [/bin/sh, -euc]
+        args:
+          - |
+            # /mnt/nfs-backups comes from extraVolumeClaims, mounted ReadOnly
+            LATEST=$(ls -1t /mnt/nfs-backups/odoo/*.dump | head -1)
+            echo ">> using $LATEST"
+            cp "$LATEST" /snapshot/dump
+        env:
+          APPLIANCE: nfs-01
+        envFromSecrets: [appliance-creds]
+        extraVolumeClaims: [nfs-backups]
+    format: PgDump          # pg_dump: neutralized afterwards with `odoo neutralize`
+  database:
+    host: pg-rw.db.svc
+    user: odoo
+    passwordSecret: pg-app

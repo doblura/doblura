@@ -1,0 +1,697 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: odoorehearsals.doblura.dev
+spec:
+  group: doblura.dev
+  names:
+    kind: OdooRehearsal
+    listKind: OdooRehearsalList
+    plural: odoorehearsals
+    shortNames:
+    - rehearsal
+    - odr
+    singular: odoorehearsal
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - description: How long the migration took
+      jsonPath: .status.upgradeDuration
+      name: Upgrade
+      type: string
+    - description: Acceptable window
+      jsonPath: .spec.budget.maxUpgradeDuration
+      name: Budget
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          OdooRehearsal rehearses an Odoo migration against an anonymized copy of
+          production, times it, and decides whether the release is viable.
+
+          The use case: an Odoo `-u` alters the database schema and has no downgrade.
+          The only way to know whether a migration works is to run it against the real
+          data before running it against the real data.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OdooRehearsalSpec rehearses a migration before it becomes
+              irreversible.
+            properties:
+              addons:
+                description: |-
+                  Addons declares where the modules come from. This matters in a
+                  rehearsal, it is not decoration: click-odoo-update decides what to update
+                  from the checksum of the modules it SEES on the addons path. If the
+                  rehearsal's addons path is not production's, you are rehearsing a
+                  different migration.
+                properties:
+                  baked:
+                    description: |-
+                      Baked lists addon paths that ALREADY ship inside the image. They are read
+                      where they are: not copied, not moved, not mounted.
+
+                      Example: ["/opt/odoo/addons-custom", "/opt/odoo/addons-oca"]
+                    items:
+                      type: string
+                    type: array
+                  edition:
+                    default: Community
+                    description: |-
+                      Edition is Community or Enterprise. It does not change the operator's
+                      behaviour, but it does change validation and what gets recorded in the
+                      status: knowing which edition a migration was rehearsed against matters
+                      when something breaks six months later.
+                    enum:
+                    - Community
+                    - Enterprise
+                    type: string
+                  precedence:
+                    default: ExternalFirst
+                    description: |-
+                      AddonsPrecedence decides who wins when the same module appears in more than
+                      one source. In Odoo the first entry on the addons path wins, which is why
+                      this has to be explicit: the alternative is loading different code than you
+                      think, and that is exactly the class of failure Doblura exists to catch.
+                    enum:
+                    - ExternalFirst
+                    - BakedFirst
+                    type: string
+                  repos:
+                    description: |-
+                      Repos are cloned by an init container into an ephemeral emptyDir. Every
+                      pod starts with the volume empty, so no mixture of versions is possible.
+                    items:
+                      description: AddonRepo is a git repository of addons, public
+                        or private.
+                      properties:
+                        auth:
+                          description: |-
+                            Auth authenticates private repos: PAT, username/password, deploy key or
+                            GitHub App. Empty means a public repo.
+
+                            The Odoo Enterprise repository is private, so the EE edition necessarily
+                            goes through here.
+                          properties:
+                            secretRef:
+                              description: |-
+                                SecretRef is the Secret holding the keys the Type requires. It must live
+                                in the same namespace as the OdooRehearsal: reading Secrets from other
+                                namespaces would turn Doblura into a privilege-escalation vector.
+                              minLength: 1
+                              type: string
+                            type:
+                              description: |-
+                                Type is the mechanism. Explicit on purpose: see the package comment on
+                                why it is not inferred.
+                              enum:
+                              - Token
+                              - BasicAuth
+                              - SSHKey
+                              - GitHubApp
+                              type: string
+                            username:
+                              description: |-
+                                Username overrides the forge's default username. It only applies to
+                                Token. Left empty, it is derived from the URL: x-access-token for
+                                github.com, oauth2 for gitlab.com.
+                              type: string
+                          required:
+                          - secretRef
+                          - type
+                          type: object
+                        depth:
+                          default: 1
+                          description: |-
+                            Depth is the clone depth. 1 by default: a rehearsal does not need history
+                            and cloning all of OCA costs minutes.
+                          format: int32
+                          minimum: 0
+                          type: integer
+                        name:
+                          description: |-
+                            Name identifies the repo and names its directory inside the emptyDir. It
+                            must be unique within the same AddonsSpec.
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                          type: string
+                        paths:
+                          description: |-
+                            Paths are the subdirectories of the repo that contain addons. Empty means
+                            the root, which is the norm for OCA repositories.
+
+                            A repo with addons in per-version subfolders is declared as:
+                            paths: ["17.0"]
+                          items:
+                            type: string
+                          type: array
+                        ref:
+                          default: main
+                          description: |-
+                            Ref is a branch, a tag or a commit.
+
+                            For a rehearsal, USE A COMMIT. A branch makes the rehearsal
+                            non-reproducible: repeating it tomorrow clones different code and the
+                            result stops meaning anything.
+                          type: string
+                        url:
+                          description: URL of the repository. HTTPS or SSH.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - url
+                      type: object
+                    type: array
+                  volume:
+                    description: |-
+                      Volume is a PVC already populated by another process. It is mounted
+                      ReadOnly, so a rehearsal cannot corrupt what others share.
+                    properties:
+                      claimName:
+                        minLength: 1
+                        type: string
+                      paths:
+                        default:
+                        - /addons
+                        description: Paths are the paths inside the volume that contain
+                          addons.
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - claimName
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: 'edition Enterprise needs at least one addons source: the
+                    enterprise modules do not ship in the community image'
+                  rule: self.edition != 'Enterprise' || size(self.baked) > 0 || size(self.repos)
+                    > 0 || has(self.volume)
+              assertions:
+                description: |-
+                  Assertions is what must hold true after migrating.
+
+                  That the migration finishes without an exception is implicit and is not
+                  declared: if it fails, the rehearsal fails. This is about what comes after.
+                properties:
+                  custom:
+                    description: |-
+                      Custom runs your own container against the migrated database. It gets
+                      the connection through environment variables (PGHOST, PGDATABASE, ...)
+                      and the composed odoo.conf under /etc/doblura. Exit code 0 means pass.
+
+                      This is a minimal struct and deliberately not a corev1.PodSpec:
+                      embedding the full PodSpec pushed the CRD past the 262 KB annotation
+                      limit and `kubectl apply` rejected it. It also exposes intent instead of
+                      configuration, which is what a CRD should do.
+                    properties:
+                      args:
+                        items:
+                          type: string
+                        type: array
+                      command:
+                        description: Command replaces the entrypoint.
+                        items:
+                          type: string
+                        type: array
+                      env:
+                        additionalProperties:
+                          type: string
+                        description: Env adds variables. The database connection is
+                          already injected.
+                        type: object
+                      image:
+                        description: |-
+                          Image defaults to the rehearsal's own image, which already carries Odoo
+                          and the mounted addons. That is usually what you want.
+                        type: string
+                    type: object
+                  modelCounts:
+                    description: |-
+                      ModelCounts checks that critical models are still queryable after the
+                      migration. It sounds trivial and it catches serious things: a `-u` can
+                      exit 0 and leave a table unreachable.
+                    items:
+                      description: ModelCountAssertion asserts that a model holds
+                        records.
+                      properties:
+                        minCount:
+                          default: 0
+                          description: |-
+                            MinCount is the minimum expected record count. The default of 0 already
+                            checks the thing that matters: that the model can be queried without
+                            blowing up.
+                          format: int64
+                          type: integer
+                        model:
+                          description: Model is the model name, for example account.move.
+                          minLength: 1
+                          type: string
+                      required:
+                      - model
+                      type: object
+                    type: array
+                type: object
+              budget:
+                description: |-
+                  Budget is what conceptually separates Doblura from a plain timeout.
+
+                  A timeout is infrastructure hygiene: it kills something that hung. A budget
+                  is a business assertion: if the `-u` takes longer than your maintenance
+                  window, the release IS NOT VIABLE even though it technically worked.
+                  Exceeding the budget FAILS the rehearsal, it does not abort it.
+
+                  That is why the duration is a result in the status, not merely a stop
+                  condition.
+                properties:
+                  hardTimeout:
+                    default: 6h
+                    description: |-
+                      HardTimeout kills the rehearsal. This one really is hygiene: it stops a
+                      stuck rehearsal from occupying the cluster forever.
+                    type: string
+                  maxUpgradeDuration:
+                    description: |-
+                      MaxUpgradeDuration is the longest acceptable migration duration. Compare
+                      it against your real maintenance window, not against your patience.
+                    type: string
+                type: object
+              database:
+                description: |-
+                  Database is the connection to the Postgres server where the scratch
+                  database will be created. The user needs CREATEDB.
+                properties:
+                  host:
+                    description: Host of the Postgres server.
+                    minLength: 1
+                    type: string
+                  passwordSecret:
+                    description: PasswordSecret is the Secret holding the "password"
+                      key.
+                    minLength: 1
+                    type: string
+                  port:
+                    default: 5432
+                    format: int32
+                    type: integer
+                  user:
+                    minLength: 1
+                    type: string
+                required:
+                - host
+                - passwordSecret
+                - user
+                type: object
+              image:
+                description: |-
+                  Image is the candidate artifact: the exact image that would go to
+                  production. Use a digest, not a moving tag, or the rehearsal proves
+                  nothing.
+                minLength: 1
+                type: string
+              migration:
+                description: MigrationSpec describes how to migrate.
+                properties:
+                  engine:
+                    default: ClickOdooUpdate
+                    description: MigrationEngine selects how the module update is
+                      executed.
+                    enum:
+                    - ClickOdooUpdate
+                    - OdooUpdateAll
+                    - Marabunta
+                    type: string
+                  extraArgs:
+                    description: |-
+                      ExtraArgs is appended to the command. An escape hatch: if you need it
+                      often, a field is missing from this API.
+                    items:
+                      type: string
+                    type: array
+                  modules:
+                    description: |-
+                      Modules restricts the update to these modules. Empty means whatever the
+                      engine decides.
+                    items:
+                      type: string
+                    type: array
+                type: object
+              retain:
+                default: OnFailure
+                description: |-
+                  RetentionPolicy decides what happens to the scratch database when the
+                  rehearsal ends.
+                enum:
+                - Always
+                - OnFailure
+                - Never
+                type: string
+              size:
+                default: medium
+                description: |-
+                  Size expresses intent, not resources. The translation to cpu/memory lives in
+                  the platform (internal/controller/sizes.go) and can change without anyone
+                  editing their manifests.
+                enum:
+                - small
+                - medium
+                - large
+                type: string
+              snapshot:
+                description: Snapshot is where the data comes from and how to restore
+                  it.
+                properties:
+                  format:
+                    default: OdooBackup
+                    description: Format is how the dump is packaged.
+                    enum:
+                    - OdooBackup
+                    - PgDump
+                    - PgPlain
+                    type: string
+                  from:
+                    description: From is the provider.
+                    properties:
+                      custom:
+                        description: |-
+                          CustomProvider runs your container to fetch the dump.
+
+                          The contract, in full:
+
+                           1. Leave the dump at /snapshot (the SnapshotMountPath constant).
+                           2. Exit 0 on success.
+
+                          Nothing else. Doblura does not inspect how you got it. A backup on NFS, in
+                          Bacula, behind a proprietary API, a pg_dump against a live replica: if it
+                          honours the contract it works exactly like the built-in providers.
+                        properties:
+                          args:
+                            items:
+                              type: string
+                            type: array
+                          command:
+                            items:
+                              type: string
+                            type: array
+                          env:
+                            additionalProperties:
+                              type: string
+                            description: Env holds literal variables. For secrets,
+                              use EnvFromSecrets.
+                            type: object
+                          envFromSecrets:
+                            description: EnvFromSecrets projects whole Secrets as
+                              environment variables.
+                            items:
+                              type: string
+                            type: array
+                          extraVolumeClaims:
+                            description: |-
+                              ExtraVolumeClaims mounts additional PVCs, read-only, under
+                              /mnt/<claimName>. For when the source is another volume in the cluster.
+                            items:
+                              type: string
+                            type: array
+                          image:
+                            minLength: 1
+                            type: string
+                        required:
+                        - image
+                        type: object
+                      http:
+                        description: HTTPProvider downloads the dump from a URL.
+                        properties:
+                          authSecret:
+                            description: |-
+                              AuthSecret holds "username" and "password" for basic auth, or "bearer"
+                              for a token.
+                            type: string
+                          url:
+                            minLength: 1
+                            pattern: ^https?://
+                            type: string
+                        required:
+                        - url
+                        type: object
+                      objectStore:
+                        description: |-
+                          ObjectStoreProvider downloads from any S3-compatible store.
+
+                          Deliberately generic. AWS, MinIO, Ceph RGW, Cloudflare R2, Wasabi, Backblaze
+                          B2 and DigitalOcean Spaces all speak the same protocol: a type per cloud
+                          would duplicate the same code five times and still fall short on the sixth.
+                        properties:
+                          bucket:
+                            minLength: 1
+                            type: string
+                          credentialsSecret:
+                            description: |-
+                              CredentialsSecret holds the accessKeyID and secretAccessKey keys. Leaving
+                              it empty means credentials from the environment, which is what you want
+                              with IRSA on EKS or Workload Identity, where there are no keys to store.
+                            type: string
+                          endpoint:
+                            description: |-
+                              Endpoint for anything that is not AWS. Empty means AWS.
+                              Examples: https://minio.svc:9000, https://<id>.r2.cloudflarestorage.com
+                            type: string
+                          forcePathStyle:
+                            description: |-
+                              ForcePathStyle is required by MinIO and almost everything self-hosted,
+                              where the bucket goes in the path rather than the subdomain.
+                            type: boolean
+                          key:
+                            description: Key is the object, or the prefix when the
+                              dump is several files.
+                            minLength: 1
+                            type: string
+                          region:
+                            default: us-east-1
+                            type: string
+                        required:
+                        - bucket
+                        - key
+                        type: object
+                      type:
+                        description: SnapshotProviderType is where the bytes come
+                          from.
+                        enum:
+                        - Volume
+                        - ObjectStore
+                        - HTTP
+                        - Custom
+                        type: string
+                      volume:
+                        description: VolumeProvider mounts a PVC that already holds
+                          the dump.
+                        properties:
+                          claimName:
+                            minLength: 1
+                            type: string
+                          subPath:
+                            default: prod-anon
+                            description: SubPath is the path inside the volume where
+                              the dump lives.
+                            type: string
+                        required:
+                        - claimName
+                        type: object
+                    required:
+                    - type
+                    type: object
+                    x-kubernetes-validations:
+                    - message: type Volume requires the volume field
+                      rule: self.type != 'Volume' || has(self.volume)
+                    - message: type ObjectStore requires the objectStore field
+                      rule: self.type != 'ObjectStore' || has(self.objectStore)
+                    - message: type HTTP requires the http field
+                      rule: self.type != 'HTTP' || has(self.http)
+                    - message: type Custom requires the custom field
+                      rule: self.type != 'Custom' || has(self.custom)
+                  neutralize:
+                    default: true
+                    description: |-
+                      Neutralize disables scheduled actions, outgoing mail servers, payment
+                      providers and delivery carriers after restoring.
+
+                      It defaults to true, and for good reason: a production dump restored with
+                      network access and no neutralization sends real invoices to real
+                      customers. It is the most expensive failure in this domain and
+                      documentation does not prevent it, so the default covers it and disabling
+                      it takes effort.
+
+                      Note: neutralizing is NOT anonymizing. This cuts the outbound paths; the
+                      personal data is still there.
+                    type: boolean
+                  unsafeAcknowledgement:
+                    description: |-
+                      UnsafeAcknowledgement must be exactly
+                      "i-accept-this-can-send-real-emails-and-charge-real-cards"
+                      for neutralize: false to be accepted.
+                    type: string
+                required:
+                - from
+                type: object
+                x-kubernetes-validations:
+                - message: disabling neutralize requires unsafeAcknowledgement set
+                    to its literal value, because an un-neutralized production dump
+                    sends real emails and charges real cards
+                  rule: (!has(self.neutralize) || self.neutralize) || self.unsafeAcknowledgement
+                    == 'i-accept-this-can-send-real-emails-and-charge-real-cards'
+            required:
+            - database
+            - image
+            - snapshot
+            type: object
+          status:
+            description: OdooRehearsalStatus is written by the controller only.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              databaseName:
+                description: |-
+                  DatabaseName is the scratch database that was created. Whether it
+                  survives depends on spec.retain.
+                type: string
+              finishedAt:
+                format: date-time
+                type: string
+              message:
+                description: Message is the human-readable summary of the outcome.
+                type: string
+              modelCounts:
+                description: |-
+                  ModelCounts are the observed counts, in assertion order. They are useful
+                  even when the rehearsal passes: comparing them across runs surfaces data
+                  loss that no single assertion catches.
+                items:
+                  description: ModelCountResult is an observed count.
+                  properties:
+                    count:
+                      format: int64
+                      type: integer
+                    model:
+                      type: string
+                    passed:
+                      type: boolean
+                  required:
+                  - count
+                  - model
+                  type: object
+                type: array
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the spec generation this status reflects. Without
+                  it you cannot know whether what you are reading corresponds to what you
+                  asked for.
+                format: int64
+                type: integer
+              phase:
+                description: RehearsalPhase summarises the state in one word, for
+                  `kubectl get`.
+                enum:
+                - Pending
+                - Restoring
+                - Migrating
+                - Asserting
+                - Succeeded
+                - Failed
+                type: string
+              startedAt:
+                format: date-time
+                type: string
+              upgradeDuration:
+                description: |-
+                  UpgradeDuration is THE result of the rehearsal. It is not telemetry: it
+                  is the number you plan the maintenance window with.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

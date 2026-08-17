@@ -1,0 +1,26 @@
+# The recommended path: the anonymized dump already sits on a PVC, put there by a
+# CronJob that restores production, neutralizes and anonymizes.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRehearsal
+metadata:
+  name: release-17-0-3
+spec:
+  image: ghcr.io/acme/odoo@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  snapshot:
+    from:
+      type: Volume
+      volume:
+        claimName: prod-anon-dump
+        subPath: prod-anon
+    format: OdooBackup      # includes database AND filestore, which is correct
+  database:
+    host: pg-rw.db.svc
+    user: odoo
+    passwordSecret: pg-app
+  budget:
+    maxUpgradeDuration: 2h
+  assertions:
+    modelCounts:
+      - {model: account.move, minCount: 1000}
+      - {model: res.partner}
+  size: large

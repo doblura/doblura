@@ -1,0 +1,413 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: runboatlinks.doblura.dev
+spec:
+  group: doblura.dev
+  names:
+    kind: RunboatLink
+    listKind: RunboatLinkList
+    plural: runboatlinks
+    shortNames:
+    - rbl
+    singular: runboatlink
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.url
+      name: URL
+      type: string
+    - jsonPath: .status.total
+      name: Builds
+      type: integer
+    - jsonPath: .status.truncated
+      name: Truncated
+      type: boolean
+    - jsonPath: .status.conditions[?(@.type=="Reachable")].status
+      name: Reachable
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="MirrorFresh")].status
+      name: Fresh
+      type: string
+    - jsonPath: .status.lastPoll
+      name: Last poll
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RunboatLink mirrors a Runboat deployment's builds and proxies a small,
+          explicitly allowed set of actions on them.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              RunboatLinkSpec points at one Runboat and says what may be done through it.
+
+              Note the shape of the first rule. `self.allowedActions` on an object that
+              simply omitted the field is not an empty list — it is an evaluation ERROR, and
+              the API server then rejects every RunboatLink, including valid read-only ones.
+              The same trap has now bitten this project three times (OdooEnvironment's
+              security block, OdooDatabase's companies), so: guard with has() first, and
+              order the clauses so an absent allowedActions with a pending request DENIES
+              rather than erroring.
+            properties:
+              actionRequests:
+                description: |-
+                  ActionRequests are one-shot requests. The controller executes each new id
+                  and records the outcome; removing an entry afterwards is the caller's job
+                  and forgetting is harmless.
+                items:
+                  description: |-
+                    RunboatActionRequest asks for one action, once.
+
+                    The id is what makes this safe. A reconcile can run for any reason at any
+                    time, and Reset destroys a database — so the controller records each id it has
+                    executed and never executes the same one twice. Without it, an unrelated spec
+                    edit would silently re-fire every request in the list.
+                  properties:
+                    action:
+                      description: Action is what to do.
+                      enum:
+                      - Start
+                      - Stop
+                      - Reset
+                      type: string
+                    build:
+                      description: Build is Runboat's build name, as it appears in
+                        status.builds.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    id:
+                      description: |-
+                        ID is an idempotency key. Any unique string; the console generates one per
+                        click. Reusing an id is how you say "this is the same request", so
+                        changing your mind means a new id, not an edited one.
+                      maxLength: 64
+                      minLength: 1
+                      type: string
+                    requestedBy:
+                      description: |-
+                        RequestedBy is recorded for the audit trail. The console fills it with the
+                        authenticated user; nothing verifies it, so it is a note, not a claim.
+                      maxLength: 253
+                      type: string
+                  required:
+                  - action
+                  - build
+                  - id
+                  type: object
+                maxItems: 32
+                type: array
+              allowedActions:
+                description: |-
+                  AllowedActions is what this link permits at all, independent of RBAC.
+
+                  Empty by default, which makes a fresh link a read-only window. Two locks
+                  rather than one: RBAC says who may ask, this says what is askable here.
+                  Turning off Reset for a Runboat that other teams also use does not require
+                  finding and editing everyone's role bindings.
+                items:
+                  description: |-
+                    RunboatAction is something a person can ask Doblura to do to a build.
+
+                    Undeploy is deliberately absent. Runboat's bulk-delete endpoint takes the same
+                    credential and a filter, and there is no version of "delete every build for
+                    this repo" that belongs behind a console button.
+                  enum:
+                  - Start
+                  - Stop
+                  - Reset
+                  type: string
+                maxItems: 3
+                type: array
+              auth:
+                description: Auth is needed only for actions. Listing builds is unauthenticated.
+                properties:
+                  basicAuthSecret:
+                    description: BasicAuthSecret holds keys "username" and "password".
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - basicAuthSecret
+                type: object
+              filter:
+                description: |-
+                  RunboatFilter narrows what gets mirrored.
+
+                  Worth setting. A shared Runboat carries every repository the organisation
+                  tests, and mirroring all of it fills the status with builds nobody on this
+                  cluster cares about.
+                properties:
+                  repos:
+                    description: |-
+                      Repos is a list of "owner/name". Empty mirrors everything.
+
+                      Runboat lowercases repository names, so these are compared case
+                      insensitively — otherwise a filter of "OCA/foo" would silently match
+                      nothing, which is the least helpful possible failure.
+                    items:
+                      type: string
+                    maxItems: 64
+                    type: array
+                  targetBranch:
+                    description: TargetBranch narrows to one Odoo series, e.g. "17.0".
+                    maxLength: 128
+                    type: string
+                type: object
+              maxBuilds:
+                default: 200
+                description: |-
+                  MaxBuilds caps how many builds are mirrored into status.
+
+                  An etcd object cannot exceed about 1.5 MB, and a busy Runboat has hundreds
+                  of builds. Truncation is recorded in status.truncated rather than being
+                  silent, because a list that quietly stops at the limit reads exactly like a
+                  list of everything.
+                format: int32
+                maximum: 500
+                minimum: 1
+                type: integer
+              pollInterval:
+                default: 60s
+                description: |-
+                  PollInterval is how often to refresh the mirror.
+
+                  Runboat also offers a server-sent-event stream, which would be cheaper and
+                  more immediate. Polling is deliberate for a first version: a long-lived SSE
+                  connection that silently dies leaves a mirror that looks current and is
+                  not, and a stale mirror is worse than a slow one. The stream is a later
+                  optimisation, once the staleness is visible in status.
+                type: string
+              url:
+                description: URL is Runboat's base URL, without the /api/v1 suffix.
+                maxLength: 2048
+                pattern: ^https?://[^\s]+$
+                type: string
+            required:
+            - url
+            type: object
+            x-kubernetes-validations:
+            - message: every actionRequest must name an action listed in spec.allowedActions;
+                allowedActions is the kill switch, and it is checked here so the apply
+                is rejected rather than a Reset being quietly ignored
+              rule: '!has(self.actionRequests) || size(self.actionRequests) == 0 ||
+                (has(self.allowedActions) && self.actionRequests.all(r, r.action in
+                self.allowedActions))'
+            - message: 'requesting actions needs spec.auth: without a credential the
+                controller cannot talk to Runboat''s privileged endpoints'
+              rule: '!has(self.actionRequests) || size(self.actionRequests) == 0 ||
+                has(self.auth)'
+          status:
+            description: RunboatLinkStatus is written by the controller only.
+            properties:
+              builds:
+                description: Builds is the mirror, newest first.
+                items:
+                  description: |-
+                    RunboatBuild is one mirrored build. Every field comes from Runboat; none is
+                    computed here.
+                  properties:
+                    commit:
+                      description: Commit is the git sha the build was made from.
+                      type: string
+                    created:
+                      description: Created is when Runboat first deployed it.
+                      format: date-time
+                      type: string
+                    deployLink:
+                      description: DeployLink opens the Odoo instance itself.
+                      type: string
+                    lastScaled:
+                      description: |-
+                        LastScaled is when it was last started or stopped, which is the closest
+                        thing Runboat has to "when was this last touched".
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name is Runboat's build name and the handle for
+                        actions.
+                      type: string
+                    pr:
+                      description: PR is the pull request number, absent for branch
+                        builds.
+                      format: int32
+                      type: integer
+                    prLink:
+                      description: PRLink opens the pull request on the forge.
+                      type: string
+                    repo:
+                      description: Repo is "owner/name", lowercased by Runboat.
+                      type: string
+                    status:
+                      description: Status is Runboat's own state, passed through unmapped.
+                      type: string
+                    targetBranch:
+                      description: TargetBranch is the Odoo series the PR targets,
+                        e.g. "17.0".
+                      type: string
+                    webuiLink:
+                      description: |-
+                        WebuiLink opens Runboat's own page for the build, which is where its logs
+                        are. Doblura does not proxy those: a link to the thing that owns them beats
+                        a copy that can go stale.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              executedActions:
+                description: ExecutedActions records the ids already carried out,
+                  so none is repeated.
+                items:
+                  description: RunboatActionResult records what happened to one request
+                    id.
+                  properties:
+                    action:
+                      description: |-
+                        RunboatAction is something a person can ask Doblura to do to a build.
+
+                        Undeploy is deliberately absent. Runboat's bulk-delete endpoint takes the same
+                        credential and a filter, and there is no version of "delete every build for
+                        this repo" that belongs behind a console button.
+                      enum:
+                      - Start
+                      - Stop
+                      - Reset
+                      type: string
+                    build:
+                      type: string
+                    executedAt:
+                      format: date-time
+                      type: string
+                    id:
+                      description: ID matches the request.
+                      type: string
+                    message:
+                      description: |-
+                        Message carries Runboat's own error when it did not, unaltered. A 404 here
+                        usually means the mirror was stale and the build is already gone.
+                      type: string
+                    requestedBy:
+                      description: RequestedBy is copied from the request, for the
+                        audit trail.
+                      type: string
+                    succeeded:
+                      description: Succeeded is whether Runboat accepted it.
+                      type: boolean
+                  required:
+                  - id
+                  - succeeded
+                  type: object
+                maxItems: 64
+                type: array
+              lastPoll:
+                description: |-
+                  LastPoll is when the mirror was last refreshed.
+
+                  The most important field here. Everything else in this status is a copy of
+                  somebody else's truth, and a copy is only worth what its age says it is.
+                format: date-time
+                type: string
+              message:
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              total:
+                description: |-
+                  Total is how many builds Runboat reported after filtering, before the
+                  MaxBuilds cap. When it exceeds len(builds) the mirror is partial.
+                format: int32
+                type: integer
+              truncated:
+                description: |-
+                  Truncated says the cap was hit. Surfaced as a printcolumn so nobody reads
+                  a capped list as a complete one.
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

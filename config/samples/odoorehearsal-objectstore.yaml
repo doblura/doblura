@@ -1,0 +1,23 @@
+# S3-compatible storage. ONE implementation for AWS, MinIO, Ceph, R2, Wasabi,
+# Backblaze and Spaces: it is the same protocol.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRehearsal
+metadata:
+  name: release-17-0-4-from-objectstore
+spec:
+  image: ghcr.io/acme/odoo:17.0.4
+  snapshot:
+    from:
+      type: ObjectStore
+      objectStore:
+        bucket: backups
+        key: odoo/prod-anon-2026-08-17.zip
+        endpoint: https://minio.storage.svc:9000
+        forcePathStyle: true          # MinIO and almost everything self-hosted
+        credentialsSecret: minio-creds # keys: accessKeyID, secretAccessKey
+    format: OdooBackup
+  database:
+    host: pg-rw.db.svc
+    user: odoo
+    passwordSecret: pg-app
+  budget: {maxUpgradeDuration: 90m}
