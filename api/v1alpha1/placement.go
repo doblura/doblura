@@ -96,6 +96,14 @@ func placementReject(db *OdooDatabaseSpec, c *PlacementCandidate) string {
 		return fmt.Sprintf("at capacity (%d/%d databases)",
 			c.Status.Databases, c.Spec.Capacity.MaxDatabases)
 	}
+	// Disk, which used to be declared and never checked. capacity.reservedGi was
+	// documented as "Placement refuses an instance whose free space would drop
+	// below it" while this function looked at cordon, tier, reachability and a
+	// COUNT of databases — so twenty small databases and one 400 GiB one weighed
+	// the same, and the reservation was decoration.
+	if ok, why := c.HeadroomFor(db.SizeGi); !ok {
+		return why
+	}
 	return ""
 }
 

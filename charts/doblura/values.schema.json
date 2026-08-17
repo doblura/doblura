@@ -166,6 +166,18 @@
         }
       }
     },
+    "instanceProbe": {
+      "type": "object",
+      "description": "Image used by the OdooInstance probe Pod.",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Needs psql, sh, df and awk."
+        }
+      }
+    },
     "logLevel": {
       "type": "string",
       "enum": [

@@ -98,13 +98,45 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              class:
+                default: Unknown
+                description: |-
+                  Class is how this server is operated. See InstanceClass: it is what lets
+                  usage be rated, because the cost of an hour depends on it.
+                enum:
+                - InCluster
+                - Managed
+                - Unknown
+                type: string
               host:
                 minLength: 1
+                type: string
+              observeInterval:
+                default: 10m
+                description: |-
+                  ObserveInterval is how often to probe the server.
+
+                  The probe is a short-lived Pod, not a connection from the manager: see the
+                  comment on the OdooInstance controller for why that choice was made and what
+                  it costs.
                 type: string
               port:
                 default: 5432
                 format: int32
                 type: integer
+              region:
+                description: |-
+                  Region is where it physically is, in the provider's own naming —
+                  "eu-central-1", "fsn1", "es-mad". Free text on purpose: normalising the
+                  world's region names is a losing game, and the value that matters is the one
+                  that appears on the provider's invoice.
+
+                  It is recorded rather than enforced. Nothing here checks that a database
+                  placed on it is allowed to be in that region; that is a data-protection
+                  decision, and pretending a string comparison settles it would be worse than
+                  leaving it visible.
+                maxLength: 64
+                type: string
               tier:
                 default: NonProduction
                 description: |-
@@ -204,6 +236,28 @@ spec:
                   placed here.
                 format: int32
                 type: integer
+              diskFreeGi:
+                description: |-
+                  DiskFreeGi and DiskTotalGi are the data directory's filesystem, in GiB.
+
+                  These are what make capacity.reservedGi mean anything. Until they existed the
+                  field was documented as enforced and read by nothing — a number on the
+                  customer record that an operator believes bounds the cluster, and does not.
+                format: int32
+                type: integer
+              diskTotalGi:
+                format: int32
+                type: integer
+              lastProbe:
+                description: |-
+                  LastProbe is when the observations above were taken.
+
+                  The most important field in this status, for the same reason as on
+                  RunboatLink: everything else here is a measurement, and a measurement is
+                  worth what its age says it is. Placement refuses an instance it has never
+                  observed rather than assuming the disk is empty.
+                format: date-time
+                type: string
               message:
                 type: string
               observedGeneration:

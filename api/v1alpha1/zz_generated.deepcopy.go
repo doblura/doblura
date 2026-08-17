@@ -846,6 +846,11 @@ func (in *OdooInstanceList) DeepCopyObject() runtime.Object {
 func (in *OdooInstanceSpec) DeepCopyInto(out *OdooInstanceSpec) {
 	*out = *in
 	in.Capacity.DeepCopyInto(&out.Capacity)
+	if in.ObserveInterval != nil {
+		in, out := &in.ObserveInterval, &out.ObserveInterval
+		*out = new(v1.Duration)
+		**out = **in
+	}
 	if in.Unschedulable != nil {
 		in, out := &in.Unschedulable, &out.Unschedulable
 		*out = new(bool)
@@ -872,6 +877,20 @@ func (in *OdooInstanceStatus) DeepCopyInto(out *OdooInstanceStatus) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.DiskFreeGi != nil {
+		in, out := &in.DiskFreeGi, &out.DiskFreeGi
+		*out = new(int32)
+		**out = **in
+	}
+	if in.DiskTotalGi != nil {
+		in, out := &in.DiskTotalGi, &out.DiskTotalGi
+		*out = new(int32)
+		**out = **in
+	}
+	if in.LastProbe != nil {
+		in, out := &in.LastProbe, &out.LastProbe
+		*out = (*in).DeepCopy()
 	}
 }
 

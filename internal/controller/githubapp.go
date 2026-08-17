@@ -78,7 +78,7 @@ func (r *OdooRehearsalReconciler) ensureGitHubAppTokens(
 				Namespace: reh.Namespace,
 				Labels: map[string]string{
 					"app.kubernetes.io/managed-by": "doblura",
-					"doblura.dev/ephemeral":         "true",
+					"doblura.dev/ephemeral":        "true",
 				},
 				Annotations: map[string]string{
 					"doblura.dev/expires-at": expiry.UTC().Format(time.RFC3339),

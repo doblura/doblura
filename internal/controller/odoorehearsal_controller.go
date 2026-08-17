@@ -287,8 +287,8 @@ func (r *OdooRehearsalReconciler) ensureJob(
 			Namespace: reh.Namespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/managed-by": "doblura",
-				"doblura.dev/rehearsal":         reh.Name,
-				"doblura.dev/phase":             string(st.Phase),
+				"doblura.dev/rehearsal":        reh.Name,
+				"doblura.dev/phase":            string(st.Phase),
 			},
 		},
 		Spec: batchv1.JobSpec{

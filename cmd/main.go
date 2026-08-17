@@ -41,6 +41,7 @@ func main() {
 	var enableLeaderElection bool
 	var webhookOpts doblurawebhook.Options
 	var exemptUsers string
+	var probeImage string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "address the metrics endpoint binds to")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "address the health probes bind to")
@@ -62,6 +63,9 @@ func main() {
 		"ValidatingWebhookConfiguration to publish the CA bundle into.")
 	flag.StringVar(&webhookOpts.MutatingConfigName, "mutating-webhook-config", "",
 		"MutatingWebhookConfiguration to publish the CA bundle into.")
+	flag.StringVar(&probeImage, "instance-probe-image", "postgres:18-alpine",
+		"image used to probe an OdooInstance: needs psql, sh, df and awk. Its client "+
+			"major does not have to match the server's — the probe only reads, it never restores")
 	flag.StringVar(&exemptUsers, "quota-exempt-users", "",
 		"comma-separated identities the environment quota does not apply to. The "+
 			"operator's own ServiceAccount belongs here: it creates environments on "+
@@ -178,6 +182,15 @@ func main() {
 			setupLog.Error(err, "unable to add the webhook readiness check")
 			os.Exit(1)
 		}
+	}
+
+	if err := (&controller.OdooInstanceReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		ProbeImage: probeImage,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to register controller", "controller", "OdooInstance")
+		os.Exit(1)
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

@@ -4,6 +4,9 @@
 package v1alpha1
 
 import (
+	"fmt"
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -68,6 +71,36 @@ type InstanceCapacity struct {
 	ReservedGi *int32 `json:"reservedGi,omitempty"`
 }
 
+// InstanceClass is how a Postgres server is operated.
+//
+// It exists because the two are not interchangeable in cost. Measured on published
+// EU provider prices, an environment-hour on an in-cluster CloudNativePG instance
+// and one on a managed instance in a named region differ by up to an order of
+// magnitude — and until now the product could not tell them apart, because
+// InstanceTier records Production/NonProduction and nothing else.
+//
+// Doblura provisions neither. This records which one you brought.
+// +kubebuilder:validation:Enum=InCluster;Managed;Unknown
+type InstanceClass string
+
+const (
+	// ClassInCluster is Postgres you run yourself, on this cluster or another.
+	// Usually CloudNativePG. The cheap default, and the one the self-hosted path
+	// assumes.
+	ClassInCluster InstanceClass = "InCluster"
+
+	// ClassManaged is somebody else's operated service: RDS, Cloud SQL, a
+	// provider's managed Postgres. Costs more, and is the honest answer when a
+	// customer requires a named region, a signed DPA or auditable PITR.
+	ClassManaged InstanceClass = "Managed"
+
+	// ClassUnknown is the default, and it is deliberately not InCluster.
+	//
+	// Guessing here would put a number on an invoice that nobody chose. An
+	// unclassified instance should show up as unclassified.
+	ClassUnknown InstanceClass = "Unknown"
+)
+
 // OdooInstanceSpec is a Postgres server Doblura may place databases on.
 type OdooInstanceSpec struct {
 	// +kubebuilder:validation:MinLength=1
@@ -93,6 +126,34 @@ type OdooInstanceSpec struct {
 	// +kubebuilder:default={}
 	// +optional
 	Capacity InstanceCapacity `json:"capacity,omitempty"`
+
+	// Class is how this server is operated. See InstanceClass: it is what lets
+	// usage be rated, because the cost of an hour depends on it.
+	// +kubebuilder:default=Unknown
+	// +optional
+	Class InstanceClass `json:"class,omitempty"`
+
+	// Region is where it physically is, in the provider's own naming —
+	// "eu-central-1", "fsn1", "es-mad". Free text on purpose: normalising the
+	// world's region names is a losing game, and the value that matters is the one
+	// that appears on the provider's invoice.
+	//
+	// It is recorded rather than enforced. Nothing here checks that a database
+	// placed on it is allowed to be in that region; that is a data-protection
+	// decision, and pretending a string comparison settles it would be worse than
+	// leaving it visible.
+	// +kubebuilder:validation:MaxLength=64
+	// +optional
+	Region string `json:"region,omitempty"`
+
+	// ObserveInterval is how often to probe the server.
+	//
+	// The probe is a short-lived Pod, not a connection from the manager: see the
+	// comment on the OdooInstance controller for why that choice was made and what
+	// it costs.
+	// +kubebuilder:default="10m"
+	// +optional
+	ObserveInterval *metav1.Duration `json:"observeInterval,omitempty"`
 
 	// Unschedulable takes the instance out of placement without deleting it.
 	// The databases already on it keep working; nothing new lands.
@@ -130,6 +191,26 @@ type OdooInstanceStatus struct {
 	// where there is room without arithmetic.
 	// +optional
 	Available int32 `json:"available,omitempty"`
+
+	// DiskFreeGi and DiskTotalGi are the data directory's filesystem, in GiB.
+	//
+	// These are what make capacity.reservedGi mean anything. Until they existed the
+	// field was documented as enforced and read by nothing — a number on the
+	// customer record that an operator believes bounds the cluster, and does not.
+	// +optional
+	DiskFreeGi *int32 `json:"diskFreeGi,omitempty"`
+
+	// +optional
+	DiskTotalGi *int32 `json:"diskTotalGi,omitempty"`
+
+	// LastProbe is when the observations above were taken.
+	//
+	// The most important field in this status, for the same reason as on
+	// RunboatLink: everything else here is a measurement, and a measurement is
+	// worth what its age says it is. Placement refuses an instance it has never
+	// observed rather than assuming the disk is empty.
+	// +optional
+	LastProbe *metav1.Time `json:"lastProbe,omitempty"`
 
 	// +optional
 	Message string `json:"message,omitempty"`
@@ -192,4 +273,73 @@ func (s *OdooInstanceSpec) AcceptsRole(role DatabaseRole) bool {
 		return s.Tier == TierProduction
 	}
 	return s.Tier == TierNonProduction
+}
+
+// ObserveEvery returns the probe interval, defaulted and floored.
+//
+// The floor exists for the same reason RunboatLink has one: each probe is a Pod,
+// and one badly-configured instance should not be able to fill a node with them.
+func (s *OdooInstanceSpec) ObserveEvery() metav1.Duration {
+	const (
+		def   = 10 * time.Minute
+		floor = time.Minute
+	)
+	if s.ObserveInterval == nil || s.ObserveInterval.Duration <= 0 {
+		return metav1.Duration{Duration: def}
+	}
+	if s.ObserveInterval.Duration < floor {
+		return metav1.Duration{Duration: floor}
+	}
+	return *s.ObserveInterval
+}
+
+// HeadroomFor reports whether placing a database of the given size would leave
+// less free disk than capacity.reservedGi demands, and why when it would.
+//
+// Three answers, not two, and the third is the one that matters:
+//
+//	(true,  "")     there is room
+//	(false, reason) there is not
+//	(false, reason) the disk has never been observed, so nobody knows
+//
+// The third case refuses. That is the whole point of the field: an instance whose
+// free space is unknown is exactly the instance you must not fill, and defaulting
+// an unobserved disk to "empty" would turn a safety limit into a decoration —
+// which is what this field was for its entire life before the probe existed.
+func (i *OdooInstance) HeadroomFor(sizeGi *int32) (bool, string) {
+	return headroomFor(i.Spec.Capacity, i.Status, sizeGi)
+}
+
+// HeadroomFor is the same check from the placer's point of view, which holds the
+// spec and status side by side rather than a whole object.
+func (c *PlacementCandidate) HeadroomFor(sizeGi *int32) (bool, string) {
+	return headroomFor(c.Spec.Capacity, c.Status, sizeGi)
+}
+
+func headroomFor(cap InstanceCapacity, st OdooInstanceStatus, sizeGi *int32) (bool, string) {
+	reserved := cap.ReservedGi
+	if reserved == nil || *reserved <= 0 {
+		return true, "" // no reservation declared: nothing to enforce
+	}
+	if st.LastProbe == nil || st.DiskFreeGi == nil {
+		return false, "capacity.reservedGi is set but the disk has never been " +
+			"observed; placement will not guess (is the manager able to run a probe Pod?)"
+	}
+
+	want := int32(0)
+	if sizeGi != nil && *sizeGi > 0 {
+		// A restore of an OdooBackup stages a writable copy of the dump, so it
+		// needs the database's size AGAIN as scratch. Reserving only the final
+		// size is the arithmetic error the field's own comment warns about.
+		want = *sizeGi * 2
+	}
+
+	after := *st.DiskFreeGi - want
+	if after < *reserved {
+		return false, fmt.Sprintf(
+			"would leave %dGi free, below the reserved %dGi (%dGi free now, "+
+				"%dGi needed including scratch)",
+			after, *reserved, *st.DiskFreeGi, want)
+	}
+	return true, ""
 }

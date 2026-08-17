@@ -104,6 +104,18 @@ resources:
 personas:
   create: true
 
+# Observing an OdooInstance: server version, database count, and the free disk that
+# makes capacity.reservedGi mean anything.
+#
+# The probe is a short-lived Pod running psql, not a connection from the manager —
+# so the manager holds no database credential and needs no network path to your
+# Postgres. See internal/controller/instance_probe.go for what that costs.
+#
+# Unlike `defaults` below, this value is wired end to end: it becomes a flag on the
+# manager. Needs psql, sh, df and awk.
+instanceProbe:
+  image: postgres:18-alpine
+
 logLevel: info
 # console to read in a terminal, json to aggregate in Loki or similar.
 logFormat: console

@@ -30,6 +30,8 @@ rules:
   resources:
   - pods
   verbs:
+  - create
+  - delete
   - get
   - list
   - watch
@@ -102,6 +104,7 @@ rules:
   - doblura.dev
   resources:
   - odooenvironments/status
+  - odooinstances/status
   - odoorehearsals/status
   - odoosnapshots/status
   - runboatlinks/status

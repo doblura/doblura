@@ -46,6 +46,7 @@ spec:
             {{- else }}
             - --metrics-bind-address=0
             {{- end }}
+            - --instance-probe-image={{ .Values.instanceProbe.image }}
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
             {{- end }}
