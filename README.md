@@ -447,14 +447,21 @@ what `make e2e-real` does. What is in place:
 - [x] Helm chart with `values.schema.json` and `helm test`
 - [x] `OdooEnvironment`: ephemeral and persistent environments, Ingress only
       after hardening
-- [x] `OdooInstance` / `OdooDatabase` / `OdooTenant`: the catalogue, with
-      placement and the multi-tenancy handover guardrail
+- [x] `OdooInstance` / `OdooDatabase` / `OdooTenant`: the catalogue types, and the
+      multi-tenancy handover guardrail, enforced at reconcile time
 - [x] `RunboatLink`: mirrors a [Runboat](https://github.com/sbidoul/runboat)'s
       builds and proxies start/stop/reset through Kubernetes RBAC
 - [x] Five RBAC profiles — viewer, support, qa, consultancy, platform
 - [x] Environment quota enforced at admission — per customer and per person, with
       a self-signed CA and no cert-manager dependency
 - [x] Company-level subsetting for multi-tenant databases
+- [ ] **Controllers for `OdooInstance` / `OdooDatabase` / `OdooTenant`.** The types,
+      their CEL rules and the handover check are live; nothing *observes* an
+      instance. So `status.serverVersion`, `status.available` and `status.exists`
+      are never written, `capacity.reservedGi` is never read, and `Place()` — the
+      placement logic, with its tests — is never called. Listed here rather than
+      left for you to find: a field the API documents and nothing enforces is worse
+      than a missing one
 - [x] **A real end-to-end rehearsal against Odoo 19**
 - [x] 22 CEL rules and 49 guardrail checks, verified against a real API server
 - [ ] The web console (designed, not written — the operator is the product today)
