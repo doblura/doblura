@@ -1,0 +1,60 @@
+# Produces the starting point: initialise a real Odoo database, put a couple of
+# records in it, and back it up onto the PVC with click-odoo-backupdb.
+#
+# This is the slow part of the e2e (Odoo module installation), and it is also the
+# part that makes the rehearsal meaningful: what gets restored later is a genuine
+# Odoo database, not a fixture.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: seed, namespace: doblura-e2e}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: doblura-odoo-test:19.0
+          imagePullPolicy: Never
+          command: [/bin/bash, -euxo, pipefail, -c]
+          args:
+            - |
+              cat > /tmp/odoo.conf <<CONF
+              [options]
+              db_host = pg
+              db_port = 5432
+              db_user = odoo
+              db_name = source
+              list_db = False
+              CONF
+
+              # A real Odoo database with base + mail, so mail_message exists and
+              # the masking presets have something to bite on.
+              odoo -c /tmp/odoo.conf -d source -i base,mail \
+                   --without-demo=False --stop-after-init --log-level=warn
+
+              # A handful of partners, so a modelCounts assertion is not vacuous.
+              cat > /tmp/seed.py <<'PY'
+              Partner = env['res.partner']
+              for i in range(25):
+                  Partner.create({'name': f'Customer {i}', 'email': f'c{i}@example.invalid'})
+              env.cr.commit()
+              print('partners:', Partner.search_count([]))
+              PY
+              click-odoo -c /tmp/odoo.conf -d source /tmp/seed.py
+
+              # Folder format: it contains the database AND the filestore, which
+              # is what FormatOdooBackup expects.
+              rm -rf /dump/prod-anon
+              click-odoo-backupdb -c /tmp/odoo.conf --format=folder --force source /dump/prod-anon
+              ls -la /dump/prod-anon
+          env:
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: pg-app, key: password}}
+          volumeMounts:
+            - {name: dump, mountPath: /dump}
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {memory: 3Gi}
+      volumes:
+        - {name: dump, persistentVolumeClaim: {claimName: prod-anon-dump}}

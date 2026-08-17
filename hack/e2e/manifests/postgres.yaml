@@ -1,0 +1,47 @@
+# A plain Postgres for the e2e. Deliberately not CloudNativePG: the rehearsal
+# only needs a server whose user can CREATEDB, and one less operator to install
+# keeps the e2e fast and its failures unambiguous.
+apiVersion: v1
+kind: Secret
+metadata: {name: pg-app, namespace: doblura-e2e}
+stringData:
+  password: e2e-not-a-secret
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pg, namespace: doblura-e2e}
+spec:
+  selector: {app: pg}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pg, namespace: doblura-e2e}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: pg}}
+  template:
+    metadata: {labels: {app: pg}}
+    spec:
+      containers:
+        - name: pg
+          # 18, matching the client the Odoo 19 image ships. Not incidental:
+          # a newer client against an older server produces SQL the server
+          # rejects, and click-odoo reports it as "Couldn't restore database".
+          # Your image's client and your server should agree.
+          image: postgres:18-alpine
+          env:
+            - {name: POSTGRES_USER, value: odoo}
+            - {name: POSTGRES_DB, value: postgres}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: pg-app, key: password}}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -U, odoo]}
+            initialDelaySeconds: 5
+            periodSeconds: 3
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes: [{name: data, emptyDir: {}}]

@@ -1,0 +1,46 @@
+# Second member of the conformance matrix: Odoo built from OCB.
+#
+# OCB (Odoo Community Backports, github.com/OCA/OCB) is a SOURCE repository, not
+# a published image. OCA's own CI images (oca-ci) are built from it, but they are
+# not anonymously pullable, so the honest reproducible path is to build here.
+#
+# Deliberately NOT doodba: doodba is project scaffolding for deploying Odoo per
+# project. It is a fine choice for the projects side of a platform, but it brings
+# ingress and a lot of other machinery Doblura does not need, and its plain tag is
+# a base image without Odoo at all.
+#
+# Cost warning: the OCB clone is large. --depth 1 keeps it bounded but this still
+# takes minutes. Not built by default; see `make e2e-ocb`.
+ARG ODOO_BRANCH=19.0
+FROM python:3.12-slim-trixie
+
+ARG ODOO_BRANCH
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Odoo's runtime dependencies plus the Postgres client tools. The client tools
+# matter: without them the PgDump and PgPlain snapshot formats and the whole
+# OdooSnapshot pipeline are unavailable. `make verify-image` reports exactly that.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git build-essential libpq-dev libxml2-dev libxslt1-dev libldap2-dev \
+      libsasl2-dev libjpeg-dev zlib1g-dev libfreetype6-dev liblcms2-dev \
+      libwebp-dev libtiff-dev libffi-dev node-less postgresql-client \
+      fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+RUN git clone --depth 1 --branch "${ODOO_BRANCH}" \
+      https://github.com/OCA/OCB.git odoo
+
+RUN pip install --no-cache-dir -r /opt/odoo/requirements.txt \
+ && pip install --no-cache-dir -e /opt/odoo \
+ && pip install --no-cache-dir click-odoo-contrib
+
+# Same conformance assertion as the official-image fixture.
+RUN for c in odoo click-odoo click-odoo-backupdb click-odoo-restoredb \
+             click-odoo-update click-odoo-dropdb psql pg_dump createdb; do \
+      command -v "$c" >/dev/null || { echo "MISSING: $c"; exit 1; }; \
+    done \
+ && python3 -c 'import odoo.release as r; print("OCB", r.version)'
+
+RUN useradd -m -u 65532 odoo && mkdir -p /var/lib/odoo && chown odoo /var/lib/odoo
+USER 65532

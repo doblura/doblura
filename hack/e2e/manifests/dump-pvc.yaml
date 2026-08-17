@@ -1,0 +1,8 @@
+# Where the "production" dump lives. In real life a CronJob running OdooSnapshot
+# fills this; here the seed Job does.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: prod-anon-dump, namespace: doblura-e2e}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 3Gi}}

@@ -1,0 +1,24 @@
+# Test fixture for the end-to-end rehearsal.
+#
+# Doblura ships no Odoo image and does not want to: the contract with your image
+# is that it carries click-odoo-contrib. This Dockerfile exists only so the e2e
+# has something real to run against, and it doubles as the minimal example of
+# what "an image Doblura can drive" means.
+ARG ODOO_VERSION=19.0
+FROM odoo:${ODOO_VERSION}
+
+USER root
+# --break-system-packages: the Odoo images are Debian with a PEP 668 managed
+# Python. Installing into the system interpreter is what we want here, because
+# click-odoo has to import odoo itself.
+#
+# The --help calls are the point of this layer: they fail the build if the
+# entry-point names ever change. Note it is click-odoo-backupDB, not
+# click-odoo-backup — a detail that only a real run surfaces.
+RUN pip3 install --no-cache-dir --break-system-packages click-odoo-contrib \
+ && for c in click-odoo click-odoo-backupdb click-odoo-restoredb \
+             click-odoo-update click-odoo-dropdb; do \
+      "$c" --help >/dev/null || { echo "MISSING: $c"; exit 1; }; \
+    done
+
+USER odoo

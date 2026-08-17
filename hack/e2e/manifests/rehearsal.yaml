@@ -1,0 +1,32 @@
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRehearsal
+metadata:
+  name: e2e-odoo-19
+  namespace: doblura-e2e
+spec:
+  image: doblura-odoo-test:19.0
+  snapshot:
+    from:
+      type: Volume
+      volume:
+        claimName: prod-anon-dump
+        subPath: prod-anon
+    format: OdooBackup
+  database:
+    host: pg
+    user: odoo
+    passwordSecret: pg-app
+  migration:
+    engine: ClickOdooUpdate
+  budget:
+    # Generous: this is a tiny database. The point is that the duration gets
+    # measured and compared, not that it is fast.
+    maxUpgradeDuration: 30m
+    hardTimeout: 45m
+  assertions:
+    modelCounts:
+      - {model: res.partner, minCount: 25}
+      - {model: res.users, minCount: 1}
+      - {model: mail.message}
+  size: small
+  retain: OnFailure
