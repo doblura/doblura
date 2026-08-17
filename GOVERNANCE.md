@@ -126,6 +126,48 @@ binary a derivative work of AGPL code, and the AGPL would then require its sourc
 No accident there is possible in this direction either: `internal/` is a Go
 internal package, so the compiler refuses the import outright.
 
+## The repositories
+
+Four, and the split follows the commitment above rather than the other way round.
+
+| Repository | Visibility | Licence | What |
+| --- | --- | --- | --- |
+| `doblura/doblura` | public | AGPL-3.0 (`api/` Apache-2.0) | the operator, the chart, **and the console** |
+| `doblura/doblura.dev` | public | AGPL-3.0 | the site and the documentation for self-hosting |
+| `doblura/enterprise` | private | proprietary | the hosted and multi-cluster parts |
+| `doblura/.github` | public | — | the organisation profile |
+
+### The console is public, and that is not generosity
+
+It is the obvious thing to hold back, and holding it back would break the project.
+
+The five RBAC profiles exist because support, QA and consultancy are not `kubectl`
+users. A self-hosted edition that ships `support` and `qa` ClusterRoles with no
+interface for the people they are named after ships a feature nobody can reach —
+and it would contradict the commitment three sections up, which names the RBAC
+profiles explicitly as staying on this side.
+
+So the single-cluster console goes here: the customer list, the task launcher, the
+approval queue, OIDC group mapping, all five profiles. What is on the other side
+is what genuinely cannot exist on one cluster you already administer:
+
+- **many clusters at once**, and a control plane somebody else operates
+- **identity past group mapping** — SCIM provisioning, audit export
+- **retention and custody** across regions, over years
+- **support** with a response time attached
+
+The test for any future feature: *can a competent team do this on their own
+cluster?* If yes, it belongs in the public repository, no matter how sellable it
+looks.
+
+### Why the docs are their own repository
+
+Documentation for self-hosting changes on a different clock from the operator: a
+typo fix should not need a Go review, and a first contribution to a project is far
+more often a docs fix than a controller change. Keeping it separate also keeps it
+honest — documentation that lives beside the code it documents drifts more slowly,
+but documentation nobody can find is worse, and a site is the findable form.
+
 ## Trademark
 
 "Doblura" is a coined name, chosen partly because it is defensible — a common
