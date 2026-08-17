@@ -165,6 +165,15 @@ func (r *OdooEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if st.Phase != doblurav1alpha1.EnvHibernated {
 		st.Phase = doblurav1alpha1.EnvReady
+		// Stamped once and never moved. It is when the environment first became
+		// usable, which is not when it was created — restoring a snapshot takes
+		// minutes to hours, and the meter must not charge for a copy nobody could
+		// open yet. Re-stamping on a wake from hibernation would reset the clock
+		// and lose everything consumed before it.
+		if st.ReadyAt == nil {
+			t := metav1.Now()
+			st.ReadyAt = &t
+		}
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
 			Type: "Ready", Status: metav1.ConditionTrue, Reason: "EnvironmentServing",
 			Message:            "environment hardened and serving",
@@ -527,6 +536,20 @@ func (r *OdooEnvironmentReconciler) checkExpiry(
 	// drops the database, and garbage collection takes the rest.
 	st.Phase = doblurav1alpha1.EnvExpired
 	st.Message = fmt.Sprintf("expired after %s; being destroyed", ttl)
+	// Recorded BEFORE the delete, and this ordering is the point: once the object
+	// is gone nothing can be asked when it stopped, so the accounting watermark
+	// would keep accruing against an environment that no longer exists. Writing it
+	// here bounds the overcount at one accounting interval.
+	if st.TerminatedAt == nil {
+		t := metav1.Now()
+		st.TerminatedAt = &t
+	}
+	if _, err := r.commit(ctx, env, st, ctrl.Result{}); err != nil {
+		// Could not record when it stopped. Requeue rather than delete: an
+		// environment that outlives its TTL by one pass is a smaller problem than
+		// one that disappears without ever being accounted for.
+		return ctrl.Result{}, true
+	}
 	_ = r.Delete(ctx, env)
 	return ctrl.Result{}, true
 }

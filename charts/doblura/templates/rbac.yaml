@@ -41,7 +41,7 @@ rules:
     verbs: [update]
   - apiGroups: [doblura.dev]
     resources: [odooenvironments/status, odooinstances/status, odoorehearsals/status, odoosnapshots/status,
-  runboatlinks/status]
+  odootenants/status, runboatlinks/status]
     verbs: [get, patch, update]
   - apiGroups: [doblura.dev]
     resources: [runboatlinks]

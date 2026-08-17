@@ -86,6 +86,17 @@ func (s *OdooTenantSpec) EphemeralQuota() int32 {
 	return *s.MaxEphemeralEnvironments
 }
 
+// Tenant condition types.
+const (
+	// ConditionWithinQuota is whether this customer can still open a throwaway
+	// environment.
+	//
+	// A condition rather than a bare number because the reason is what somebody
+	// acts on, and because it is the same answer the admission webhook gives — read
+	// here in advance instead of discovered on a rejected apply.
+	ConditionWithinQuota = "WithinQuota"
+)
+
 // OdooTenantStatus is written by the controller only.
 type OdooTenantStatus struct {
 	// +optional
@@ -99,6 +110,33 @@ type OdooTenantStatus struct {
 	// Databases is how many OdooDatabase objects declare this tenant.
 	// +optional
 	Databases int32 `json:"databases,omitempty"`
+
+	// EnvironmentHours is a MONOTONIC total of sized environment-hours consumed.
+	//
+	// Monotonic, and persisted here rather than derived from metrics, because the
+	// distinction is what makes it usable at all: a gauge of what is open answers
+	// "what is running", and an invoice needs "what was consumed". A counter that
+	// resets when the operator redeploys cannot be invoiced from, and a Prometheus
+	// retention window is not an accounting record.
+	//
+	// Sized, not raw: weighted by the size class already declared on each
+	// environment, because an hour of `large` costs the platform about three times
+	// an hour of `medium` and a meter that ignores that loses money on exactly the
+	// customers who use the product most.
+	//
+	// Stored in milli-hours as an integer. Floats accumulate error over thousands
+	// of additions and this value is only ever added to.
+	// +optional
+	EnvironmentMilliHours int64 `json:"environmentMilliHours,omitempty"`
+
+	// LastAccountedAt is the watermark: consumption before it is already counted in
+	// EnvironmentMilliHours.
+	//
+	// It is what makes the counter survive a restart without double counting, and
+	// it bounds the known undercount — see the controller. Accounting that is
+	// approximately right and says so beats accounting that is exactly wrong.
+	// +optional
+	LastAccountedAt *metav1.Time `json:"lastAccountedAt,omitempty"`
 
 	// SharedDatabases is how many of those are Shared with other customers.
 	//

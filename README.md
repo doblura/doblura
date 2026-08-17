@@ -455,13 +455,19 @@ what `make e2e-real` does. What is in place:
 - [x] Environment quota enforced at admission — per customer and per person, with
       a self-signed CA and no cert-manager dependency
 - [x] Company-level subsetting for multi-tenant databases
-- [ ] **Controllers for `OdooInstance` / `OdooDatabase` / `OdooTenant`.** The types,
-      their CEL rules and the handover check are live; nothing *observes* an
-      instance. So `status.serverVersion`, `status.available` and `status.exists`
-      are never written, `capacity.reservedGi` is never read, and `Place()` — the
-      placement logic, with its tests — is never called. Listed here rather than
-      left for you to find: a field the API documents and nothing enforces is worse
-      than a missing one
+- [x] `OdooInstance` observed: server version, placed databases, and the free disk
+      that makes `capacity.reservedGi` mean something. Placement refuses an instance
+      whose disk was never measured rather than assuming it is empty
+- [x] `OdooTenant` accounted: open ephemeral environments, and a **monotonic**
+      total of sized environment-hours with a persisted watermark — the counter an
+      invoice could be built from, rather than a gauge that resets on redeploy
+- [ ] **An `OdooDatabase` controller.** `Place()` — the placement logic, with its
+      tests — is still never called, so `spec.instanceRef` has to be set by hand and
+      `status.placedOn` is never written. Listed rather than left to be discovered
+- [ ] **The chart's `defaults` ConfigMap is read by nothing.** It renders
+      `objectStoreImage`, `httpImage` and `gitImage`, and the Go code hardcodes
+      those; pinning a digest or an air-gapped mirror through those values silently
+      does nothing. Same defect as the two above, found while fixing them
 - [x] **A real end-to-end rehearsal against Odoo 19**
 - [x] 22 CEL rules and 49 guardrail checks, verified against a real API server
 - [ ] The web console (designed, not written — the operator is the product today)

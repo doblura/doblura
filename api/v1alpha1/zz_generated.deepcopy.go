@@ -767,6 +767,14 @@ func (in *OdooEnvironmentStatus) DeepCopyInto(out *OdooEnvironmentStatus) {
 		in, out := &in.ExpiresAt, &out.ExpiresAt
 		*out = (*in).DeepCopy()
 	}
+	if in.ReadyAt != nil {
+		in, out := &in.ReadyAt, &out.ReadyAt
+		*out = (*in).DeepCopy()
+	}
+	if in.TerminatedAt != nil {
+		in, out := &in.TerminatedAt, &out.TerminatedAt
+		*out = (*in).DeepCopy()
+	}
 	if in.LastRequestTime != nil {
 		in, out := &in.LastRequestTime, &out.LastRequestTime
 		*out = (*in).DeepCopy()
@@ -1236,6 +1244,10 @@ func (in *OdooTenantStatus) DeepCopyInto(out *OdooTenantStatus) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.LastAccountedAt != nil {
+		in, out := &in.LastAccountedAt, &out.LastAccountedAt
+		*out = (*in).DeepCopy()
 	}
 }
 

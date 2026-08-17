@@ -333,6 +333,23 @@ type OdooEnvironmentStatus struct {
 	// +optional
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 
+	// ReadyAt is when this environment first became usable.
+	//
+	// Not the same as creationTimestamp, and the difference is the whole reason it
+	// exists: restoring a 40 GiB snapshot takes minutes to hours, and nobody should
+	// be charged for — or credited with — the time before anything was reachable.
+	// Set once and never moved, so a hibernate/wake cycle does not reset it.
+	// +optional
+	ReadyAt *metav1.Time `json:"readyAt,omitempty"`
+
+	// TerminatedAt is when it stopped consuming.
+	//
+	// Recorded on the object rather than inferred from its disappearance, because a
+	// deleted object cannot be asked anything. Whatever accounting exists has to
+	// have seen this before the object goes.
+	// +optional
+	TerminatedAt *metav1.Time `json:"terminatedAt,omitempty"`
+
 	// +optional
 	LastRequestTime *metav1.Time `json:"lastRequestTime,omitempty"`
 

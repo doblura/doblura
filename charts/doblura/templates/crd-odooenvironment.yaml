@@ -782,6 +782,25 @@ spec:
                 - Expired
                 - Failed
                 type: string
+              readyAt:
+                description: |-
+                  ReadyAt is when this environment first became usable.
+
+                  Not the same as creationTimestamp, and the difference is the whole reason it
+                  exists: restoring a 40 GiB snapshot takes minutes to hours, and nobody should
+                  be charged for — or credited with — the time before anything was reachable.
+                  Set once and never moved, so a hibernate/wake cycle does not reset it.
+                format: date-time
+                type: string
+              terminatedAt:
+                description: |-
+                  TerminatedAt is when it stopped consuming.
+
+                  Recorded on the object rather than inferred from its disappearance, because a
+                  deleted object cannot be asked anything. Whatever accounting exists has to
+                  have seen this before the object goes.
+                format: date-time
+                type: string
               url:
                 type: string
             type: object

@@ -107,6 +107,7 @@ rules:
   - odooinstances/status
   - odoorehearsals/status
   - odoosnapshots/status
+  - odootenants/status
   - runboatlinks/status
   verbs:
   - get
