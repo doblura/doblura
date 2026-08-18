@@ -72,6 +72,65 @@
   </div>
 </details>
 
+{{$f := .Data.Form}}
+<h2>Settings</h2>
+{{if can $perms (printf "patch:odooenvironments:%s" $e.Name)}}
+<form method="post" action="/e/{{$e.Namespace}}/{{$e.Name}}/settings" class="settings">
+  <fieldset>
+    <legend>Capacity</legend>
+    <div class="fields">
+      <div><label for="webReplicas">Web copies</label>
+        <input id="webReplicas" name="webReplicas" type="number" min="0" max="10" value="{{$f.WebReplicas}}"></div>
+      <div><label for="webWorkers">Workers per copy</label>
+        <input id="webWorkers" name="webWorkers" type="number" min="0" max="32" value="{{$f.WebWorkers}}"></div>
+    </div>
+    <p class="hint">More than one copy needs file storage every copy can reach.
+    The API refuses the combination that would otherwise lose attachments.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Scheduled jobs</legend>
+    <label class="check"><input type="checkbox" name="cronTier" {{if $f.CronTier}}checked{{end}}>
+      Run them on their own worker</label>
+    <div class="fields">
+      <div><label for="cronThreads">Jobs at once</label>
+        <input id="cronThreads" name="cronThreads" type="number" min="1" max="8" value="{{$f.CronThreads}}"></div>
+    </div>
+    <p class="hint">Off means the web pages run them too. On means the web pages
+    stop running them entirely — it is one switch, not two settings.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Who can reach it</legend>
+    <label class="check"><input type="checkbox" name="public" {{if $f.Public}}checked{{end}}>
+      Reachable from the internet</label>
+    <div class="fields">
+      <div><label for="host">Address</label>
+        <input id="host" name="host" value="{{$f.Host}}" placeholder="review-1421.example.com"></div>
+      <div><label for="authType">Sign-in wall</label>
+        <select id="authType" name="authType">
+          <option value="None"{{if eq $f.AuthType "None"}} selected{{end}}>None</option>
+          <option value="BasicAuth"{{if eq $f.AuthType "BasicAuth"}} selected{{end}}>Username and password</option>
+          <option value="ForwardAuth"{{if eq $f.AuthType "ForwardAuth"}} selected{{end}}>Your identity provider</option>
+        </select></div>
+      <div><label for="authSecret">Credentials secret</label>
+        <input id="authSecret" name="authSecret" value="{{$f.AuthSecret}}" placeholder="only for username and password"></div>
+      <div><label for="rateLimitRPS">Requests per second</label>
+        <input id="rateLimitRPS" name="rateLimitRPS" type="number" min="0" max="10000" value="{{$f.RateLimit}}" placeholder="no limit"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="noIndex" {{if $f.NoIndex}}checked{{end}}>
+      Keep it out of search engines</label>
+    <p class="hint">An environment holding realistic-looking data, indexed by
+    Google, is a leak that requires nobody to attack anything.</p>
+  </fieldset>
+
+  <button type="submit">Save</button>
+</form>
+{{else}}
+<div class="denied">{{icon "locked"}} Changing this environment is not permitted
+for your groups.</div>
+{{end}}
+
 <div class="actions">
 {{if can $perms (printf "delete:odooenvironments:%s" $e.Name)}}
   <form method="post" action="/e/{{$e.Namespace}}/{{$e.Name}}/delete">

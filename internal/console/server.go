@@ -171,6 +171,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /c/{ns}/{name}", s.authenticated(s.handleCustomer))
 	mux.HandleFunc("GET /e/{ns}/{name}", s.authenticated(s.handleEnvironment))
 	mux.HandleFunc("POST /e/{ns}/{name}/delete", s.authenticated(s.handleDeleteEnvironment))
+	mux.HandleFunc("POST /e/{ns}/{name}/settings", s.authenticated(s.handleEnvironmentSettings))
 	mux.HandleFunc("POST /c/{ns}/{name}/environments", s.authenticated(s.handleCreateEnvironment))
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
 	mux.HandleFunc("GET /detail", s.authenticated(s.handleDetail))

@@ -387,3 +387,24 @@ td .small { display: block; margin-top: 2px; }
 .tile-l { font-size: 13px; color: var(--ink-3); }
 a.brand { color: var(--ink); }
 a.brand:hover { text-decoration: none; opacity: .82; }
+
+/* ── the settings form ── */
+form.settings { display: grid; gap: 16px; }
+form.settings fieldset {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); padding: 16px 18px 18px; margin: 0;
+}
+form.settings legend {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink-3); font-weight: 620; padding: 0 6px;
+}
+form.settings .fields {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+form.settings .hint { margin: 12px 0 0; font-size: 13px; color: var(--ink-3); max-width: 62ch; }
+label.check {
+  display: flex; align-items: center; gap: 9px; margin: 4px 0 12px;
+  font-size: 14px; color: var(--ink); text-transform: none; letter-spacing: 0;
+}
+label.check input { width: auto; height: auto; accent-color: var(--accent); }
+form.settings > button { justify-self: start; }

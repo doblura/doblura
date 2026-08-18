@@ -6,6 +6,7 @@ package console
 import (
 	"bytes"
 	"context"
+	"net/url"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -34,6 +35,9 @@ type page struct {
 	AuthMode string
 	Perms    map[string]bool
 	Error    string
+	// Back is where the error page returns to: the page the person was on, so a
+	// refusal does not also cost them the edit they were making.
+	Back string
 
 	// Level is how much each page says. One application, two depths — never
 	// two applications, which drift.
@@ -84,6 +88,23 @@ func (s *Server) render(w http.ResponseWriter, name string, p page) {
 // it would turn a self-service answer into a support ticket.
 func (s *Server) fail(w http.ResponseWriter, id Identity, err error) {
 	s.render(w, "error.html", page{Title: "Not available", Identity: id, Error: err.Error()})
+}
+
+// failBack is fail with somewhere to return to.
+//
+// The referer, and only when it is a path on this console. An absolute URL from
+// a header would make the error page an open redirector, and an error page is
+// exactly where somebody clicks without reading.
+func (s *Server) failBack(w http.ResponseWriter, r *http.Request, id Identity, err error) {
+	back := "/"
+	if ref := r.Header.Get("Referer"); ref != "" {
+		if u, e := url.Parse(ref); e == nil && u.Host == r.Host && u.Path != "" {
+			back = u.Path
+		}
+	}
+	s.render(w, "error.html", page{
+		Title: "Not available", Identity: id, Error: err.Error(), Back: back,
+	})
 }
 
 // ── the customer list, which is the landing view for everyone ──
@@ -235,6 +256,26 @@ type environmentView struct {
 
 	WebReplicas string
 	CronSummary string
+
+	// Form holds the current values, so the settings form opens showing what is
+	// there rather than showing blanks that would wipe it on save.
+	Form settingsForm
+}
+
+// settingsForm is the editable surface, already reduced to what a form field
+// needs. The zero value is never meaningful here: every field is read from the
+// object first.
+type settingsForm struct {
+	WebReplicas int32
+	WebWorkers  int32
+	CronTier    bool
+	CronThreads int32
+	Public      bool
+	Host        string
+	AuthType    string
+	AuthSecret  string
+	NoIndex     bool
+	RateLimit   string
 }
 
 type conditionRow struct {
@@ -271,6 +312,7 @@ func (s *Server) handleEnvironment(w http.ResponseWriter, r *http.Request, id Id
 	}
 	view.Load, view.LoadDetail, view.LoadState = s.load(r.Context(), id, &env)
 	view.Map = environmentGraph(&env).render()
+	view.Form = formFrom(&env)
 
 	for _, cond := range env.Status.Conditions {
 		view.Keys = append(view.Keys, conditionRow{
@@ -279,7 +321,8 @@ func (s *Server) handleEnvironment(w http.ResponseWriter, r *http.Request, id Id
 		})
 	}
 	perms, err := s.allowed(r.Context(), id,
-		CanDeleteEnvironment(ns, name), CanApprove(ns, name), CanReadLogs(ns))
+		CanDeleteEnvironment(ns, name), CanApprove(ns, name), CanReadLogs(ns),
+		Verb{"patch", "odooenvironments", ns, name})
 	if err != nil {
 		s.fail(w, id, err)
 		return
@@ -662,4 +705,43 @@ func environmentGraph(e *doblurav1alpha1.OdooEnvironment) *graph {
 		g.Edges = append(g.Edges, edge{From: id, To: "cron", Label: "crons"})
 	}
 	return g
+}
+
+// formFrom reads the current settings out of the object.
+//
+// Every field, including the ones with schema defaults, because the form posts
+// all of them: a field left blank because "it is the default anyway" would be
+// read back as "not set" and clear whatever the operator had filled in.
+func formFrom(e *doblurav1alpha1.OdooEnvironment) settingsForm {
+	f := settingsForm{
+		WebReplicas: 1,
+		WebWorkers:  2,
+		CronThreads: 2,
+		Host:        e.Spec.Exposure.Host,
+		AuthType:    string(e.Spec.Exposure.Auth.Type),
+		AuthSecret:  e.Spec.Exposure.Auth.SecretRef,
+		Public:      e.Spec.IsPublic(),
+		NoIndex:     e.Spec.Exposure.NoIndex == nil || *e.Spec.Exposure.NoIndex,
+	}
+	if w := e.Spec.Workload; w != nil {
+		if w.Web != nil {
+			f.WebReplicas = w.Web.Replicas
+			if w.Web.Workers != nil {
+				f.WebWorkers = *w.Web.Workers
+			}
+		}
+		if w.Cron != nil && w.Cron.Replicas > 0 {
+			f.CronTier = true
+			if w.Cron.Threads > 0 {
+				f.CronThreads = w.Cron.Threads
+			}
+		}
+	}
+	if e.Spec.Exposure.RateLimitRPS != nil && *e.Spec.Exposure.RateLimitRPS > 0 {
+		f.RateLimit = itoa(int(*e.Spec.Exposure.RateLimitRPS))
+	}
+	if f.AuthType == "" {
+		f.AuthType = "None"
+	}
+	return f
 }

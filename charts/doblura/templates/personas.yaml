@@ -113,7 +113,13 @@ rules:
   # Its own throwaway environments. The quota webhook bounds how many.
   - apiGroups: [doblura.dev]
     resources: [odooenvironments]
-    verbs: [get, list, watch, create, delete]
+    # patch and update alongside create and delete, and the reason is that
+    # withholding them bought nothing. Somebody who can delete an environment and
+    # create it again with different settings can already reach any state a patch
+    # could reach — so denying the patch made the SAFE operation the forbidden
+    # one and left the destructive workaround allowed. It also meant the console
+    # could show these people an environment and no way to change it.
+    verbs: [get, list, watch, create, update, patch, delete]
   # Read-only on everything else, so the list can show state.
   - apiGroups: [doblura.dev]
     resources: [odoorehearsals, odoosnapshots]
@@ -186,7 +192,13 @@ rules:
     verbs: [get, list, watch]
   - apiGroups: [doblura.dev]
     resources: [odooenvironments]
-    verbs: [get, list, watch, create, delete]
+    # patch and update alongside create and delete, and the reason is that
+    # withholding them bought nothing. Somebody who can delete an environment and
+    # create it again with different settings can already reach any state a patch
+    # could reach — so denying the patch made the SAFE operation the forbidden
+    # one and left the destructive workaround allowed. It also meant the console
+    # could show these people an environment and no way to change it.
+    verbs: [get, list, watch, create, update, patch, delete]
   # The customer record itself: version, product release, contact of record.
   - apiGroups: [doblura.dev]
     resources: [odootenants]

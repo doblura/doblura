@@ -5,5 +5,8 @@ here names the verb, the resource and you — which is what whoever administers
 your groups needs.</p>
 <div class="problem"><strong>The request was refused or failed.</strong>
 <pre>{{.Error}}</pre></div>
-<div class="actions"><a class="btn ghost" href="/">Back to customers</a></div>
+<div class="actions">
+  <a class="btn ghost" href="{{if .Back}}{{.Back}}{{else}}/{{end}}">Back</a>
+  <a class="btn ghost" href="/">Overview</a>
+</div>
 {{template "bottom" .}}{{end}}
