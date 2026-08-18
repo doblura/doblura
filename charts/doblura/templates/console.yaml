@@ -1,0 +1,272 @@
+{{- if .Values.console.enabled }}
+{{/*
+The nested maps are normalised first, and that is not defensive style for its own
+sake. `helm upgrade --reuse-values` merges the PREVIOUS release's values, which
+predate this section, so `--set console.enabled=true` arrives with console as a
+map holding one key and every sub-map nil. Reading $oidc.issuer
+then fails with "nil pointer evaluating interface {}.issuer" — an error about
+Helm internals, from an upgrade that looks like it should work.
+*/}}
+{{- $c := .Values.console -}}
+{{- $oidc := $c.oidc | default dict -}}
+{{- $local := $c.localAccounts | default dict -}}
+{{- $ing := $c.ingress | default dict -}}
+{{/*
+The console.
+
+A second Deployment and a second ServiceAccount, from the same image. The split
+is the point: the manager's identity can create and delete anybody's
+environments, and the console's can do exactly one thing — impersonate the person
+who signed in. One process for both would give the web-facing half the identity
+of the half that can do everything, and no amount of care inside that process
+would make that a good idea.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "doblura.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+---
+{{/*
+IMPERSONATION — the most dangerous permission in this chart, and the only one the
+console has.
+
+`impersonate` on users and groups means this ServiceAccount can act as anybody.
+That is not a loophole in the design; it IS the design: the console holds no
+authority of its own precisely so that every request carries the authority of the
+human who made it, and Kubernetes RBAC stays the only authorization in the
+system.
+
+What makes it safe is what is NOT here: no Secrets, no OdooEnvironments, no pods.
+Compromising the console gets an attacker the ability to act as a user they must
+first name; it does not get them the cluster.
+
+That property is only true if you have not bound a persona to a group every
+ServiceAccount belongs to. Binding viewer to system:authenticated does exactly
+that, and this ServiceAccount would inherit it along with every other pod in the
+cluster — see the note in personas.yaml.
+
+Two consequences to be explicit about rather than discover:
+
+  * `serviceaccounts` is deliberately absent from the resources below. Being able
+    to impersonate a ServiceAccount would include impersonating the MANAGER's,
+    which can do everything. Users and groups only.
+  * Local accounts (console.localAccounts) are a group-membership store, so
+    whoever can write that Secret can grant themselves any group. The console
+    reads it with this ServiceAccount because there is no person yet at the
+    moment a password is checked. Restrict the Secret accordingly, and prefer
+    OIDC once you have it.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-console-impersonate
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [users, groups]
+    verbs: [impersonate]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "doblura.fullname" . }}-console-impersonate
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "doblura.fullname" . }}-console-impersonate
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "doblura.fullname" . }}-console
+    namespace: {{ .Release.Namespace }}
+{{- if $local.secretName }}
+---
+{{/*
+Reading the accounts Secret is scoped to that ONE Secret by name, in this one
+namespace. A Role over all Secrets would have been three fewer lines and would
+have handed a web-facing pod every credential the namespace holds.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "doblura.fullname" . }}-console-accounts
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $local.secretName | quote }}]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "doblura.fullname" . }}-console-accounts
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "doblura.fullname" . }}-console-accounts
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "doblura.fullname" . }}-console
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "doblura.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    {{- include "doblura.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "doblura.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "doblura.labels" . | nindent 4 }}
+    app.kubernetes.io/component: console
+spec:
+  replicas: {{ ($c.replicaCount | default 1) }}
+  selector:
+    matchLabels:
+      {{- include "doblura.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: console
+  template:
+    metadata:
+      labels:
+        {{- include "doblura.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: console
+    spec:
+      serviceAccountName: {{ include "doblura.fullname" . }}-console
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: console
+          image: {{ include "doblura.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/console"]
+          args:
+            - --addr=:8080
+            {{- with $oidc.issuer }}
+            - --oidc-issuer={{ . }}
+            {{- end }}
+            {{- with $oidc.clientID }}
+            - --oidc-client-id={{ . }}
+            {{- end }}
+            {{- with $oidc.redirectURL }}
+            - --oidc-redirect-url={{ . }}
+            {{- end }}
+            {{- with $oidc.groupsClaim }}
+            - --oidc-groups-claim={{ . }}
+            {{- end }}
+            {{- with $local.secretName }}
+            - --local-accounts-secret={{ . }}
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{/*
+            The session key signs the cookie and MUST be identical across
+            replicas: two replicas with different keys sign each other out on
+            every other request, which reads as a session bug rather than as a
+            missing value. From a Secret rather than generated, for the same
+            reason.
+            */}}
+            - name: DOBLURA_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $c.sessionKeySecret | default (printf "%s-console-session" (include "doblura.fullname" .)) }}
+                  key: sessionKey
+            {{- if $oidc.clientSecretSecret }}
+            {{/*
+            Read from the environment and not a flag: a client secret in a flag
+            is in the pod spec, in `kubectl describe`, and in every process
+            listing on the node.
+            */}}
+            - name: DOBLURA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $oidc.clientSecretSecret }}
+                  key: clientSecret
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {{- toYaml ($c.resources | default dict) | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- if $ing.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "doblura.fullname" . }}-console
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "doblura.labels" . | nindent 4 }}
+  {{- with $ing.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $ing.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $ing.tlsSecretName }}
+  tls:
+    - hosts: [{{ $ing.host | quote }}]
+      secretName: {{ $ing.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $ing.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "doblura.fullname" . }}-console
+                port:
+                  number: 80
+{{- end }}
+{{- end }}

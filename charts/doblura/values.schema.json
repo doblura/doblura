@@ -225,6 +225,77 @@
     },
     "nameOverride": {
       "type": "string"
+    },
+    "console": {
+      "type": "object",
+      "description": "The web console. Off by default: it needs an identity provider or an accounts Secret, and one that installs with neither would serve the customer list to whoever reaches it.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oidc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuer": {
+              "type": "string"
+            },
+            "clientID": {
+              "type": "string"
+            },
+            "redirectURL": {
+              "type": "string"
+            },
+            "groupsClaim": {
+              "type": "string"
+            },
+            "clientSecretSecret": {
+              "type": "string"
+            }
+          }
+        },
+        "localAccounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secretName": {
+              "type": "string"
+            }
+          }
+        },
+        "sessionKeySecret": {
+          "type": "string"
+        },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "className": {
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            },
+            "tlsSecretName": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            }
+          }
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
     }
   }
 }

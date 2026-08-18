@@ -5,7 +5,7 @@
 nameOverride: ""
 
 image:
-  repository: ghcr.io/aromera/doblura
+  repository: ghcr.io/doblura/doblura
   # Empty means the chart's appVersion. That way a chart upgrade brings the
   # matching image, with no second place to keep in sync.
   tag: ""
@@ -134,3 +134,47 @@ defaults:
   objectStoreImage: rclone/rclone:latest
   httpImage: curlimages/curl:latest
   gitImage: alpine/git:latest
+
+# ── The console ──
+#
+# Off by default. It needs an identity provider or an accounts Secret and a
+# session key, and a console that installs itself with none of those would either
+# refuse to start (a confusing default) or serve the customer list to whoever
+# reaches it (a much worse one).
+console:
+  enabled: false
+  replicaCount: 1
+
+  # Sign-in. At least one of oidc.issuer or localAccounts.secretName must be set;
+  # the console refuses to start with neither, rather than serving anonymously.
+  oidc:
+    issuer: ""
+    clientID: ""
+    # This console's own /auth/callback URL, as the provider will redirect to it.
+    redirectURL: ""
+    groupsClaim: groups
+    # Secret holding key `clientSecret`. Read from the environment, never a flag.
+    clientSecretSecret: ""
+
+  localAccounts:
+    # Secret holding one key per user: "<bcrypt hash>:group,group".
+    # Generate a hash with:  kubectl run -it --rm hash --image=<doblura image> \
+    #   --restart=Never --command -- /console hash
+    secretName: ""
+
+  # Secret holding key `sessionKey`: at least 32 base64-encoded bytes, IDENTICAL
+  # across replicas. Create one with:
+  #   kubectl -n <ns> create secret generic doblura-console-session \
+  #     --from-literal=sessionKey="$(head -c 32 /dev/urandom | base64)"
+  sessionKeySecret: ""
+
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    tlsSecretName: ""
+    annotations: {}
+
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {memory: 256Mi}

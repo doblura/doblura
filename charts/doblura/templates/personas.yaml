@@ -19,17 +19,27 @@ Bind these to your OIDC groups. They are ClusterRoles so you can bind them
 cluster-wide OR per namespace with a RoleBinding, which is how you scope a
 consultant to one customer's namespace.
 
-VIEWER IS THE FLOOR, and binding it to everyone who authenticates is part of the
-intended installation, not an optional extra:
+VIEWER IS THE FLOOR. Bind it to the group your identity provider gives every
+person who should see this platform at all:
 
   kubectl create clusterrolebinding doblura-viewer-all \
-    --clusterrole=doblura-viewer --group=system:authenticated
+    --clusterrole=doblura-viewer --group=<your-everyone-group>
 
 RBAC is additive, so support and QA then ADD to it rather than restating it.
 Skipping this leaves support able to create environments and unable to see
 whether any of them is running, because the read that answers "is it up" lives
-here — and the console, honestly, reports that as "cannot tell" rather than
+here — and the console honestly reports that as "cannot tell" rather than
 inventing a status.
+
+NOT system:authenticated. That was the first suggestion here and it was wrong in
+a way worth recording: every ServiceAccount in the cluster belongs to
+system:authenticated, so binding to it hands every customer record and every
+environment to every pod with a mounted token, in every namespace. Measured, not
+supposed — kube-system's default ServiceAccount could list OdooTenants
+cluster-wide. Kubernetes has no group meaning "authenticated humans", so the
+group has to come from your identity provider; with local accounts, put the
+viewer group in each account's record, which is what the accounts Secret format
+is for.
 */}}
 ---
 {{/*

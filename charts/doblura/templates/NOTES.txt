@@ -4,7 +4,7 @@ Doblura {{ .Chart.AppVersion }} installed in namespace {{ .Release.Namespace }}.
 
   WARNING: crds.install is false. Install the CRDs by hand or every
   OdooRehearsal will be rejected:
-      kubectl apply -f https://raw.githubusercontent.com/aromera/doblura/v{{ .Chart.AppVersion }}/config/crd/doblura.dev_odoorehearsals.yaml
+      kubectl apply -f https://raw.githubusercontent.com/doblura/doblura/v{{ .Chart.AppVersion }}/config/crd/doblura.dev_odoorehearsals.yaml
 {{- end }}
 
 {{- if and (gt (int .Values.replicaCount) 1) (not .Values.leaderElection.enabled) }}
@@ -67,8 +67,34 @@ Check that it started:
 
 And launch the first one:
 
-    kubectl apply -f https://raw.githubusercontent.com/aromera/doblura/v{{ .Chart.AppVersion }}/config/samples/odoorehearsal-volume.yaml
+    kubectl apply -f https://raw.githubusercontent.com/doblura/doblura/v{{ .Chart.AppVersion }}/config/samples/odoorehearsal-volume.yaml
     kubectl get rehearsal -w
 
 Remember: neutralize defaults to true, and it should stay that way. A production
 dump restored without neutralization sends real invoices to real customers.
+
+{{ if .Values.personas.create }}
+The five personas are installed as ClusterRoles. Bind viewer to the group your
+identity provider gives everyone who should see this platform — it is the floor
+the others add to, and it is what answers "is it up" in the console:
+
+    kubectl create clusterrolebinding doblura-viewer-all \
+      --clusterrole={{ include "doblura.fullname" . }}-viewer --group=<your-everyone-group>
+
+Do NOT use system:authenticated. Every ServiceAccount in the cluster belongs to
+it, so that binding hands every customer record to every pod with a mounted
+token, in every namespace.
+
+Then bind support, qa, consultancy and platform to your own groups.
+{{- end }}
+{{- if .Values.console.enabled }}
+
+The console is serving on {{ include "doblura.fullname" . }}-console. It holds no
+permissions of its own: every request is impersonated as the person who signed
+in, so Kubernetes RBAC is the only authorization in the system.
+{{- if not (or (.Values.console.oidc).issuer (.Values.console.localAccounts).secretName) }}
+
+It will NOT start: neither console.oidc.issuer nor console.localAccounts.secretName
+is set, and it refuses to serve traffic it cannot attribute to anybody.
+{{- end }}
+{{- end }}
