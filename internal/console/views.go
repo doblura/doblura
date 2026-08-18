@@ -340,8 +340,9 @@ type settingsForm struct {
 	Host        string
 	AuthType    string
 	AuthSecret  string
-	NoIndex     bool
-	RateLimit   string
+	NoIndex       bool
+	RateLimit     string
+	UpdateOnStart bool
 }
 
 type conditionRow struct {
@@ -791,7 +792,8 @@ func formFrom(e *doblurav1alpha1.OdooEnvironment) settingsForm {
 		AuthType:    string(e.Spec.Exposure.Auth.Type),
 		AuthSecret:  e.Spec.Exposure.Auth.SecretRef,
 		Public:      e.Spec.IsPublic(),
-		NoIndex:     e.Spec.Exposure.NoIndex == nil || *e.Spec.Exposure.NoIndex,
+		NoIndex:       e.Spec.Exposure.NoIndex == nil || *e.Spec.Exposure.NoIndex,
+		UpdateOnStart: e.Spec.UpdatesOnStart(),
 	}
 	if w := e.Spec.Workload; w != nil {
 		if w.Web != nil {

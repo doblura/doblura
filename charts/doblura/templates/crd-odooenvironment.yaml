@@ -902,6 +902,38 @@ spec:
                         is no filestore for a claim or a size to describe
                       rule: self.mode != 'Database' || (!has(self.claimName) && !has(self.size))
                 type: object
+              update:
+                description: Update says when the modules are brought in line with
+                  the code.
+                properties:
+                  modules:
+                    description: |-
+                      Modules restricts what is updated. Empty means "whatever changed", which
+                      is what click-odoo-update is for and what you want almost always.
+                    items:
+                      type: string
+                    type: array
+                  onStart:
+                    description: |-
+                      OnStart runs click-odoo-update before the server starts, every time the
+                      pod starts.
+
+                      Left unset it follows the purpose: on for Review and QA, off for Staging
+                      and Production. Set it explicitly and it is honoured — somebody running
+                      staging as a rolling rehearsal of production is not wrong.
+
+                      A pointer because false is a real answer that must survive the defaulting:
+                      with a plain bool an explicit "no" is indistinguishable from "unset" and
+                      would be overwritten by the purpose.
+                    type: boolean
+                  timeout:
+                    default: 20m
+                    description: |-
+                      Timeout bounds the update. An update that hangs holds the pod in its init
+                      phase, and a review environment that never starts is harder to diagnose
+                      than one that starts and says the update failed.
+                    type: string
+                type: object
               workload:
                 description: |-
                   Workload splits the environment's processes. Absent means one deployment

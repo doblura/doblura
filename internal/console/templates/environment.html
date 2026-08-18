@@ -59,6 +59,8 @@
       <dt>File storage</dt><dd>{{if $e.Spec.Storage}}{{if $e.Spec.Storage.Filestore}}{{$e.Spec.Storage.Filestore.Mode}}{{else}}default{{end}}{{else}}default{{end}}</dd>
       <dt>Web copies</dt><dd>{{.Data.WebReplicas}}</dd>
       <dt>Scheduled jobs</dt><dd>{{.Data.CronSummary}}</dd>
+      <dt>Module updates</dt><dd>{{if $e.Spec.UpdatesOnStart}}brought level with the code
+        every time it starts{{else}}only when somebody asks{{end}}</dd>
       <dt>Rate limit</dt><dd>{{if $e.Spec.Exposure.RateLimitRPS}}{{$e.Spec.Exposure.RateLimitRPS}} requests/second{{else}}<span class="muted">none</span>{{end}}</dd>
       <dt>Sign-in wall</dt><dd>{{if $e.Spec.IsPublic}}{{$e.Spec.Exposure.Auth.Type}}{{else}}not public{{end}}</dd>
       {{if $e.Status.Message}}<dt>Message</dt><dd>{{$e.Status.Message}}</dd>{{end}}
@@ -126,6 +128,19 @@ refuses it you are shown the rule's own words.</p>`)}}
     </div>
     <p class="hint">More than one copy needs file storage every copy can reach.
     The API refuses the combination that would otherwise lose attachments.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Module updates</legend>
+    <label class="check"><input type="checkbox" name="updateOnStart" {{if $f.UpdateOnStart}}checked{{end}}>
+      Bring modules level with the code every time it starts</label>
+    <p class="hint">Odoo has to be told when addon code changes: the module
+    records in the database still describe the old code, views are not reloaded,
+    and a new field has no column. Doblura hashes each addon's content and
+    updates the ones that actually changed — no version to remember bumping.
+    <br>On for review and QA, where a change should land without ceremony. Off
+    for staging and production, so a schema is never rewritten because a node was
+    drained at three in the morning.</p>
   </fieldset>
 
   <fieldset>

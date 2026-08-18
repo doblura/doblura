@@ -51,6 +51,16 @@ func (s *Server) handleEnvironmentSettings(w http.ResponseWriter, r *http.Reques
 	applyWorkloadForm(&env, r)
 	applyExposureForm(&env, r)
 
+	// Written explicitly whichever way the box went, because the field is a
+	// pointer precisely so that "no" survives the purpose's default. Leaving it
+	// nil when unticked would hand a review environment straight back to the
+	// purpose, which says yes.
+	on := r.FormValue("updateOnStart") == "on"
+	if env.Spec.Update == nil {
+		env.Spec.Update = &doblurav1alpha1.UpdateSpec{}
+	}
+	env.Spec.Update.OnStart = &on
+
 	// Updated as the person. A persona without patch on odooenvironments gets a
 	// 403 naming the verb, the resource and themselves, which is exactly what
 	// whoever administers their groups needs.

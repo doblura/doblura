@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
 )
 
@@ -92,4 +94,68 @@ func TestPreflightChecksWhatTheFlavourPromised(t *testing.T) {
 	if strings.Contains(official, doblurav1alpha1.DoodbaAddonsPath) {
 		t.Errorf("an official image must not be asked for Doodba's layout; got:\n%s", official)
 	}
+}
+
+// The module update belongs to the web tier alone.
+//
+// Two pods running click-odoo-update against one database at the same time is
+// the double execution the cron split exists to prevent, applied to the one
+// operation that rewrites the schema. Easy to reintroduce by adding the update
+// to a shared helper, which is exactly how it got in the first time.
+func TestOnlyTheWebTierUpdatesModules(t *testing.T) {
+	env := flavourEnv(doblurav1alpha1.FlavorOfficial)
+	env.Spec.Purpose = doblurav1alpha1.PurposeReview
+	env.Spec.Workload = &doblurav1alpha1.WorkloadSplit{
+		Cron: &doblurav1alpha1.CronTier{Replicas: 1, Threads: 2},
+	}
+
+	if !hasInit(envServingPod(env).Spec.InitContainers, "update") {
+		t.Error("a Review environment must bring its modules level as it starts")
+	}
+	if hasInit(envCronPod(env).Spec.InitContainers, "update") {
+		t.Error("the cron tier must not update: that is two updates against one database")
+	}
+}
+
+// Production does not update itself because a node was drained.
+func TestPurposeDecidesWhetherModulesUpdateOnStart(t *testing.T) {
+	for _, tc := range []struct {
+		purpose doblurav1alpha1.EnvPurpose
+		want    bool
+	}{
+		{doblurav1alpha1.PurposeReview, true},
+		{doblurav1alpha1.PurposeQA, true},
+		{doblurav1alpha1.PurposeStaging, false},
+		{doblurav1alpha1.PurposeProduction, false},
+		{"", false},
+	} {
+		env := flavourEnv(doblurav1alpha1.FlavorOfficial)
+		env.Spec.Purpose = tc.purpose
+		if got := env.Spec.UpdatesOnStart(); got != tc.want {
+			t.Errorf("purpose %q: updates on start = %v, want %v", tc.purpose, got, tc.want)
+		}
+	}
+
+	// An explicit answer beats the purpose, in both directions — including the
+	// false that a plain bool could not have expressed.
+	env := flavourEnv(doblurav1alpha1.FlavorOfficial)
+	env.Spec.Purpose = doblurav1alpha1.PurposeProduction
+	env.Spec.Update = &doblurav1alpha1.UpdateSpec{OnStart: ptr(true)}
+	if !env.Spec.UpdatesOnStart() {
+		t.Error("an explicit yes must beat the purpose's no")
+	}
+	env.Spec.Purpose = doblurav1alpha1.PurposeReview
+	env.Spec.Update = &doblurav1alpha1.UpdateSpec{OnStart: ptr(false)}
+	if env.Spec.UpdatesOnStart() {
+		t.Error("an explicit no must beat the purpose's yes")
+	}
+}
+
+func hasInit(inits []corev1.Container, name string) bool {
+	for _, c := range inits {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }

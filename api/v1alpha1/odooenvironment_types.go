@@ -4,6 +4,8 @@
 package v1alpha1
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -259,6 +261,10 @@ type EnvLifecycle struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="more than one web replica needs a filestore every pod can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database, which has no filestore to share: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.cron) || self.workload.cron.replicas == 0 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="a cron tier is a second pod writing the same filestore and needs one both tiers can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database: scheduled jobs that generate reports or attachments would otherwise write them where the web tier cannot read them, and a ReadWriteOnce claim only appears to work while both pods happen to land on the same node"
 type OdooEnvironmentSpec struct {
+	// Update says when the modules are brought in line with the code.
+	// +optional
+	Update *UpdateSpec `json:"update,omitempty"`
+
 	// Purpose is what this environment is FOR, and it is the field to fill in
 	// first.
 	//
@@ -432,6 +438,83 @@ type AddonRevision struct {
 	// being a moving target for this environment.
 	// +optional
 	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+}
+
+// ─────────────── Keeping the modules level with the code ───────────────
+//
+// An environment clones its addons when its pod starts, so a new commit reaches
+// the filesystem on the next restart. Nothing then tells Odoo about it: the
+// module records in the database still describe the old code, views are not
+// reloaded, and a new field has no column. The environment runs new code against
+// an old schema, which fails in ways that look like a bug in the change.
+//
+// odoo.sh solves this by asking people to bump the version in __manifest__.py,
+// and updates whatever they bumped. That works and it depends on somebody
+// remembering — and on remembering for every module a change touched, which is
+// exactly the sort of thing that is right nine times and wrong the tenth.
+//
+// click-odoo-update does it better: it hashes each addon's file content and
+// compares that with the hashes it stored in the database last time, so what
+// gets updated is what actually changed. Doblura already requires
+// click-odoo-contrib for restores. This uses what is already there.
+//
+// OnStart defaults by PURPOSE, and the default is the interesting part. A review
+// environment exists to look at a change and should absorb it without ceremony.
+// A production environment must not update its schema because a node was drained
+// at three in the morning and the pod happened to restart.
+
+// UpdateSpec says when modules are updated.
+type UpdateSpec struct {
+	// OnStart runs click-odoo-update before the server starts, every time the
+	// pod starts.
+	//
+	// Left unset it follows the purpose: on for Review and QA, off for Staging
+	// and Production. Set it explicitly and it is honoured — somebody running
+	// staging as a rolling rehearsal of production is not wrong.
+	//
+	// A pointer because false is a real answer that must survive the defaulting:
+	// with a plain bool an explicit "no" is indistinguishable from "unset" and
+	// would be overwritten by the purpose.
+	// +optional
+	OnStart *bool `json:"onStart,omitempty"`
+
+	// Modules restricts what is updated. Empty means "whatever changed", which
+	// is what click-odoo-update is for and what you want almost always.
+	// +optional
+	Modules []string `json:"modules,omitempty"`
+
+	// Timeout bounds the update. An update that hangs holds the pod in its init
+	// phase, and a review environment that never starts is harder to diagnose
+	// than one that starts and says the update failed.
+	// +kubebuilder:default="20m"
+	// +optional
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
+}
+
+// UpdatesOnStart reports whether this environment updates its modules as it
+// starts, resolving the purpose default when nothing was said.
+func (s *OdooEnvironmentSpec) UpdatesOnStart() bool {
+	if s.Update != nil && s.Update.OnStart != nil {
+		return *s.Update.OnStart
+	}
+	switch s.Purpose {
+	case PurposeReview, PurposeQA:
+		return true
+	case PurposeStaging, PurposeProduction:
+		return false
+	}
+	// No purpose at all: off. An environment that updates its own schema without
+	// anybody asking is a surprise, and surprises belong on the side somebody
+	// opted into.
+	return false
+}
+
+// UpdateTimeout is the bound, with its default.
+func (s *OdooEnvironmentSpec) UpdateTimeout() time.Duration {
+	if s.Update != nil && s.Update.Timeout != nil && s.Update.Timeout.Duration > 0 {
+		return s.Update.Timeout.Duration
+	}
+	return 20 * time.Minute
 }
 
 // EnvPurpose is what an environment is for.

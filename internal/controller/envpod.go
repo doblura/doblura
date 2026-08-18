@@ -199,6 +199,62 @@ func envInitContainers(env *doblurav1alpha1.OdooEnvironment, inits []corev1.Cont
 	return inits
 }
 
+// servingInitContainers is envInitContainers plus the module update, which only
+// the SERVING pod does.
+//
+// Not the phase Jobs: the init phase has just created the database and there is
+// nothing to bring level, and the migrate phase runs the same tool deliberately.
+// Running it in both would update twice and mean the phase that reports the
+// result is not the one that did the work.
+//
+// After the proxy, because the update talks to the database and the proxy is
+// what it talks through. Init containers run in order and a native sidecar is
+// ready before the ones after it start, so this ordering is the whole
+// dependency.
+func servingInitContainers(env *doblurav1alpha1.OdooEnvironment, inits []corev1.Container) []corev1.Container {
+	inits = envInitContainers(env, inits)
+	if env.Spec.UpdatesOnStart() {
+		inits = append(inits, updateContainer(env))
+	}
+	return inits
+}
+
+// updateContainer brings the modules level with the code that was just cloned.
+func updateContainer(env *doblurav1alpha1.OdooEnvironment) corev1.Container {
+	vols, mounts := envVolumes(env)
+	_ = vols
+
+	target := "" // whatever changed
+	if u := env.Spec.Update; u != nil && len(u.Modules) > 0 {
+		target = " --update " + strings.Join(u.Modules, ",")
+	}
+
+	// timeout, so an update that hangs fails the pod instead of leaving it in
+	// Init for ever — which reads as "the image is broken" and is not.
+	script := fmt.Sprintf(`
+if ! command -v click-odoo-update >/dev/null 2>&1; then
+  echo "!! spec.update.onStart is on and this image has no click-odoo-contrib." >&2
+  echo "!! Either install it (pip install click-odoo-contrib) or set" >&2
+  echo "!! spec.update.onStart to false and update deliberately instead." >&2
+  exit 1
+fi
+echo ">> bringing modules level with the code"
+timeout %d click-odoo-update -c %s -d "%s"%s
+echo ">> modules are level"
+`, int(env.Spec.UpdateTimeout().Seconds()), envConf, envDBName(env), target)
+
+	return corev1.Container{
+		Name:            "update",
+		Image:           env.Spec.Image,
+		Command:         []string{"/bin/sh", "-euc"},
+		Args:            []string{script},
+		Env:             envEnv(env),
+		VolumeMounts:    mounts,
+		SecurityContext: envSecurityContext(),
+		Resources:       sizeToResources(env.Spec.Size),
+	}
+}
+
 func envEnv(env *doblurav1alpha1.OdooEnvironment) []corev1.EnvVar {
 	vars := []corev1.EnvVar{
 		{Name: "PGHOST", Value: env.Spec.Database.ConnectHost()},
@@ -300,7 +356,7 @@ func envServingPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec 
 		ObjectMeta: metav1.ObjectMeta{Labels: envLabels(env, "odoo")},
 		Spec: corev1.PodSpec{
 			SecurityContext: envPodSecurityContext(env),
-			InitContainers:  envInitContainers(env, inits),
+			InitContainers:  servingInitContainers(env, inits),
 			Containers: []corev1.Container{{
 				Name:    "odoo",
 				Image:   env.Spec.Image,
@@ -351,7 +407,12 @@ func envCronPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec {
 		ObjectMeta: metav1.ObjectMeta{Labels: envTierLabels(env, "cron")},
 		Spec: corev1.PodSpec{
 			SecurityContext: envPodSecurityContext(env),
-			InitContainers:  envInitContainers(env, inits),
+			// envInitContainers and NOT servingInitContainers: the WEB tier runs
+			// the module update, and this one must not. Two pods running
+			// click-odoo-update against one database at the same time is the
+			// double execution the cron split exists to prevent, applied to the
+			// one operation that rewrites the schema.
+			InitContainers: envInitContainers(env, inits),
 			Containers: []corev1.Container{{
 				Name:    "odoo-cron",
 				Image:   env.Spec.Image,
