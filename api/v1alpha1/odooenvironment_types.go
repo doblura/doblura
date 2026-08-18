@@ -285,6 +285,12 @@ type OdooEnvironmentSpec struct {
 
 	Database DatabaseSpec `json:"database"`
 
+	// Workload splits the environment's processes. Absent means one deployment
+	// serving HTTP and running crons, which is right for a throwaway environment
+	// and wrong for a persistent one.
+	// +optional
+	Workload *WorkloadSplit `json:"workload,omitempty"`
+
 	// +kubebuilder:default=medium
 	// +optional
 	Size Size `json:"size,omitempty"`
@@ -416,4 +422,130 @@ func (s *OdooEnvironmentSpec) RequiredHardening() []string {
 		out = append(out, "ingress-auth", "no-index", "rate-limit")
 	}
 	return out
+}
+
+// ─────────────── Web, crons and jobs ───────────────
+//
+// One Odoo deployment serving HTTP *and* running crons is the default because it
+// is the simplest thing that works, and it stops working for three separate
+// reasons that people usually discover one at a time.
+//
+//  1. A heavy cron starves the web workers. Odoo's cron threads live in the same
+//     process pool as HTTP; a scheduler run that takes four minutes is four minutes
+//     of a worker not answering anybody.
+//  2. Scaling the web tier multiplies the cron tier. Every replica polls
+//     ir_cron on its own timer. Odoo takes a per-job advisory lock so the same job
+//     does not execute twice, but the polling, the connections and the wakeups all
+//     multiply, and the lock is the only thing between you and a job that was not
+//     written to be re-entrant.
+//  3. OCA's queue_job runrunner is NOT protected that way. It is a singleton by
+//     design, and running two is a supported way to process the same job twice.
+//
+// So the split is offered, and the guardrails that make it safe are in the API
+// rather than in a runbook.
+//
+// NOTE on neutralized environments, because it changes what this is for: Odoo's
+// own neutralize.sql sets `ir_cron.active = false` for every cron except
+// autovacuum_job. So in a neutralized copy — the default here — the crons are
+// already off in the DATA, and a cron deployment would poll and find nothing. The
+// separation matters for persistent staging, for the acknowledged non-neutralized
+// case, and for keeping a long cron off the web path. It is not a way to make an
+// anonymized environment safe: that job is already done.
+
+// WorkloadSplit says how an environment's processes are divided.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.cron) || !has(self.web) || self.web.replicas == 0 || self.cron.replicas <= 1",message="cron.replicas may be at most 1: every replica polls ir_cron independently, and the per-job advisory lock is the only thing preventing a job that was not written to be re-entrant from overlapping with itself"
+// +kubebuilder:validation:XValidation:rule="!has(self.queueJob) || self.queueJob.replicas <= 1",message="queueJob.replicas may be at most 1: OCA's queue_job runner is a singleton by design, and a second one is a supported way to process the same job twice"
+type WorkloadSplit struct {
+	// Web serves HTTP. When a cron section is present this tier runs with
+	// max_cron_threads = 0, so crons happen in exactly one place.
+	// +optional
+	Web *WebTier `json:"web,omitempty"`
+
+	// Cron runs ir.cron and nothing else.
+	//
+	// Absent means the historical behaviour: one deployment doing both. That is
+	// deliberately still the default, because it is right for an ephemeral
+	// environment somebody opens for twenty minutes.
+	// +optional
+	Cron *CronTier `json:"cron,omitempty"`
+
+	// QueueJob runs OCA's queue_job runner.
+	//
+	// Optional in the strong sense: queue_job is an OCA addon and most
+	// installations do not have it. Asking for this tier without the module on the
+	// addons path produces a pod that starts and does nothing, so the operator
+	// reports that rather than leaving it running.
+	// +optional
+	QueueJob *QueueJobTier `json:"queueJob,omitempty"`
+}
+
+type WebTier struct {
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=32
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Workers is Odoo's HTTP worker count.
+	//
+	// 0 means threaded mode, which is what you want for a small environment: the
+	// prefork pool costs memory per worker and buys nothing under one user.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=64
+	// +optional
+	Workers *int32 `json:"workers,omitempty"`
+}
+
+type CronTier struct {
+	// Replicas is 0 or 1. See the guardrail on WorkloadSplit.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Threads is max_cron_threads on the cron tier.
+	//
+	// More than one lets independent jobs run in parallel. It does not make a
+	// single slow job faster, and it is the setting people raise when the real
+	// problem is one job.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=8
+	// +kubebuilder:default=2
+	// +optional
+	Threads int32 `json:"threads,omitempty"`
+}
+
+type QueueJobTier struct {
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1
+	// +kubebuilder:default=1
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
+
+	// Channels is queue_job's channel configuration, e.g. "root:2,export:1".
+	// Passed through unread: it is queue_job's syntax, and validating somebody
+	// else's grammar here would only ever be wrong in a new version.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Channels string `json:"channels,omitempty"`
+}
+
+// SplitsCrons reports whether crons are handled by their own tier.
+//
+// When true the web tier must run with max_cron_threads = 0. Getting that wrong is
+// the whole failure this feature exists to prevent: the crons would run in BOTH
+// places, which looks like it is working right up until a job that assumed it was
+// alone runs twice.
+func (w *WorkloadSplit) SplitsCrons() bool {
+	return w != nil && w.Cron != nil && w.Cron.Replicas > 0
+}
+
+// CronThreadsForWeb is what max_cron_threads must be on the HTTP tier.
+func (w *WorkloadSplit) CronThreadsForWeb() int32 {
+	if w.SplitsCrons() {
+		return 0
+	}
+	return 1
 }

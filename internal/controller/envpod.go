@@ -62,8 +62,17 @@ func envOdooConf(env *doblurav1alpha1.OdooEnvironment) string {
 	// the manager is a way to create and drop databases from a web form.
 	b.WriteString("list_db = False\n")
 	b.WriteString("proxy_mode = True\n")
-	b.WriteString("workers = 2\n")
-	b.WriteString("max_cron_threads = 1\n")
+	// workers and max_cron_threads used to be hardcoded at 2 and 1, which meant
+	// every replica of every environment ran a cron thread. Now they follow the
+	// workload split, and the value that matters is the ZERO: with a cron tier
+	// present the web tier must not run crons, or they run in both places.
+	w := env.Spec.Workload
+	workers := int32(2)
+	if w != nil && w.Web != nil && w.Web.Workers != nil {
+		workers = *w.Web.Workers
+	}
+	b.WriteString(fmt.Sprintf("workers = %d\n", workers))
+	b.WriteString(fmt.Sprintf("max_cron_threads = %d\n", w.CronThreadsForWeb()))
 	return b.String()
 }
 

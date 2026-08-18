@@ -666,6 +666,97 @@ spec:
                   SourceDatabase is the OdooDatabase the snapshot came from, used by the
                   handover check to find out who else is inside it.
                 type: string
+              workload:
+                description: |-
+                  Workload splits the environment's processes. Absent means one deployment
+                  serving HTTP and running crons, which is right for a throwaway environment
+                  and wrong for a persistent one.
+                properties:
+                  cron:
+                    description: |-
+                      Cron runs ir.cron and nothing else.
+
+                      Absent means the historical behaviour: one deployment doing both. That is
+                      deliberately still the default, because it is right for an ephemeral
+                      environment somebody opens for twenty minutes.
+                    properties:
+                      replicas:
+                        default: 1
+                        description: Replicas is 0 or 1. See the guardrail on WorkloadSplit.
+                        format: int32
+                        maximum: 1
+                        minimum: 0
+                        type: integer
+                      threads:
+                        default: 2
+                        description: |-
+                          Threads is max_cron_threads on the cron tier.
+
+                          More than one lets independent jobs run in parallel. It does not make a
+                          single slow job faster, and it is the setting people raise when the real
+                          problem is one job.
+                        format: int32
+                        maximum: 8
+                        minimum: 1
+                        type: integer
+                    type: object
+                  queueJob:
+                    description: |-
+                      QueueJob runs OCA's queue_job runner.
+
+                      Optional in the strong sense: queue_job is an OCA addon and most
+                      installations do not have it. Asking for this tier without the module on the
+                      addons path produces a pod that starts and does nothing, so the operator
+                      reports that rather than leaving it running.
+                    properties:
+                      channels:
+                        description: |-
+                          Channels is queue_job's channel configuration, e.g. "root:2,export:1".
+                          Passed through unread: it is queue_job's syntax, and validating somebody
+                          else's grammar here would only ever be wrong in a new version.
+                        maxLength: 512
+                        type: string
+                      replicas:
+                        default: 1
+                        format: int32
+                        maximum: 1
+                        minimum: 0
+                        type: integer
+                    type: object
+                  web:
+                    description: |-
+                      Web serves HTTP. When a cron section is present this tier runs with
+                      max_cron_threads = 0, so crons happen in exactly one place.
+                    properties:
+                      replicas:
+                        default: 1
+                        format: int32
+                        maximum: 32
+                        minimum: 0
+                        type: integer
+                      workers:
+                        description: |-
+                          Workers is Odoo's HTTP worker count.
+
+                          0 means threaded mode, which is what you want for a small environment: the
+                          prefork pool costs memory per worker and buys nothing under one user.
+                        format: int32
+                        maximum: 64
+                        minimum: 0
+                        type: integer
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: 'cron.replicas may be at most 1: every replica polls ir_cron
+                    independently, and the per-job advisory lock is the only thing
+                    preventing a job that was not written to be re-entrant from overlapping
+                    with itself'
+                  rule: '!has(self.cron) || !has(self.web) || self.web.replicas ==
+                    0 || self.cron.replicas <= 1'
+                - message: 'queueJob.replicas may be at most 1: OCA''s queue_job runner
+                    is a singleton by design, and a second one is a supported way
+                    to process the same job twice'
+                  rule: '!has(self.queueJob) || self.queueJob.replicas <= 1'
             required:
             - data
             - database
