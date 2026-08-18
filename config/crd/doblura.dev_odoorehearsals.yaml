@@ -222,15 +222,8 @@ spec:
                   declared: if it fails, the rehearsal fails. This is about what comes after.
                 properties:
                   custom:
-                    description: |-
-                      Custom runs your own container against the migrated database. It gets
-                      the connection through environment variables (PGHOST, PGDATABASE, ...)
-                      and the composed odoo.conf under /etc/doblura. Exit code 0 means pass.
-
-                      This is a minimal struct and deliberately not a corev1.PodSpec:
-                      embedding the full PodSpec pushed the CRD past the 262 KB annotation
-                      limit and `kubectl apply` rejected it. It also exposes intent instead of
-                      configuration, which is what a CRD should do.
+                    description: CustomAssertion is a container that decides whether
+                      the rehearsal passes.
                     properties:
                       args:
                         items:
@@ -278,6 +271,52 @@ spec:
                       - model
                       type: object
                     type: array
+                  modules:
+                    description: |-
+                      Custom runs your own container against the migrated database. It gets
+                      the connection through environment variables (PGHOST, PGDATABASE, ...)
+                      and the composed odoo.conf under /etc/doblura. Exit code 0 means pass.
+
+                      This is a minimal struct and deliberately not a corev1.PodSpec:
+                      embedding the full PodSpec pushed the CRD past the 262 KB annotation
+                      limit and `kubectl apply` rejected it. It also exposes intent instead of
+                      configuration, which is what a CRD should do.
+                      Modules checks WHICH modules the rehearsal actually exercised.
+
+                      The README already warns that if the rehearsal's addons PATH is not
+                      production's, you are rehearsing a different migration. The installed SET is
+                      the other half of that sentence and the one nothing checked: OpenUpgrade runs
+                      a module's migration scripts only if that module is installed, so a rehearsal
+                      against a database missing a module silently never exercises its migration —
+                      and passes.
+                    properties:
+                      installed:
+                        description: |-
+                          Installed lists modules that must be installed in the restored copy.
+
+                          Name them for the modules whose migration you actually care about — the ones
+                          with data to transform. A rehearsal that passes without `account` installed
+                          has told you nothing about the part that takes 96% of the time.
+                        items:
+                          type: string
+                        maxItems: 256
+                        type: array
+                      minCount:
+                        description: |-
+                          MinCount is the smallest acceptable number of installed modules.
+
+                          A blunt instrument on purpose. It catches the failure that matters — a
+                          snapshot restored into a database that came up with a fraction of the
+                          modules — without anybody having to enumerate four hundred names.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                    x-kubernetes-validations:
+                    - message: a modules assertion needs installed, minCount, or both;
+                        an empty one would pass unconditionally, which is worse than
+                        not declaring it
+                      rule: has(self.installed) || has(self.minCount)
                 type: object
               budget:
                 description: |-

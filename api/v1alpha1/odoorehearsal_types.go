@@ -96,8 +96,47 @@ type Assertions struct {
 	// embedding the full PodSpec pushed the CRD past the 262 KB annotation
 	// limit and `kubectl apply` rejected it. It also exposes intent instead of
 	// configuration, which is what a CRD should do.
+	// Modules checks WHICH modules the rehearsal actually exercised.
+	//
+	// The README already warns that if the rehearsal's addons PATH is not
+	// production's, you are rehearsing a different migration. The installed SET is
+	// the other half of that sentence and the one nothing checked: OpenUpgrade runs
+	// a module's migration scripts only if that module is installed, so a rehearsal
+	// against a database missing a module silently never exercises its migration —
+	// and passes.
+	// +optional
+	Modules *ModuleAssertion `json:"modules,omitempty"`
+
 	// +optional
 	Custom *CustomAssertion `json:"custom,omitempty"`
+}
+
+// ModuleAssertion checks the installed module set.
+//
+// Declared rather than discovered, and that is a limitation worth naming: the
+// operator cannot read production's module set, because nothing observes an
+// OdooDatabase yet. So this is you writing down what the rehearsal is supposed to
+// cover, and the rehearsal refusing to pass quietly when it does not.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.installed) || has(self.minCount)",message="a modules assertion needs installed, minCount, or both; an empty one would pass unconditionally, which is worse than not declaring it"
+type ModuleAssertion struct {
+	// Installed lists modules that must be installed in the restored copy.
+	//
+	// Name them for the modules whose migration you actually care about — the ones
+	// with data to transform. A rehearsal that passes without `account` installed
+	// has told you nothing about the part that takes 96% of the time.
+	// +kubebuilder:validation:MaxItems=256
+	// +optional
+	Installed []string `json:"installed,omitempty"`
+
+	// MinCount is the smallest acceptable number of installed modules.
+	//
+	// A blunt instrument on purpose. It catches the failure that matters — a
+	// snapshot restored into a database that came up with a fraction of the
+	// modules — without anybody having to enumerate four hundred names.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MinCount *int32 `json:"minCount,omitempty"`
 }
 
 // CustomAssertion is a container that decides whether the rehearsal passes.

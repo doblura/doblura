@@ -134,6 +134,16 @@ spec:
   displayName: Guardrail
 '
 
+echo "-- the module set the rehearsal actually exercised --"
+check "modules: an empty assertion"    "$REH$VOL
+  assertions: {modules: {}}" rejected
+check "modules: a list"                "$REH$VOL
+  assertions: {modules: {installed: [account, stock]}}" ok
+check "modules: a minimum"             "$REH$VOL
+  assertions: {modules: {minCount: 100}}" ok
+check "modules: a minimum of zero"     "$REH$VOL
+  assertions: {modules: {minCount: 0}}" rejected
+
 echo "-- the filestore, which is state outside the database --"
 # The first two expect OK. They are what proves the has() guards are present: a
 # rule that errors on an absent lifecycle rejects every environment, and that is

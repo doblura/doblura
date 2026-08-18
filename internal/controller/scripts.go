@@ -105,11 +105,36 @@ echo ">> migration finished"`, st.DatabaseName, cmd)
 }
 
 func assertScript(reh *doblurav1alpha1.OdooRehearsal, st *doblurav1alpha1.OdooRehearsalStatus) string {
-	if len(reh.Spec.Assertions.ModelCounts) == 0 {
+	if len(reh.Spec.Assertions.ModelCounts) == 0 && reh.Spec.Assertions.Modules == nil {
 		return `echo ">> no assertions declared"`
 	}
 	var py strings.Builder
 	py.WriteString("failed = []\n")
+
+	// Which modules the rehearsal actually exercised.
+	//
+	// Checked BEFORE the model counts and printed either way, because when it
+	// fails the counts are meaningless: a database missing `account` will happily
+	// report zero account.move rows and satisfy nothing you meant to ask.
+	if m := reh.Spec.Assertions.Modules; m != nil {
+		py.WriteString("installed = set(env['ir.module.module'].sudo()" +
+			".search([('state','=','installed')]).mapped('name'))\n")
+		py.WriteString("print('installed modules: %d' % len(installed))\n")
+		if m.MinCount != nil {
+			py.WriteString(fmt.Sprintf(
+				"if len(installed) < %d:\n"+
+					"    failed.append('only %%d modules installed, expected at least %d' %% len(installed))\n",
+				*m.MinCount, *m.MinCount))
+		}
+		if len(m.Installed) > 0 {
+			py.WriteString(fmt.Sprintf("want = %s\n", pyList(m.Installed)))
+			// The missing ones are named. "module assertion failed" would send
+			// somebody to compare two lists of four hundred by hand.
+			py.WriteString("missing = sorted(set(want) - installed)\n")
+			py.WriteString("if missing:\n" +
+				"    failed.append('not installed, so their migrations never ran: ' + ', '.join(missing))\n")
+		}
+	}
 	for _, a := range reh.Spec.Assertions.ModelCounts {
 		py.WriteString(fmt.Sprintf(
 			"n = env['%s'].search_count([])\n"+
@@ -118,7 +143,7 @@ func assertScript(reh *doblurav1alpha1.OdooRehearsal, st *doblurav1alpha1.OdooRe
 			a.Model, a.Model, a.MinCount, a.Model, a.MinCount))
 	}
 	py.WriteString("env.cr.rollback()\n")
-	py.WriteString("if failed:\n    raise SystemExit('aserciones fallidas: ' + '; '.join(failed))\n")
+	py.WriteString("if failed:\n    raise SystemExit('assertions failed: ' + '; '.join(failed))\n")
 
 	// The script goes to a file and click-odoo gets the path.
 	//
@@ -131,4 +156,18 @@ cat > /tmp/doblura-assert.py <<'PYSCRIPT'
 %s
 PYSCRIPT
 click-odoo -c %s -d "%s" /tmp/doblura-assert.py`, py.String(), confPath, st.DatabaseName)
+}
+
+// pyList renders a Go string slice as a Python list literal.
+//
+// Quoted with repr-safe escaping rather than %q: Go's %q emits Go escapes, and the
+// two languages disagree on enough of them that a module name with an odd
+// character would produce a script that fails to parse rather than an assertion
+// that fails.
+func pyList(v []string) string {
+	parts := make([]string, 0, len(v))
+	for _, s := range v {
+		parts = append(parts, "'"+strings.ReplaceAll(s, "'", "\\'")+"'")
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }

@@ -562,3 +562,69 @@ func TestAdvanceReportsThePreviousPhase(t *testing.T) {
 		t.Error("Asserting must not be terminal")
 	}
 }
+
+// ─────────────── the module set ───────────────
+
+func TestModuleAssertionIsCheckedBeforeTheCounts(t *testing.T) {
+	// Ordering is the point: a database missing `account` reports zero
+	// account.move rows and satisfies nothing you meant to ask, so the module
+	// check has to fail first or the output misleads.
+	min := int32(100)
+	reh := &doblurav1alpha1.OdooRehearsal{
+		Spec: doblurav1alpha1.OdooRehearsalSpec{
+			Assertions: doblurav1alpha1.Assertions{
+				Modules: &doblurav1alpha1.ModuleAssertion{
+					Installed: []string{"account", "stock"},
+					MinCount:  &min,
+				},
+				ModelCounts: []doblurav1alpha1.ModelCountAssertion{
+					{Model: "account.move", MinCount: 1000},
+				},
+			},
+		},
+	}
+	st := &doblurav1alpha1.OdooRehearsalStatus{DatabaseName: "d"}
+	got := assertScript(reh, st)
+
+	iMod := strings.Index(got, "ir.module.module")
+	iCnt := strings.Index(got, "account.move")
+	if iMod < 0 {
+		t.Fatalf("no module check emitted:\n%s", got)
+	}
+	if iCnt >= 0 && iMod > iCnt {
+		t.Error("the module check must come before the model counts")
+	}
+	// The missing ones are named, or somebody compares two lists of 400 by hand.
+	if !strings.Contains(got, "missing") || !strings.Contains(got, "never ran") {
+		t.Errorf("the failure must name which modules are missing:\n%s", got)
+	}
+	if !strings.Contains(got, "'account', 'stock'") {
+		t.Errorf("the expected list must reach the script:\n%s", got)
+	}
+	if !strings.Contains(got, "at least 100") {
+		t.Errorf("minCount must reach the script:\n%s", got)
+	}
+}
+
+func TestModuleAssertionAloneStillProducesAScript(t *testing.T) {
+	// Regression: the early return used to key on ModelCounts only, so a rehearsal
+	// declaring ONLY a module assertion silently checked nothing.
+	reh := &doblurav1alpha1.OdooRehearsal{
+		Spec: doblurav1alpha1.OdooRehearsalSpec{
+			Assertions: doblurav1alpha1.Assertions{
+				Modules: &doblurav1alpha1.ModuleAssertion{Installed: []string{"account"}},
+			},
+		},
+	}
+	got := assertScript(reh, &doblurav1alpha1.OdooRehearsalStatus{DatabaseName: "d"})
+	if strings.Contains(got, "no assertions declared") {
+		t.Fatalf("a modules-only assertion was skipped entirely:\n%s", got)
+	}
+}
+
+func TestNoAssertionsStillMeansNoAssertions(t *testing.T) {
+	reh := &doblurav1alpha1.OdooRehearsal{}
+	if got := assertScript(reh, &doblurav1alpha1.OdooRehearsalStatus{}); !strings.Contains(got, "no assertions declared") {
+		t.Errorf("got %q", got)
+	}
+}
