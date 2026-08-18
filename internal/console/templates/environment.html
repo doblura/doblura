@@ -1,41 +1,84 @@
 {{define "environment.html"}}{{template "top" .}}
-{{$e := .Data.Env}}{{$perms := .Perms}}
+{{$e := .Data.Env}}{{$perms := .Perms}}{{$adv := .Advanced}}{{$h := .Data.Health}}
+<p class="crumbs"><a href="/">Customers</a> ›
+  <a href="/c/{{$e.Namespace}}/{{$e.Spec.ForTenant}}">{{$e.Spec.ForTenant}}</a> › {{$e.Name}}</p>
 <h1>{{$e.Name}}</h1>
-<p class="lede">{{$e.Namespace}} · for {{$e.Spec.ForTenant}}</p>
 
+{{/* The answer first. Somebody arrived here with one question. */}}
+<div class="answer {{$h.State}}">
+  <span class="icon">{{icon $h.State}}</span>
+  <div>
+    <p class="big">{{stateWord $h.State}}</p>
+    <p>{{$h.Detail}}</p>
+    {{if .Data.Expiry}}<p>{{.Data.Expiry}}</p>{{end}}
+  </div>
+</div>
+
+{{if .Data.Load}}
+<div class="answer {{.Data.LoadState}}">
+  <span class="icon">{{icon .Data.LoadState}}</span>
+  <div>
+    <p class="big">{{.Data.Load}}</p>
+    <p>{{.Data.LoadDetail}}</p>
+  </div>
+</div>
+{{end}}
+
+<div class="grid-2" style="margin-top:22px">
 <div class="panel pad">
 <dl class="kv">
-  <dt>Phase</dt><dd>{{template "phase" (printf "%s" $e.Status.Phase)}}</dd>
-  <dt>Data</dt><dd>{{$e.Spec.Data.Type}}</dd>
-  <dt>Lifecycle</dt><dd>{{$e.Spec.Lifecycle.Type}}</dd>
-  <dt>Image</dt><dd>{{$e.Spec.Image}}</dd>
-  <dt>Filestore</dt><dd>{{if $e.Spec.Storage.Filestore}}{{$e.Spec.Storage.Filestore.Mode}}{{else}}<span class="muted">default</span>{{end}}</dd>
-  <dt>URL</dt><dd>{{if $e.Status.URL}}<a href="{{$e.Status.URL}}">{{$e.Status.URL}}</a>{{else}}<span class="muted">not exposed</span>{{end}}</dd>
-  <dt>Ready</dt><dd>{{since $e.Status.ReadyAt}}{{if $e.Status.ReadyAt}} ago{{end}}</dd>
-  {{if $e.Status.Message}}<dt>Message</dt><dd>{{$e.Status.Message}}</dd>{{end}}
+  <dt>What it is</dt><dd>{{$e.Spec.Data.Type}} data, {{$e.Spec.Lifecycle.Type | lower}}</dd>
+  <dt>Version</dt><dd>{{if $e.Spec.ImageRef}}{{$e.Spec.ImageRef}}{{else}}<span class="muted">set directly</span>{{end}}</dd>
+  <dt>Address</dt><dd>{{if $e.Status.URL}}<a href="{{$e.Status.URL}}">{{$e.Status.URL}}</a>{{else}}<span class="muted">not published on the internet</span>{{end}}</dd>
+  <dt>Ready since</dt><dd>{{if $e.Status.ReadyAt}}{{since $e.Status.ReadyAt}} ago{{else}}<span class="muted">not yet</span>{{end}}</dd>
 </dl>
 </div>
 
-<h2>Conditions</h2>
-<div class="panel"><table>
-  <thead><tr><th>Condition</th><th>Status</th><th>Reason</th><th>Message</th><th>Changed</th></tr></thead>
-  <tbody>
-  {{range .Data.Keys}}
-    <tr><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.Reason}}</td>
-        <td class="muted">{{.Message}}</td><td class="muted">{{.Age}} ago</td></tr>
-  {{else}}
-    <tr><td class="muted" colspan="5">The operator has recorded no conditions yet.</td></tr>
-  {{end}}
-  </tbody>
-</table></div>
+{{if .Data.Map}}<div class="panel pad">{{.Data.Map}}</div>{{end}}
+</div>
+
+{{/* The technical detail is always reachable, but folded away at the simple
+     level: the person who needs it knows to open it, and the person who does
+     not is never shown a wall of conditions. */}}
+<details class="more"{{if $adv}} open{{end}}>
+  <summary>Technical detail</summary>
+  <div class="body">
+    <dl class="kv">
+      <dt>Namespace</dt><dd>{{$e.Namespace}}</dd>
+      <dt>Phase</dt><dd>{{$e.Status.Phase}}</dd>
+      <dt>Image</dt><dd class="small">{{$e.Spec.Image}}</dd>
+      <dt>Database</dt><dd>{{$e.Spec.Database.Host}}:{{$e.Spec.Database.ConnectPort}}
+        {{if $e.Spec.Database.ProxyEnabled}}<span class="muted"> · through a pooler; this pod holds no password</span>{{end}}</dd>
+      <dt>File storage</dt><dd>{{if $e.Spec.Storage}}{{if $e.Spec.Storage.Filestore}}{{$e.Spec.Storage.Filestore.Mode}}{{else}}default{{end}}{{else}}default{{end}}</dd>
+      <dt>Web copies</dt><dd>{{.Data.WebReplicas}}</dd>
+      <dt>Scheduled jobs</dt><dd>{{.Data.CronSummary}}</dd>
+      <dt>Rate limit</dt><dd>{{if $e.Spec.Exposure.RateLimitRPS}}{{$e.Spec.Exposure.RateLimitRPS}} requests/second{{else}}<span class="muted">none</span>{{end}}</dd>
+      <dt>Sign-in wall</dt><dd>{{if $e.Spec.IsPublic}}{{$e.Spec.Exposure.Auth.Type}}{{else}}not public{{end}}</dd>
+      {{if $e.Status.Message}}<dt>Message</dt><dd>{{$e.Status.Message}}</dd>{{end}}
+    </dl>
+
+    <h2>Conditions</h2>
+    <div class="panel"><table>
+      <thead><tr><th>Condition</th><th>Status</th><th>Reason</th><th>Message</th><th>Changed</th></tr></thead>
+      <tbody>
+      {{range .Data.Keys}}
+        <tr><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.Reason}}</td>
+            <td class="muted">{{.Message}}</td><td class="muted">{{.Age}} ago</td></tr>
+      {{else}}
+        <tr><td class="muted" colspan="5">The operator has recorded no conditions yet.</td></tr>
+      {{end}}
+      </tbody>
+    </table></div>
+  </div>
+</details>
 
 <div class="actions">
 {{if can $perms (printf "delete:odooenvironments:%s" $e.Name)}}
   <form method="post" action="/e/{{$e.Namespace}}/{{$e.Name}}/delete">
-    <button class="danger" type="submit">Delete environment</button>
+    <button class="danger" type="submit">Delete this environment</button>
   </form>
 {{else}}
-  <span class="denied">Deleting is not permitted for your groups.</span>
+  <span class="denied">{{icon "locked"}} Deleting is not permitted for your groups.</span>
 {{end}}
 </div>
 {{template "bottom" .}}{{end}}

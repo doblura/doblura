@@ -1,33 +1,33 @@
 {{define "customers.html"}}{{template "top" .}}
 <h1>Customers</h1>
-<p class="lede">Every persona lands here. What each of you can do to a customer
+<p class="lede">Everyone lands here. What each of you can do to a customer
 differs; the list does not.</p>
 
 {{if .Data}}
 <div class="panel"><table>
   <thead><tr>
-    <th>Customer</th><th>Namespace</th><th>Odoo</th><th>Release</th>
-    <th class="num">Environments</th><th class="num">Ready</th><th class="num">Databases</th>
+    <th>Customer</th><th>Running</th><th>Odoo</th>
+    {{if .Advanced}}<th>Namespace</th><th>Release</th><th class="num">Databases</th>{{end}}
   </tr></thead>
   <tbody>
   {{range .Data}}
     <tr>
       <td><a href="/c/{{.Tenant.Namespace}}/{{.Tenant.Name}}">{{.Tenant.Spec.DisplayName}}</a></td>
-      <td class="muted">{{.Tenant.Namespace}}</td>
-      <td>{{if .Tenant.Spec.OdooVersion}}{{.Tenant.Spec.OdooVersion}}{{else}}<span class="muted">—</span>{{end}}</td>
-      <td>{{if .Tenant.Spec.ProductRelease}}{{.Tenant.Spec.ProductRelease}}{{else}}<span class="muted">—</span>{{end}}</td>
-      <td class="num">{{.Environments}}</td>
-      <td class="num">{{.Ready}}</td>
-      <td class="num">{{.Tenant.Status.Databases}}</td>
+      <td>{{.Ready}} of {{.Environments}} environment{{if ne .Environments 1}}s{{end}} up</td>
+      <td>{{if .Version}}{{.Version}}{{else}}<span class="muted">not set</span>{{end}}</td>
+      {{if $.Advanced}}
+        <td class="muted">{{.Tenant.Namespace}}</td>
+        <td>{{if .Tenant.Spec.ProductRelease}}{{.Tenant.Spec.ProductRelease}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="num">{{.Tenant.Status.Databases}}</td>
+      {{end}}
     </tr>
   {{end}}
   </tbody>
 </table></div>
 {{else}}
 <div class="panel"><table><tbody><tr><td class="muted">
-No customers are visible to you. That is either because none exist yet, or
-because your groups do not grant read access in any namespace —
-<a href="/me">your access</a> says which.
+No customers are visible to you. Either none exist yet, or your groups grant no
+read access in any namespace — <a href="/me">your access</a> says which.
 </td></tr></tbody></table></div>
 {{end}}
 {{template "bottom" .}}{{end}}

@@ -18,6 +18,18 @@ doing it this way:
 Bind these to your OIDC groups. They are ClusterRoles so you can bind them
 cluster-wide OR per namespace with a RoleBinding, which is how you scope a
 consultant to one customer's namespace.
+
+VIEWER IS THE FLOOR, and binding it to everyone who authenticates is part of the
+intended installation, not an optional extra:
+
+  kubectl create clusterrolebinding doblura-viewer-all \
+    --clusterrole=doblura-viewer --group=system:authenticated
+
+RBAC is additive, so support and QA then ADD to it rather than restating it.
+Skipping this leaves support able to create environments and unable to see
+whether any of them is running, because the read that answers "is it up" lives
+here — and the console, honestly, reports that as "cannot tell" rather than
+inventing a status.
 */}}
 ---
 {{/*
@@ -49,6 +61,32 @@ metadata:
 rules:
   - apiGroups: [doblura.dev]
     resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots]
+    verbs: [get, list, watch]
+  # Deployments, read-only, and nothing else from apps/.
+  #
+  # Because "is it up" is not a question the CRDs answer. An environment's phase
+  # is Ready once the operator has finished building it, and it stays Ready while
+  # the pod is crash-looping. Only the workload knows how many replicas are
+  # actually answering.
+  #
+  # Without this the console reported every healthy environment as Down to
+  # precisely the people it exists for — the read failed, and a failed read is
+  # not an outage. It reads a replica count and carries no customer data, which
+  # is why it is here and pods/log is not.
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch]
+  # Pod metrics, when metrics-server is installed: the answer to "is it slow",
+  # which is the other half of what somebody fielding a complaint needs. Also
+  # just numbers.
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods]
+    verbs: [get, list]
+  # Pods themselves, but ONLY the object: their names and phases. Reading a pod
+  # is not reading its logs, and logs are where the live customer data is — that
+  # still starts at support.
+  - apiGroups: [""]
+    resources: [pods]
     verbs: [get, list, watch]
 ---
 {{/*

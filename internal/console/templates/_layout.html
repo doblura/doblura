@@ -10,6 +10,10 @@ request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}}
 <header class="bar"><div class="bar-in">
   <span class="brand">dob<span>l</span>ura</span>
   <nav><a href="/">Customers</a><a href="/me">Your access</a></nav>
+  <span class="levels" role="group" aria-label="How much detail to show">
+    <a href="/detail?to=plain&amp;back={{.Path}}" {{if not .Advanced}}class="on" aria-current="true"{{end}}>Simple</a>
+    <a href="/detail?to=advanced&amp;back={{.Path}}" {{if .Advanced}}class="on" aria-current="true"{{end}}>Technical</a>
+  </span>
   <span class="who">{{if .Identity.Name}}{{.Identity.Name}}{{else}}{{.Identity.User}}{{end}}
     · <a href="/auth/logout">sign out</a></span>
 </div></header>
@@ -22,4 +26,5 @@ performed as you, and Kubernetes RBAC decides.</footer>
 </main></body></html>
 {{end}}
 
-{{define "phase"}}<span class="phase {{if eq . "Ready"}}ready{{else if eq . "Failed"}}failed{{else if eq . "Expired"}}{{else if eq . "Hibernated"}}{{else}}working{{end}}">{{if .}}{{.}}{{else}}—{{end}}</span>{{end}}
+{{/* A state, carried by colour, by shape and by the word — never by colour alone. */}}
+{{define "state"}}<span class="state state-{{.}}">{{icon .}}{{stateWord .}}</span>{{end}}

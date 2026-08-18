@@ -50,7 +50,7 @@ type graph struct {
 // (customer, then environments, then what each one is made of), so a layered
 // drawing is not a simplification of the truth but a picture of it.
 const (
-	colW   = 230
+	colW   = 254
 	rowH   = 92
 	boxW   = 196
 	boxH   = 58
@@ -115,9 +115,16 @@ func (g *graph) render() template.HTML {
 		mid := x1 + colGap/2
 		fmt.Fprintf(&b, `<path class="edge" d="M%d,%d H%d V%d H%d" marker-end="url(#mapArrow)"/>`,
 			x1, y1, mid, y2, x2-6)
-		if e.Label != "" {
-			fmt.Fprintf(&b, `<text class="edge-label" x="%d" y="%d" text-anchor="middle">%s</text>`,
-				mid, min(y1, y2)+abs(y2-y1)/2-6, html.EscapeString(e.Label))
+		// The label rides the VERTICAL segment, rotated, rather than sitting at
+		// the midpoint. At the midpoint it landed on top of whichever box the
+		// line was passing, which made the map harder to read than no labels at
+		// all. Skipped entirely when the segment is too short to hold text.
+		if e.Label != "" && abs(y2-y1) > 34 {
+			cy := min(y1, y2) + abs(y2-y1)/2
+			fmt.Fprintf(&b,
+				`<text class="edge-label" x="%d" y="%d" text-anchor="middle" `+
+					`transform="rotate(-90 %d %d)">%s</text>`,
+				mid, cy, mid, cy, html.EscapeString(e.Label))
 		}
 	}
 

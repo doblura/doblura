@@ -6,6 +6,7 @@ package console
 import (
 	"context"
 	"embed"
+	"fmt"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -75,6 +76,15 @@ func New(cfg *rest.Config, scheme *runtime.Scheme, opt Options) (*Server, error)
 	funcs := template.FuncMap{
 		"since": func(t *metaTime) string { return humanSince(t) },
 		"join":  strings.Join,
+		// Takes any, not a string: the API's enums are named types, and
+		// strings.ToLower on one is a template error at render time rather
+		// than a compile error anywhere.
+		"lower": func(v any) string { return strings.ToLower(fmt.Sprint(v)) },
+		"icon":  icon,
+		// stateWord is what the colour and the icon say in words. Every state in
+		// this interface carries all three, so none of them is load-bearing
+		// alone.
+		"stateWord": stateWord,
 		"can": func(perms map[string]bool, key string) bool {
 			return perms[key]
 		},
@@ -162,6 +172,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /e/{ns}/{name}/delete", s.authenticated(s.handleDeleteEnvironment))
 	mux.HandleFunc("POST /c/{ns}/{name}/environments", s.authenticated(s.handleCreateEnvironment))
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
+	mux.HandleFunc("GET /detail", s.authenticated(s.handleDetail))
 
 	return withSecurityHeaders(mux)
 }

@@ -86,7 +86,15 @@ type health struct {
 	Since string
 }
 
-func environmentHealth(env *doblurav1alpha1.OdooEnvironment, replicas, ready int32) health {
+// environmentHealth turns an environment and its workload into an answer.
+//
+// The `known` flag is the important parameter and it was not here at first. The
+// workload read is done as the person, and a persona without access to
+// Deployments gets an error the caller was ignoring — so every healthy
+// environment was reported as Down, to exactly the people this view exists for.
+// "I cannot see" and "it is not running" are different answers and the second
+// one starts a false incident.
+func environmentHealth(env *doblurav1alpha1.OdooEnvironment, replicas, ready int32, known bool) health {
 	h := health{Since: humanSince(env.Status.ReadyAt)}
 
 	switch {
@@ -107,6 +115,13 @@ func environmentHealth(env *doblurav1alpha1.OdooEnvironment, replicas, ready int
 		return h
 	}
 
+	if !known {
+		h.State = "unknown"
+		h.Detail = "Prepared and finished. Whether it is answering right now cannot be " +
+			"read with your access — that needs permission to see the workload."
+		return h
+	}
+
 	switch {
 	case replicas == 0:
 		h.State, h.Detail = "down", "It is ready, but nothing is running it."
@@ -124,6 +139,14 @@ func environmentHealth(env *doblurav1alpha1.OdooEnvironment, replicas, ready int
 
 // hibernationHint explains the one state that generates the most confused tickets.
 func hibernationHint(env *doblurav1alpha1.OdooEnvironment) string {
+	// The TYPE, not the presence of a ttl. spec.lifecycle.ttl carries a schema
+	// default, so it is never nil — testing it told every persistent staging
+	// environment that it would delete itself in three days, in the calmest
+	// possible language, on the page a non-technical person reads. Third time
+	// this default has caught something in this project.
+	if env.Spec.Lifecycle.Type != doblurav1alpha1.LifecycleEphemeral {
+		return ""
+	}
 	if env.Spec.Lifecycle.TTL == nil {
 		return ""
 	}
@@ -141,12 +164,21 @@ func hibernationHint(env *doblurav1alpha1.OdooEnvironment) string {
 func shortDuration(d time.Duration) string {
 	switch {
 	case d < time.Hour:
-		return itoa(int(d.Minutes())) + " minutes"
+		return plural(int(d.Minutes()), "minute")
 	case d < 48*time.Hour:
-		return itoa(int(d.Hours())) + " hours"
+		return plural(int(d.Hours()), "hour")
 	default:
-		return itoa(int(d.Hours()/24)) + " days"
+		return plural(int(d.Hours()/24), "day")
 	}
+}
+
+// plural, because "in 1 hours" is the kind of detail that makes a person trust
+// the rest of the page a little less.
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return itoa(n) + " " + unit + "s"
 }
 
 func itoa(i int) string {

@@ -1,10 +1,11 @@
 {{define "customer.html"}}{{template "top" .}}
-{{$ns := .Data.Tenant.Namespace}}{{$perms := .Perms}}
+{{$ns := .Data.Tenant.Namespace}}{{$perms := .Perms}}{{$adv := .Advanced}}
+<p class="crumbs"><a href="/">Customers</a> › {{.Data.Tenant.Spec.DisplayName}}</p>
 <h1>{{.Data.Tenant.Spec.DisplayName}}</h1>
-<p class="lede">{{.Data.Tenant.Namespace}}/{{.Data.Tenant.Name}}</p>
+{{if $adv}}<p class="lede">{{$ns}}/{{.Data.Tenant.Name}}</p>{{end}}
 
 <div class="meter">
-  <span>Ephemeral quota</span>
+  <span>Throwaway environments</span>
   <progress class="meter-bar{{if ge .Data.Open .Data.Quota}} full{{end}}"
             value="{{.Data.Open}}" max="{{.Data.Quota}}"></progress>
   <span>{{.Data.Open}} of {{.Data.Quota}} open</span>
@@ -13,39 +14,81 @@
 <h2>Environments</h2>
 {{if .Data.Environments}}
 <div class="panel"><table>
-  <thead><tr><th>Name</th><th>Phase</th><th>Data</th><th>Lifecycle</th><th>URL</th><th>Ready</th></tr></thead>
+  <thead><tr><th>Name</th><th>State</th><th>What it is</th><th>Address</th>
+    {{if $adv}}<th>Image</th><th>Phase</th>{{end}}</tr></thead>
   <tbody>
   {{range .Data.Environments}}
     <tr>
-      <td><a href="/e/{{.Namespace}}/{{.Name}}">{{.Name}}</a></td>
-      <td>{{template "phase" (printf "%s" .Status.Phase)}}</td>
-      <td>{{.Spec.Data.Type}}</td>
-      <td>{{.Spec.Lifecycle.Type}}</td>
-      <td>{{if .Status.URL}}<a href="{{.Status.URL}}">open</a>{{else}}<span class="muted">not exposed</span>{{end}}</td>
-      <td class="muted">{{since .Status.ReadyAt}}</td>
+      <td><a href="/e/{{.Env.Namespace}}/{{.Env.Name}}">{{.Env.Name}}</a>
+          {{if .Expiry}}<div class="muted small">{{.Expiry}}</div>{{end}}</td>
+      <td>{{template "state" .Health.State}}</td>
+      <td>{{.Env.Spec.Data.Type}} data, {{.Env.Spec.Lifecycle.Type | lower}}</td>
+      <td>{{if .Env.Status.URL}}<a href="{{.Env.Status.URL}}">open</a>
+          {{else}}<span class="muted">internal only</span>{{end}}</td>
+      {{if $adv}}
+        <td class="muted small">{{.Env.Spec.Image}}</td>
+        <td class="muted">{{.Env.Status.Phase}}</td>
+      {{end}}
     </tr>
   {{end}}
   </tbody>
 </table></div>
-{{else}}<div class="panel"><table><tbody><tr><td class="muted">No environments.</td></tr></tbody></table></div>{{end}}
+{{else}}<div class="panel"><table><tbody><tr><td class="muted">Nothing running for this customer.</td></tr></tbody></table></div>{{end}}
 
 <h2>New environment</h2>
-{{if can $perms (printf "create:odooenvironments:")}}
+{{if can $perms "create:odooenvironments:"}}
 <form class="launcher" method="post" action="/c/{{$ns}}/{{.Data.Tenant.Name}}/environments">
   <div><label for="name">Name</label><input id="name" name="name" required
        pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="review-1421"></div>
+  <div><label for="imageRef">Version</label><select id="imageRef" name="imageRef">
+    {{range .Data.Tenant.Spec.Images}}
+      <option value="{{.Name}}"{{if .Default}} selected{{end}}>{{.Name}} — Odoo {{.OdooVersion}}{{if .Notes}} ({{.Notes}}){{end}}</option>
+    {{else}}
+      <option value="">the customer's default</option>
+    {{end}}
+  </select></div>
   <div><label for="data">Data</label><select id="data" name="data">
-      <option value="Demo">Demo</option>
+      <option value="Demo">Demo data</option>
       <option value="Empty">Empty</option>
-      <option value="Snapshot">Snapshot (anonymised copy)</option>
+      <option value="Snapshot">A copy of production, anonymised</option>
   </select></div>
   <div><button type="submit">Create</button></div>
 </form>
-<p class="lede note">Created as you, and the image, database and filestore come
-from this customer's record — not from you. If the quota is spent, the admission
-webhook refuses it and says so in its own words.</p>
+<p class="lede note">Created as you, and it removes itself when its time is up.
+The image, database and file storage come from this customer's record — not from
+you. If the quota is spent, you will be told in the words of the rule that
+refused it.</p>
 {{else}}
-<div class="denied">Your groups do not permit creating environments in
-<b>{{$ns}}</b>. The API server was asked, not this page.</div>
+<div class="denied">{{icon "locked"}} Your groups do not permit creating
+environments for this customer. The API server was asked; this page holds no
+list of its own.</div>
+{{end}}
+
+{{if .Data.Map}}
+<h2>How this fits together</h2>
+<div class="panel pad">{{.Data.Map}}</div>
+<p class="lede note">Environments share a database server, and that is why
+restarting one is never a local decision.</p>
+{{end}}
+
+{{if $adv}}
+<h2>Image catalogue</h2>
+<div class="panel"><table>
+  <thead><tr><th>Name</th><th>Odoo</th><th>Image</th><th>Notes</th></tr></thead>
+  <tbody>
+  {{range .Data.Tenant.Spec.Images}}
+    <tr><td>{{.Name}}{{if .Default}} <span class="muted">· default</span>{{end}}</td>
+        <td>{{.OdooVersion}}</td><td class="muted small">{{.Image}}</td>
+        <td class="muted">{{.Notes}}</td></tr>
+  {{else}}
+    <tr><td class="muted" colspan="4">No catalogue. Environments fall back to the
+    customer's default image.</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+<p class="lede note">Moving the default between builds of the same Odoo version
+is an ordinary change. Moving it across versions is refused unless a rehearsal
+succeeded against exactly that image first — a major upgrade rewrites the
+database and cannot be undone by redeploying.</p>
 {{end}}
 {{template "bottom" .}}{{end}}

@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
@@ -94,6 +95,14 @@ func main() {
 		os.Exit(1)
 	}
 	if err := doblurav1alpha1.AddToScheme(scheme); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	// metrics.k8s.io, for the "is it slow" reading. Registered unconditionally
+	// even though the API may be absent: a scheme entry costs nothing, and
+	// without it the List fails with "no kind is registered" — which looks
+	// exactly like a missing metrics-server and is not one.
+	if err := metricsv1beta1.AddToScheme(scheme); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

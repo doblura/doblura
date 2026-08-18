@@ -326,3 +326,19 @@ details.more .body { padding: 0 16px 16px; }
 .grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .crumbs { font-size: 13px; color: var(--ink-3); margin: 0 0 6px; }
 .crumbs a { color: var(--ink-2); }
+
+.small { font-size: 12.5px; }
+td .small { display: block; margin-top: 2px; }
+
+/* "Cannot tell" is its own state and must not look like a failure: a person who
+   lacks a permission has not found an outage. */
+:root { --unknown: #5d6b66; --unknown-bg: #eceeed; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --unknown: #8b9a94; --unknown-bg: #1c2422; }
+}
+:root[data-theme="dark"] { --unknown: #8b9a94; --unknown-bg: #1c2422; }
+.state-unknown { color: var(--unknown); background: var(--unknown-bg); border-color: var(--line); }
+.answer.unknown { border-left-color: var(--unknown); }
+
+.map .edge-label { paint-order: stroke; stroke: var(--surface); stroke-width: 3px;
+                   stroke-linejoin: round; }

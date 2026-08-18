@@ -28,6 +28,8 @@ var icons = map[string]template.HTML{
 
 	"asleep": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.6A8.5 8.5 0 1 1 9.4 3.5a7 7 0 0 0 11.1 11.1z"/></svg>`,
 
+	"unknown": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>`,
+
 	"gone": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6"/></svg>`,
 
 	"customer": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V7l7-4 7 4v14"/><path d="M10 21v-5h4v5"/><path d="M21 21H3"/></svg>`,
@@ -44,6 +46,7 @@ var stateWords = map[string]string{
 	"building": "Being prepared",
 	"asleep":   "Asleep",
 	"gone":     "Removed",
+	"unknown":  "Cannot tell",
 }
 
 func icon(name string) template.HTML { return icons[name] }
