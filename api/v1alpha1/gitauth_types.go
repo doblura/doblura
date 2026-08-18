@@ -43,6 +43,11 @@ const (
 	// Secret keys: "ssh-privatekey", "known_hosts" (optional).
 	AuthSSHKey GitAuthType = "SSHKey"
 
+	// There is no GitLabApp, and that is not an omission. GitLab's equivalent of
+	// an App installation is a group or project access token, which is a token:
+	// there is nothing to mint, so it goes through AuthToken with the username
+	// GitLab expects. The same is true of Gitea and Forgejo.
+
 	// AuthGitHubApp mints an installation token from a GitHub App's
 	// credentials. The operator performs the exchange and leaves the token in
 	// an ephemeral Secret it owns, which is garbage-collected with the

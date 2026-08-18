@@ -18,8 +18,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
@@ -46,14 +47,33 @@ func (r *OdooRehearsalReconciler) ensureGitHubAppTokens(
 	ctx context.Context,
 	reh *doblurav1alpha1.OdooRehearsal,
 ) error {
-	for _, repo := range reh.Spec.Addons.Repos {
+	return mintAppTokensFor(ctx, r.Client, r.Scheme, reh, reh.Namespace, reh.Spec.Addons.Repos)
+}
+
+// mintAppTokensFor is the same work for any owner.
+//
+// Extracted because it was a method on the rehearsal reconciler and nothing
+// else, which meant an OdooEnvironment declaring auth.type GitHubApp produced a
+// clone container mounting a Secret NOBODY CREATED: the pod stuck in
+// CreateContainerConfigError, naming a Secret the person had never heard of.
+// The mechanism was in the API, in the enum, in the README's "four mechanisms,
+// all explicit" — and wired to one of the two kinds that can use it.
+func mintAppTokensFor(
+	ctx context.Context,
+	c client.Client,
+	scheme *runtime.Scheme,
+	owner metav1.Object,
+	namespace string,
+	repos []doblurav1alpha1.AddonRepo,
+) error {
+	for _, repo := range repos {
 		if !repo.Auth.NeedsTokenMinting() {
 			continue
 		}
 
 		var src corev1.Secret
-		key := client.ObjectKey{Namespace: reh.Namespace, Name: repo.Auth.SecretRef}
-		if err := r.Get(ctx, key, &src); err != nil {
+		key := client.ObjectKey{Namespace: namespace, Name: repo.Auth.SecretRef}
+		if err := c.Get(ctx, key, &src); err != nil {
 			return fmt.Errorf("reading GitHub App credentials from %q: %w", repo.Auth.SecretRef, err)
 		}
 
@@ -75,7 +95,7 @@ func (r *OdooRehearsalReconciler) ensureGitHubAppTokens(
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      MintedTokenSecretName(repo.Name),
-				Namespace: reh.Namespace,
+				Namespace: namespace,
 				Labels: map[string]string{
 					"app.kubernetes.io/managed-by": "doblura",
 					"doblura.dev/ephemeral":        "true",
@@ -87,10 +107,12 @@ func (r *OdooRehearsalReconciler) ensureGitHubAppTokens(
 			Type:       corev1.SecretTypeOpaque,
 			StringData: map[string]string{"token": token},
 		}
-		if err := ctrl.SetControllerReference(reh, sec, r.Scheme); err != nil {
+		// Owned by whatever asked for it, so the ephemeral Secret is collected
+		// with the object rather than outliving it.
+		if err := controllerutil.SetControllerReference(owner, sec, scheme); err != nil {
 			return err
 		}
-		if err := r.Patch(ctx, sec, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
+		if err := c.Patch(ctx, sec, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
 			return fmt.Errorf("storing the minted token for %q: %w", repo.Name, err)
 		}
 	}

@@ -88,6 +88,14 @@ func (r *OdooEnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.commit(ctx, &env, st, res)
 	}
 
+	// Mint GitHub App tokens before anything tries to clone. Same reason as the
+	// rehearsal: the tokens last an hour, and every phase Job — and every restart
+	// of the serving pod — begins with a fresh one.
+	if err := mintAppTokensFor(ctx, r.Client, r.Scheme, &env, env.Namespace,
+		env.Spec.Addons.Repos); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if err := r.ensureConfigAndSecrets(ctx, &env, st); err != nil {
 		return ctrl.Result{}, err
 	}
