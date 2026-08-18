@@ -657,7 +657,31 @@ func (r *OdooEnvironmentReconciler) requeueForLifecycle(
 	return ctrl.Result{}
 }
 
+// dropDeadline bounds how long deletion waits for the database to go.
+//
+// Long enough for a drop that has to wait on connections to finish, short enough
+// that a wedged job does not leave an object nobody can delete.
+const dropDeadline = 10 * time.Minute
+
 // finalize drops the database, which garbage collection cannot reach.
+//
+// This used to launch the job and remove the finalizer in the same pass, on the
+// reasoning that an object which cannot be deleted is worse than a database which
+// does not get dropped. That reasoning is right and the implementation was still
+// wrong, because it left a job running with nothing owning it and nothing
+// waiting for it.
+//
+// What that costs, measured rather than imagined: deleting an environment and
+// recreating it under the same name, the new init finished at 10:08:44 and the
+// OLD drop job ran at 10:08:45. It dropped the database the successor had just
+// created. The recreated environment then failed in its harden phase with
+// `database "env_staging_acme" does not exist` — a message pointing at the phase
+// that noticed, not at the job from the previous object that caused it.
+//
+// So deletion now waits for the drop to reach a terminal state, and the escape
+// hatch is kept: past the deadline it gives up — but it DELETES the job on the
+// way out, so the thing that outlived the object cannot go on to destroy its
+// replacement.
 func (r *OdooEnvironmentReconciler) finalize(
 	ctx context.Context,
 	env *doblurav1alpha1.OdooEnvironment,
@@ -666,27 +690,83 @@ func (r *OdooEnvironmentReconciler) finalize(
 
 	// An environment with live data is NOT touched: it pointed at an existing
 	// database that is not ours. Dropping it would be catastrophic.
-	if env.Spec.Data.Type != doblurav1alpha1.DataLive {
-		job := &batchv1.Job{
-			TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
-			ObjectMeta: metav1.ObjectMeta{
-				Name: env.Name + "-dropdb", Namespace: env.Namespace,
-				Labels: envLabels(env, "dropdb"),
-			},
-			Spec: batchv1.JobSpec{
-				BackoffLimit: ptr(int32(2)),
-				Template:     envJobPod(env, envPhaseStep{"dropdb", "Dropped", doblurav1alpha1.EnvExpired, envDropScript}),
-			},
-		}
-		// No ownerReference: the parent is being deleted, and a child owned by an
-		// object under deletion is collected before it can finish.
-		if err := r.Patch(ctx, job, client.Apply, fieldOwner, client.ForceOwnership); err != nil && !errors.IsAlreadyExists(err) {
-			l.Error(err, "could not launch the database drop; continuing so the object does not become undeletable")
-		}
+	if env.Spec.Data.Type == doblurav1alpha1.DataLive {
+		return r.releaseEnv(ctx, env)
 	}
 
-	// Remove the finalizer even if dropping the database failed: otherwise the
-	// object is undeletable forever and somebody has to edit it by hand.
+	name := env.Name + "-dropdb"
+	job := &batchv1.Job{
+		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: env.Namespace,
+			Labels: envLabels(env, "dropdb"),
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit: ptr(int32(2)),
+			Template:     envJobPod(env, envPhaseStep{"dropdb", "Dropped", doblurav1alpha1.EnvExpired, envDropScript}),
+		},
+	}
+	// No ownerReference: the parent is being deleted, and a child owned by an
+	// object under deletion is collected before it can finish.
+	if err := r.Patch(ctx, job, client.Apply, fieldOwner, client.ForceOwnership); err != nil && !errors.IsAlreadyExists(err) {
+		l.Error(err, "could not launch the database drop; continuing so the object does not become undeletable")
+		return r.releaseEnv(ctx, env)
+	}
+
+	var cur batchv1.Job
+	if err := r.Get(ctx, client.ObjectKey{Name: name, Namespace: env.Namespace}, &cur); err != nil {
+		if errors.IsNotFound(err) {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	switch {
+	case jobFinished(&cur):
+		// Removed rather than left behind: the name is derived from the
+		// environment's, so a leftover job is also what a same-name recreate
+		// would collide with.
+		return r.releaseEnv(ctx, env, name)
+	case env.DeletionTimestamp != nil && time.Since(env.DeletionTimestamp.Time) > dropDeadline:
+		l.Error(nil, "the database drop did not finish within the deadline; "+
+			"deleting the job and releasing the object, so it cannot outlive this "+
+			"environment and drop a later one with the same name",
+			"job", name, "deadline", dropDeadline)
+		return r.releaseEnv(ctx, env, name)
+	default:
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+}
+
+// jobFinished reports whether a Job will do nothing further.
+//
+// Read from the conditions rather than from Succeeded/Failed counts: a job with
+// retries left has Failed > 0 and is not finished, and treating that as terminal
+// would release the object while the drop is still being retried.
+func jobFinished(j *batchv1.Job) bool {
+	for _, c := range j.Status.Conditions {
+		if (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) &&
+			c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// releaseEnv removes the finalizer, optionally cleaning up jobs first.
+func (r *OdooEnvironmentReconciler) releaseEnv(
+	ctx context.Context,
+	env *doblurav1alpha1.OdooEnvironment,
+	jobs ...string,
+) (ctrl.Result, error) {
+	bg := metav1.DeletePropagationBackground
+	for _, n := range jobs {
+		j := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: env.Namespace}}
+		if err := r.Delete(ctx, j, &client.DeleteOptions{PropagationPolicy: &bg}); err != nil &&
+			!errors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+	}
 	env.Finalizers = removeString(env.Finalizers, envFinalizer)
 	return ctrl.Result{}, r.Update(ctx, env)
 }
