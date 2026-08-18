@@ -570,3 +570,19 @@ details.helpbox .body a { color: var(--accent); text-decoration: underline; }
 a[target="_blank"] svg { width: 11px; height: 11px; vertical-align: -1px; margin-left: 3px; opacity: .6; }
 footer a { color: var(--ink-2); }
 footer a:hover { color: var(--accent); }
+
+/* row actions sit side by side rather than stacking */
+td.rowacts { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+td.rowacts form { margin: 0; }
+details.panel.inline { display: inline-block; }
+details.panel.inline .body {
+  position: absolute; right: 26px; z-index: 30; margin-top: 6px;
+  width: min(430px, 80vw); text-align: left;
+}
+details.panel.inline .body fieldset,
+details.panel.inline .body form { background: var(--surface); }
+details.panel.inline .body form {
+  border: 1px solid var(--accent); border-radius: var(--r);
+  padding: 16px 18px; box-shadow: var(--shadow-lift);
+}
+.card.scroll { overflow: visible; }

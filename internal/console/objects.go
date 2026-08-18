@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,6 +42,13 @@ var objectKinds = []objectKind{
 		Lede: "Every environment across every customer you can see. A customer's " +
 			"own page is usually the better place to start.",
 		Columns: []string{"Name", "Customer", "State", "What it is", "Address"},
+	},
+	{
+		Slug: "reviewsets", Title: "Review sets", Resource: "reviewsets",
+		Lede: "Each one watches a repository and opens an environment per pull " +
+			"request, so the decision made when the pull request was opened is " +
+			"not one somebody has to mirror by hand.",
+		Columns: []string{"Name", "Customer", "State", "Watching", "Open"},
 	},
 	{
 		Slug: "rehearsals", Title: "Rehearsals", Resource: "odoorehearsals",
@@ -156,6 +164,32 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 					pill(h.State),
 					text(string(e.Spec.Data.Type) + " data, " + lowerFirst(string(e.Spec.Lifecycle.Type))),
 					muted(addr),
+				},
+			})
+		}
+	case "reviewsets":
+		var l doblurav1alpha1.ReviewSetList
+		if err := c.List(ctx, &l); err != nil {
+			view.Denied = true
+			break
+		}
+		for i := range l.Items {
+			rs := &l.Items[i]
+			state, word := reviewSetState(rs)
+			open := itoa(int(rs.Status.Open))
+			if rs.Status.Skipped > 0 {
+				// The skipped count travels with the open one, because a set at
+				// its cap looks identical to a healthy one from the number alone.
+				open += " (" + itoa(int(rs.Status.Skipped)) + " over the cap)"
+			}
+			view.Rows = append(view.Rows, objectRow{
+				Name: rs.Name, Namespace: rs.Namespace,
+				Href: "/rs/" + rs.Namespace + "/" + rs.Name,
+				Cells: []cell{
+					text(rs.Spec.ForTenant),
+					verdict(state, word),
+					muted(watchSummary(rs)),
+					text(open),
 				},
 			})
 		}
@@ -319,4 +353,44 @@ func lowerFirst(s string) string {
 		b[0] += 'a' - 'A'
 	}
 	return string(b)
+}
+
+// reviewSetState reads the Watching condition into the shared vocabulary.
+//
+// Paused is deliberately NOT "down": somebody paused it on purpose, and a red
+// pill for a decision a colleague made is how a status page trains people to
+// ignore it.
+func reviewSetState(rs *doblurav1alpha1.ReviewSet) (state, word string) {
+	if rs.Spec.Paused {
+		return "asleep", "Paused"
+	}
+	for _, c := range rs.Status.Conditions {
+		if c.Type != "Watching" {
+			continue
+		}
+		if c.Status == "True" {
+			return "up", "Watching"
+		}
+		return "down", "Not watching"
+	}
+	return "building", "Starting"
+}
+
+// watchSummary says what it is watching, in words.
+func watchSummary(rs *doblurav1alpha1.ReviewSet) string {
+	var parts []string
+	if rs.Spec.Watch.PullRequests {
+		p := "pull requests"
+		if len(rs.Spec.Watch.Labels) > 0 {
+			p += " labelled " + strings.Join(rs.Spec.Watch.Labels, " or ")
+		}
+		parts = append(parts, p)
+	}
+	if len(rs.Spec.Watch.Branches) > 0 {
+		parts = append(parts, "branches "+strings.Join(rs.Spec.Watch.Branches, ", "))
+	}
+	if len(parts) == 0 {
+		return "nothing"
+	}
+	return strings.Join(parts, " and ")
 }

@@ -1,0 +1,79 @@
+{{define "reviewset.html"}}{{template "top" .}}
+{{$rs := .Data.Set}}{{$adv := .Advanced}}
+<p class="crumbs"><a href="/o/reviewsets">Review sets</a> › {{$rs.Name}}</p>
+<div class="head">
+  <div>
+    <h1>{{$rs.Name}}</h1>
+    <p class="sub">Watching {{.Data.Watch}} on
+      <a class="link" href="{{$rs.Spec.Repository.URL}}" target="_blank" rel="noopener noreferrer">{{$rs.Spec.Repository.URL}}{{icon "external"}}</a></p>
+  </div>
+  <div class="spacer"></div>
+  {{if .Data.CanEdit}}
+  <form method="post" action="/rs/{{$rs.Namespace}}/{{$rs.Name}}/pause?to={{if $rs.Spec.Paused}}watching{{else}}paused{{end}}">
+    <button class="ghost" type="submit">{{if $rs.Spec.Paused}}Resume{{else}}Pause{{end}}</button>
+  </form>
+  {{end}}
+</div>
+
+<div class="answer {{.Data.State}}">
+  <span class="icon">{{icon .Data.State}}</span>
+  <div>
+    <p class="big">{{.Data.Word}}</p>
+    <p>{{if $rs.Status.LastPolled}}Last asked {{since $rs.Status.LastPolled}} ago.{{else}}It has not asked the forge yet.{{end}}
+      {{if $rs.Status.Message}}{{$rs.Status.Message}}{{end}}</p>
+    {{if .Data.Skipped}}<p><b>{{.Data.Skipped}} more match and have no environment</b>,
+      because this set is at its limit of {{$rs.Spec.MaxEnvironments}}. Raise the
+      limit, or close some pull requests.</p>{{end}}
+  </div>
+</div>
+
+<h2 class="sect">What it is following</h2>
+{{template "help" (safe `<p>One environment per open pull request, and per branch
+matching the patterns. When a pull request closes, its environment goes with
+it.</p>
+<p>An environment that already exists is never repointed: pushing again to the
+same branch does not restore over a database somebody may be looking at. The new
+code is picked up when the pod restarts.</p>`)}}
+
+{{if .Data.Rows}}
+<div class="card scroll"><table>
+  <thead><tr><th>What</th><th>State</th><th>Environment</th><th>Branch</th></tr></thead>
+  <tbody>
+  {{range .Data.Rows}}
+    <tr>
+      <td>
+        {{if .URL}}<a href="{{.URL}}" target="_blank" rel="noopener noreferrer">#{{.Number}}{{icon "external"}}</a>
+        {{else}}<span class="muted">branch</span>{{end}}
+        {{if .Title}}<div class="small muted">{{.Title}}</div>{{end}}
+      </td>
+      <td>{{template "state" .Health.State}}</td>
+      <td><a href="/e/{{$rs.Namespace}}/{{.Name}}">{{.Name}}</a></td>
+      <td class="mono muted">{{.Ref}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}
+<div class="empty">
+  <div class="big">Nothing is open</div>
+  <p>{{if $rs.Spec.Paused}}This set is paused, so it is not asking.{{else}}
+  No pull request or branch matches what this set is watching.{{end}}</p>
+</div>
+{{end}}
+
+{{if $adv}}
+<h2 class="sect">Configuration</h2>
+<div class="card pad">
+<dl class="kv">
+  <dt>Customer</dt><dd>{{$rs.Spec.ForTenant}}</dd>
+  <dt>Forge</dt><dd>{{$rs.Spec.Repository.Provider}}{{if $rs.Spec.Repository.APIBase}} · {{$rs.Spec.Repository.APIBase}}{{end}}</dd>
+  <dt>Credential</dt><dd>{{if $rs.Spec.Repository.Auth}}{{$rs.Spec.Repository.Auth.SecretRef}}
+    <span class="muted">— read by the manager, to ask which pull requests are open</span>
+    {{else}}<span class="muted">none; the anonymous API, rate limited by address</span>{{end}}</dd>
+  <dt>Each becomes</dt><dd>{{if $rs.Spec.Template.Purpose}}{{$rs.Spec.Template.Purpose}}{{else}}Review{{end}}{{if $rs.Spec.Template.ImageRef}} · {{$rs.Spec.Template.ImageRef}}{{end}}</dd>
+  <dt>At most</dt><dd>{{$rs.Spec.MaxEnvironments}} at once</dd>
+  <dt>Asks every</dt><dd>{{if $rs.Spec.PollInterval}}{{$rs.Spec.PollInterval.Duration}}{{else}}1m0s{{end}}</dd>
+</dl>
+</div>
+{{end}}
+{{template "bottom" .}}{{end}}

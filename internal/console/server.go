@@ -211,9 +211,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /c/{ns}/{name}/environments", s.authenticated(s.handleCreateEnvironment))
 	mux.HandleFunc("POST /c/{ns}/{name}/repos", s.authenticated(s.handleAddRepo))
 	mux.HandleFunc("POST /c/{ns}/{name}/repos/remove", s.authenticated(s.handleRemoveRepo))
+	mux.HandleFunc("POST /c/{ns}/{name}/images", s.authenticated(s.handleAddImage))
+	mux.HandleFunc("POST /c/{ns}/{name}/images/remove", s.authenticated(s.handleRemoveImage))
+	mux.HandleFunc("POST /c/{ns}/{name}/images/promote", s.authenticated(s.handlePromoteImage))
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
 	mux.HandleFunc("GET /o/{kind}", s.authenticated(s.handleObjects))
 	mux.HandleFunc("GET /rail", s.authenticated(s.handleRail))
+	mux.HandleFunc("GET /rs/{ns}/{name}", s.authenticated(s.handleReviewSet))
+	mux.HandleFunc("POST /rs/{ns}/{name}/pause", s.authenticated(s.handleReviewSetPause))
+	mux.HandleFunc("POST /c/{ns}/{name}/reviewsets", s.authenticated(s.handleCreateReviewSet))
 
 	return withSecurityHeaders(mux)
 }

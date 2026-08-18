@@ -187,6 +187,22 @@ type customerView struct {
 	Repos []doblurav1alpha1.AddonRepo
 	// CanEditRepos is asked of the API server like every other permission.
 	CanEditRepos bool
+
+	// Images is the catalogue, with the one thing the raw entries do not say:
+	// whether promoting each would cross a major version. Worked out here so the
+	// page can warn BEFORE the click rather than only reporting the refusal
+	// after it.
+	Images []imageRow
+}
+
+type imageRow struct {
+	Entry doblurav1alpha1.ImageCatalogueEntry
+	// MajorChange is true when making this the default would cross a major
+	// version — the change that rewrites the database and cannot be undone by
+	// redeploying.
+	MajorChange bool
+	// From is the version it would be crossing from, for the warning's wording.
+	From string
 }
 
 // envRow is an environment plus the two things a list has to say about it that
@@ -241,6 +257,15 @@ func (s *Server) handleCustomer(w http.ResponseWriter, r *http.Request, id Ident
 	view.Map = customerGraph(&t, view.Environments, rehearsals.Items).render()
 	if d := t.Spec.EnvironmentDefaults; d != nil && d.Addons != nil {
 		view.Repos = d.Addons.Repos
+	}
+	current := t.Spec.DefaultImage()
+	for _, e := range t.Spec.Images {
+		row := imageRow{Entry: e}
+		if current != nil && !e.Default && e.Major() != current.Major() {
+			row.MajorChange = true
+			row.From = current.OdooVersion
+		}
+		view.Images = append(view.Images, row)
 	}
 
 	perms, err := s.allowed(r.Context(), id,

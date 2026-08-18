@@ -174,32 +174,166 @@ credentials. The operator never sees the code.</p>
 is never a local decision.</p>
 {{end}}
 
-{{if $adv}}
-<h2 class="sect">Image catalogue</h2>
-{{template "help" (safe `<p>The images this customer may run, by a name a person
-recognises rather than a registry path. One is the default that new environments
-get.</p>
+<h2 class="sect">Environments that follow a repository</h2>
+{{template "help" (safe `<p>A <b>review set</b> watches a repository and opens one
+environment per pull request, or per branch matching a pattern, and removes them
+when the pull request closes.</p>
+<p>The decision was already made when the pull request was opened. Mirroring it by
+hand means the environment exists for the pull requests somebody remembered.</p>`)}}
+{{if .Data.CanEditRepos}}
+<details class="panel">
+  <summary class="btn ghost">Follow a repository</summary>
+  <div class="body">
+    <fieldset>
+      <legend>Follow a repository</legend>
+      <form method="post" action="/c/{{$ns}}/{{$t.Name}}/reviewsets" class="settings">
+        <div class="fields">
+          <div><label for="rsname">Name</label>
+            <input id="rsname" name="name" required
+                   pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="hms"></div>
+          <div><label for="rsurl">Repository</label>
+            <input id="rsurl" name="url" required placeholder="https://github.com/acme/hms.git"></div>
+          <div><label for="provider">Forge</label>
+            <select id="provider" name="provider">
+              <option value="GitHub">GitHub</option>
+              <option value="GitLab">GitLab</option>
+            </select></div>
+          <div><label for="rsapi">API address</label>
+            <input id="rsapi" name="apiBase" placeholder="only if self-hosted"></div>
+        </div>
+        <label class="check"><input type="checkbox" name="pullRequests" checked>
+          One environment per open pull request</label>
+        <div class="fields">
+          <div><label for="rsbranches">Branches too</label>
+            <input id="rsbranches" name="branches" placeholder="main, release/*"></div>
+          <div><label for="rslabels">Only pull requests labelled</label>
+            <input id="rslabels" name="labels" placeholder="needs-review"></div>
+          <div><label for="rsmax">At most</label>
+            <input id="rsmax" name="maxEnvironments" type="number" min="1" max="50" value="5"></div>
+          <div><label for="rsimage">Version</label>
+            <select id="rsimage" name="imageRef">
+              {{range $t.Spec.Images}}<option value="{{.Name}}"{{if .Default}} selected{{end}}>{{.Name}} — Odoo {{.OdooVersion}}</option>{{end}}
+            </select></div>
+          <div><label for="rssecret">Token secret</label>
+            <input id="rssecret" name="authSecret" placeholder="for private repositories"></div>
+        </div>
+        <input type="hidden" name="purpose" value="Review">
+        <button type="submit">Start following</button>
+      </form>
+      <p class="hint">Doblura asks the forge every minute rather than waiting to
+      be told: a webhook needs this cluster to be reachable from the internet, and
+      most clusters running an ERP are not. The token only needs to read pull
+      requests — it is the one credential the operator itself holds, and the
+      narrowest scope your forge offers is the right one.</p>
+    </fieldset>
+  </div>
+</details>
+{{end}}
+
+<h2 class="sect">Versions this customer may run</h2>
+{{template "help" (safe `<p>The images available to this customer, by a name a
+person recognises rather than a registry path. One is the <b>default</b>: what a
+new environment gets when nobody says otherwise.</p>
 <p>Moving the default between builds of the <b>same</b> Odoo version is an
 ordinary change. Moving it <b>across</b> versions rewrites the database in place
-and cannot be undone by redeploying, so it is refused unless a rehearsal
+and cannot be undone by redeploying — so it is refused unless a rehearsal
 succeeded against exactly that image first.</p>`)}}
+
+{{if .Data.Images}}
 <div class="card scroll"><table>
-  <thead><tr><th>Name</th><th>Odoo</th><th>Flavour</th><th>Image</th><th>Notes</th></tr></thead>
+  <thead><tr><th>Name</th><th>Odoo</th><th>Built as</th>
+    {{if $adv}}<th>Image</th>{{end}}<th>Notes</th>
+    {{if $.Data.CanEditRepos}}<th></th>{{end}}</tr></thead>
   <tbody>
-  {{range $t.Spec.Images}}
-    <tr><td>{{.Name}}{{if .Default}} <span class="muted small">· default</span>{{end}}</td>
-        <td>{{.OdooVersion}}</td><td>{{.Flavor}}</td>
-        <td class="mono">{{.Image}}</td>
-        <td class="muted small">{{.Notes}}</td></tr>
-  {{else}}
-    <tr><td class="muted" colspan="5">No catalogue. Environments fall back to the
-    customer's default image.</td></tr>
+  {{range .Data.Images}}
+    <tr>
+      <td>{{.Entry.Name}}{{if .Entry.Default}}
+        <span class="state state-up">{{icon "up"}}in use</span>{{end}}</td>
+      <td>{{.Entry.OdooVersion}}</td>
+      <td class="muted">{{if .Entry.Flavor}}{{.Entry.Flavor}}{{else}}Official{{end}}</td>
+      {{if $adv}}<td class="mono muted">{{.Entry.Image}}</td>{{end}}
+      <td class="muted small">{{.Entry.Notes}}</td>
+      {{if $.Data.CanEditRepos}}
+      <td class="num rowacts">
+        {{if not .Entry.Default}}
+          {{if .MajorChange}}
+          <details class="panel inline">
+            <summary class="btn ghost small-btn">Upgrade to {{.Entry.OdooVersion}}…</summary>
+            <div class="body">
+              <form method="post" action="/c/{{$ns}}/{{$t.Name}}/images/promote" class="stack">
+                <input type="hidden" name="imageName" value="{{.Entry.Name}}">
+                <p class="hint">This crosses from Odoo <b>{{.From}}</b> to
+                <b>{{.Entry.OdooVersion}}</b>. It rewrites the database in place;
+                the way back is a restore from before it started, not a redeploy.
+                Name a rehearsal that succeeded against this exact image.</p>
+                <div><label for="reh-{{.Entry.Name}}">Rehearsal</label>
+                  <input id="reh-{{.Entry.Name}}" name="rehearsalRef" required
+                         placeholder="upgrade-19"></div>
+                <button type="submit">Authorise the upgrade</button>
+              </form>
+            </div>
+          </details>
+          {{else}}
+          <form method="post" action="/c/{{$ns}}/{{$t.Name}}/images/promote">
+            <input type="hidden" name="imageName" value="{{.Entry.Name}}">
+            <button class="ghost small-btn" type="submit">Make default</button>
+          </form>
+          {{end}}
+        {{end}}
+        <form method="post" action="/c/{{$ns}}/{{$t.Name}}/images/remove">
+          <input type="hidden" name="imageName" value="{{.Entry.Name}}">
+          <button class="danger small-btn" type="submit">Remove</button>
+        </form>
+      </td>
+      {{end}}
+    </tr>
   {{end}}
   </tbody>
 </table></div>
-<p class="hint">Moving the default between builds of the same Odoo version is an
-ordinary change. Moving it across versions is refused unless a rehearsal
-succeeded against exactly that image first — a major upgrade rewrites the
-database and cannot be undone by redeploying.</p>
+{{else}}
+<div class="empty">
+  <div class="big">No versions listed</div>
+  <p>Environments fall back to whatever image the customer's record names.
+  {{if .Data.CanEditRepos}}Add one below and it becomes a choice with a name.{{end}}</p>
+</div>
 {{end}}
+
+{{if .Data.CanEditRepos}}
+<details class="panel">
+  <summary class="btn ghost">Add a version</summary>
+  <div class="body">
+    <fieldset>
+      <legend>Add a version</legend>
+      <form method="post" action="/c/{{$ns}}/{{$t.Name}}/images" class="settings">
+        <div class="fields">
+          <div><label for="imageName">Name</label>
+            <input id="imageName" name="imageName" required
+                   pattern="[a-z0-9]([-a-z0-9.]*[a-z0-9])?" placeholder="hms-18"></div>
+          <div><label for="image">Image</label>
+            <input id="image" name="image" required placeholder="ghcr.io/acme/hms:18"></div>
+          <div><label for="odooVersion">Odoo version</label>
+            <input id="odooVersion" name="odooVersion" required
+                   pattern="[0-9]+\.[0-9]+" placeholder="18.0"></div>
+          <div><label for="flavor">Built as</label>
+            <select id="flavor" name="flavor">
+              <option value="Official">The official Odoo image</option>
+              <option value="Doodba">A Doodba build</option>
+              <option value="Custom">Something else</option>
+            </select></div>
+          <div><label for="notes">Notes</label>
+            <input id="notes" name="notes" placeholder="current production"></div>
+        </div>
+        <button type="submit">Add version</button>
+      </form>
+      <p class="hint">The version is <b>declared</b>, never read from the tag:
+      <span class="mono">hms:18</span>, <span class="mono">hms:18.0-rc2</span> and
+      <span class="mono">hms:stable</span> can all be Odoo 18, and guessing from
+      the text is how a major upgrade gets waved through. “Built as” tells Doblura
+      where that image keeps its addons and how to start it — and it is verified
+      before anything runs, not assumed.</p>
+    </fieldset>
+  </div>
+</details>
+{{end}}
+
 {{template "bottom" .}}{{end}}
