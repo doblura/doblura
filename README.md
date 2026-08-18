@@ -261,6 +261,45 @@ orphaned attachments, and that breaks migrations in confusing ways.
 
 ---
 
+## Web and crons are separate tiers
+
+Odoo's default is one process that both serves HTTP and fires scheduled actions.
+That is fine on one server and wrong the moment there is more than one pod: every
+replica polls `ir_cron` independently, so a nightly job written on the assumption
+that it was alone runs as many times as there are replicas.
+
+`workload.cron` moves them out:
+
+```yaml
+spec:
+  workload:
+    web:  {replicas: 2, workers: 4}
+    cron: {replicas: 1, threads: 2}
+  storage:
+    filestore: {mode: Database}
+```
+
+The web tier then runs with `max_cron_threads = 0` and the cron tier with
+`workers = 0`. **The zero is the feature.** Without it the crons run in both
+places, which looks like it is working right up until the day a job that assumed
+it was alone runs twice.
+
+Three consequences worth knowing before you turn it on:
+
+- `cron.replicas` is capped at 1 by the API. Odoo serialises jobs with
+  `FOR NO KEY UPDATE SKIP LOCKED`, which stops two workers taking the *same* job
+  — it does not stop a job overlapping with its own previous run.
+- A cron tier needs a filestore both tiers can reach: `Database`, or a
+  `PersistentVolumeClaim` declared `accessModeReadWriteMany`. Report generation
+  writes attachments. Over a ReadWriteOnce claim two pods appear to work for
+  exactly as long as they happen to land on the same node.
+- Removing `workload.cron` deletes the Deployment and returns the web tier to
+  `max_cron_threads = 1`. It is one switch, not two independent settings, so
+  there is no state where nobody is running the crons.
+
+`workload.queueJob` is the same shape for OCA's `queue_job`, which is an addon
+and therefore optional. The cron split is not: it is core Odoo behaviour.
+
 ## Guardrails the API server enforces
 
 They are not in the documentation: they are in the CRD. The `apply` is rejected
