@@ -260,6 +260,139 @@ type DatabaseSpec struct {
 	// PasswordSecret is the Secret holding the "password" key.
 	// +kubebuilder:validation:MinLength=1
 	PasswordSecret string `json:"passwordSecret"`
+
+	// Proxy puts a connection pooler between Odoo and this server.
+	// +optional
+	Proxy *DatabaseProxySpec `json:"proxy,omitempty"`
+}
+
+// ─────────────── The connection proxy ───────────────
+//
+// The question this answers is not pooling. It is: can the database live outside
+// the cluster without the workload holding the credential to it?
+//
+// Without a proxy the answer is no, and not by a little. PGPASSWORD is an
+// environment variable on the Odoo container, so it is in `kubectl describe pod`,
+// in any core dump, in the process environment of everything Odoo ever execs, and
+// readable by anyone who can open a shell in that container. The host and port of
+// the production database are next to it. An addon with a Python sandbox escape —
+// which is a category, not a hypothetical — gets both.
+//
+// With the sidecar, the Secret is mounted into the PROXY container and nowhere
+// else. Containers in one pod share a network namespace but NOT a filesystem, so
+// Odoo connects to 127.0.0.1 with no password at all, and cannot read the file
+// that holds the real one or learn the address it is being forwarded to.
+//
+// Two honest limits, because this is a boundary and not a wall:
+//
+//   - It stops the workload reading the credential. It does not stop anything
+//     that can already reach the pod's ServiceAccount from asking the API server
+//     for the Secret. Give environment pods a ServiceAccount with no secret
+//     access, which is what they should have regardless.
+//   - Anyone who can exec into the Odoo container can still USE the database
+//     through the loopback socket. The credential is hidden; the access is not.
+//     This buys you rotation without redeploying and a blast radius that stops at
+//     one database, not confidentiality against someone already inside.
+
+// DatabaseProxyMode selects the proxy topology.
+// +kubebuilder:validation:Enum=None;Sidecar
+type DatabaseProxyMode string
+
+const (
+	// ProxyNone connects Odoo straight to spec.database.host.
+	ProxyNone DatabaseProxyMode = "None"
+	// ProxySidecar runs the pooler in the same pod, on loopback.
+	ProxySidecar DatabaseProxyMode = "Sidecar"
+)
+
+// DatabaseProxyPoolMode is pgbouncer's pool_mode.
+// +kubebuilder:validation:Enum=Session;Transaction
+type DatabaseProxyPoolMode string
+
+const (
+	PoolSession     DatabaseProxyPoolMode = "Session"
+	PoolTransaction DatabaseProxyPoolMode = "Transaction"
+)
+
+// TransactionPoolingAck is the literal that acknowledges what Transaction costs.
+const TransactionPoolingAck = "i-accept-transaction-pooling-breaks-the-odoo-bus"
+
+// DatabaseProxySpec configures the pooler.
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Sidecar' || has(self.image)",message="proxy mode Sidecar needs an explicit image: there is no sensible default, because the pooler image is the one container in the pod that will hold your database credential and pinning a vendor tag on your behalf is not a decision this operator should make for you"
+// +kubebuilder:validation:XValidation:rule="self.poolMode != 'Transaction' || (has(self.unsafeAcknowledgement) && self.unsafeAcknowledgement == 'i-accept-transaction-pooling-breaks-the-odoo-bus')",message="poolMode Transaction requires unsafeAcknowledgement set to its literal value: Odoo's bus registers with LISTEN, which is session state, and transaction pooling does not preserve it: the failure is that live notifications silently stop, and it appears under concurrency rather than in testing"
+type DatabaseProxySpec struct {
+	// +kubebuilder:default=None
+	// +optional
+	Mode DatabaseProxyMode `json:"mode,omitempty"`
+
+	// Image is the pooler. pgbouncer is what the generated configuration speaks.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// PoolMode defaults to Session, and that default is the whole point.
+	//
+	// Session is the only mode that keeps a client on one server connection for
+	// the life of the connection, and Odoo needs that: bus.py issues
+	// `listen imbus` and then waits on the socket. Transaction pooling returns
+	// the server connection to the pool the moment the transaction ends, so the
+	// registration is on a backend the listener no longer holds.
+	//
+	// Everything else Odoo does is transaction-scoped and would be fine —
+	// ir_cron serialises with FOR NO KEY UPDATE SKIP LOCKED, mail_thread uses
+	// pg_try_advisory_xact_lock. The bus is the one exception, and it is enough.
+	// +kubebuilder:default=Session
+	// +optional
+	PoolMode DatabaseProxyPoolMode `json:"poolMode,omitempty"`
+
+	// UnsafeAcknowledgement gates Transaction. See the CEL message.
+	// +optional
+	UnsafeAcknowledgement string `json:"unsafeAcknowledgement,omitempty"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxClientConn *int32 `json:"maxClientConn,omitempty"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	DefaultPoolSize *int32 `json:"defaultPoolSize,omitempty"`
+}
+
+// ProxyEnabled reports whether Odoo talks to the database over loopback.
+func (d *DatabaseSpec) ProxyEnabled() bool {
+	return d != nil && d.Proxy != nil && d.Proxy.Mode == ProxySidecar
+}
+
+// ConnectHost is the host the WORKLOAD connects to, which is not necessarily the
+// host the administrator wrote down.
+func (d *DatabaseSpec) ConnectHost() string {
+	if d.ProxyEnabled() {
+		return "127.0.0.1"
+	}
+	return d.Host
+}
+
+// ConnectPort mirrors ConnectHost. The proxy always listens on 5432, so nothing
+// downstream — odoo.conf, psql, click-odoo — needs to know it is there.
+func (d *DatabaseSpec) ConnectPort() int32 {
+	if d.ProxyEnabled() {
+		return ProxyListenPort
+	}
+	if d.Port == 0 {
+		return 5432
+	}
+	return d.Port
+}
+
+// ProxyListenPort is where the sidecar listens on loopback.
+const ProxyListenPort int32 = 5432
+
+// PoolModeString is pgbouncer's spelling.
+func (p *DatabaseProxySpec) PoolModeString() string {
+	if p != nil && p.PoolMode == PoolTransaction {
+		return "transaction"
+	}
+	return "session"
 }
 
 // ─────────────────────────── Status ───────────────────────────

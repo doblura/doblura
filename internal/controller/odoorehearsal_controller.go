@@ -326,16 +326,23 @@ func (r *OdooRehearsalReconciler) podTemplate(
 	res := sizeToResources(reh.Spec.Size)
 
 	env := []corev1.EnvVar{
-		{Name: "PGHOST", Value: reh.Spec.Database.Host},
-		{Name: "PGPORT", Value: fmt.Sprint(orDefaultInt32(reh.Spec.Database.Port, 5432))},
+		{Name: "PGHOST", Value: reh.Spec.Database.ConnectHost()},
+		{Name: "PGPORT", Value: fmt.Sprint(reh.Spec.Database.ConnectPort())},
 		{Name: "PGUSER", Value: reh.Spec.Database.User},
 		{Name: "PGDATABASE", Value: st.DatabaseName},
-		{Name: "PGPASSWORD", ValueFrom: &corev1.EnvVarSource{
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: reh.Spec.Database.PasswordSecret},
-				Key:                  "password",
+	}
+	// A rehearsal is the case that wants this most: it restores a copy of
+	// production, so it is the pod most worth compromising and the one whose
+	// database credential it is least sensible to hand over.
+	if !reh.Spec.Database.ProxyEnabled() {
+		env = append(env, corev1.EnvVar{
+			Name: "PGPASSWORD", ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: reh.Spec.Database.PasswordSecret},
+					Key:                  "password",
+				},
 			},
-		}},
+		})
 	}
 
 	volumes := []corev1.Volume{
@@ -397,13 +404,22 @@ func (r *OdooRehearsalReconciler) podTemplate(
 		inits = append(inits, snapInits...)
 	}
 
+	if reh.Spec.Database.ProxyEnabled() {
+		// Mounted into the sidecar only; the rehearsal container gets no entry.
+		volumes = append(volumes, dbProxyVolumes(&reh.Spec.Database)...)
+	}
+
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{"doblura.dev/rehearsal": reh.Name},
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy:  corev1.RestartPolicyNever,
-			InitContainers: inits,
+			RestartPolicy: corev1.RestartPolicyNever,
+			// The pooler is a NATIVE sidecar, which is what makes it usable here
+			// at all: an ordinary sidecar never exits, so this Job would never
+			// complete and a rehearsal that finished would report as running
+			// forever.
+			InitContainers: rehearsalInits(reh, inits),
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot: ptr(true),
 				// Required: runAsNonRoot only verifies, it does not change the user.
@@ -427,6 +443,14 @@ func (r *OdooRehearsalReconciler) podTemplate(
 			Volumes: volumes,
 		},
 	}
+}
+
+// rehearsalInits appends the pooler when one is configured.
+func rehearsalInits(reh *doblurav1alpha1.OdooRehearsal, inits []corev1.Container) []corev1.Container {
+	if reh.Spec.Database.ProxyEnabled() {
+		inits = append(inits, dbProxySidecar(&reh.Spec.Database))
+	}
+	return inits
 }
 
 // SetupWithManager registers the controller.

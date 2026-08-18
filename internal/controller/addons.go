@@ -219,8 +219,8 @@ func odooConf(reh *doblurav1alpha1.OdooRehearsal, dbName string) string {
 	// path lands on a read-only root filesystem. The restore then dies on the
 	// filestore with a FileNotFoundError that names a path nobody configured.
 	b.WriteString("data_dir = " + doblurav1alpha1.DataDirPath + "\n")
-	b.WriteString(fmt.Sprintf("db_host = %s\n", reh.Spec.Database.Host))
-	b.WriteString(fmt.Sprintf("db_port = %d\n", orDefaultInt32(reh.Spec.Database.Port, 5432)))
+	b.WriteString(fmt.Sprintf("db_host = %s\n", reh.Spec.Database.ConnectHost()))
+	b.WriteString(fmt.Sprintf("db_port = %d\n", reh.Spec.Database.ConnectPort()))
 	b.WriteString(fmt.Sprintf("db_user = %s\n", reh.Spec.Database.User))
 	b.WriteString(fmt.Sprintf("db_name = %s\n", dbName))
 	b.WriteString("list_db = False\n")

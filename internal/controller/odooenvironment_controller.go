@@ -551,7 +551,13 @@ func (r *OdooEnvironmentReconciler) ensureIngress(
 func (r *OdooEnvironmentReconciler) ensureEnvNetworkPolicy(ctx context.Context, env *doblurav1alpha1.OdooEnvironment) error {
 	tcp := corev1.ProtocolTCP
 	udp := corev1.ProtocolUDP
-	pg := intstrFromInt(5432)
+	// The CONFIGURED port, not 5432. This was hardcoded, so an environment
+	// pointed at a Postgres on any other port was silently strangled by its own
+	// egress policy: pgbouncer reported "connect failed", the pod reported
+	// "server down", and nothing anywhere named the policy that was dropping the
+	// packets. Note it is Port and not ConnectPort — the pod's outbound
+	// connection is the one the PROXY makes, and the proxy dials the real server.
+	pg := intstrFromInt(orDefaultInt32(env.Spec.Database.Port, 5432))
 	dns := intstrFromInt(53)
 
 	np := &networkingv1.NetworkPolicy{

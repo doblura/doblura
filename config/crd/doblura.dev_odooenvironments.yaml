@@ -464,6 +464,67 @@ spec:
                     default: 5432
                     format: int32
                     type: integer
+                  proxy:
+                    description: Proxy puts a connection pooler between Odoo and this
+                      server.
+                    properties:
+                      defaultPoolSize:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      image:
+                        description: Image is the pooler. pgbouncer is what the generated
+                          configuration speaks.
+                        minLength: 1
+                        type: string
+                      maxClientConn:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      mode:
+                        default: None
+                        description: DatabaseProxyMode selects the proxy topology.
+                        enum:
+                        - None
+                        - Sidecar
+                        type: string
+                      poolMode:
+                        default: Session
+                        description: |-
+                          PoolMode defaults to Session, and that default is the whole point.
+
+                          Session is the only mode that keeps a client on one server connection for
+                          the life of the connection, and Odoo needs that: bus.py issues
+                          `listen imbus` and then waits on the socket. Transaction pooling returns
+                          the server connection to the pool the moment the transaction ends, so the
+                          registration is on a backend the listener no longer holds.
+
+                          Everything else Odoo does is transaction-scoped and would be fine —
+                          ir_cron serialises with FOR NO KEY UPDATE SKIP LOCKED, mail_thread uses
+                          pg_try_advisory_xact_lock. The bus is the one exception, and it is enough.
+                        enum:
+                        - Session
+                        - Transaction
+                        type: string
+                      unsafeAcknowledgement:
+                        description: UnsafeAcknowledgement gates Transaction. See
+                          the CEL message.
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'proxy mode Sidecar needs an explicit image: there
+                        is no sensible default, because the pooler image is the one
+                        container in the pod that will hold your database credential
+                        and pinning a vendor tag on your behalf is not a decision
+                        this operator should make for you'
+                      rule: self.mode != 'Sidecar' || has(self.image)
+                    - message: 'poolMode Transaction requires unsafeAcknowledgement
+                        set to its literal value: Odoo''s bus registers with LISTEN,
+                        which is session state, and transaction pooling does not preserve
+                        it: the failure is that live notifications silently stop,
+                        and it appears under concurrency rather than in testing'
+                      rule: self.poolMode != 'Transaction' || (has(self.unsafeAcknowledgement)
+                        && self.unsafeAcknowledgement == 'i-accept-transaction-pooling-breaks-the-odoo-bus')
                   user:
                     minLength: 1
                     type: string

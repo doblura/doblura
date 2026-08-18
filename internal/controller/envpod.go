@@ -90,8 +90,10 @@ func envOdooConf(env *doblurav1alpha1.OdooEnvironment) string {
 		b.WriteString("addons_path = " + strings.Join(paths, ",") + "\n")
 	}
 	b.WriteString("data_dir = " + doblurav1alpha1.DataDirPath + "\n")
-	b.WriteString(fmt.Sprintf("db_host = %s\n", env.Spec.Database.Host))
-	b.WriteString(fmt.Sprintf("db_port = %d\n", orDefaultInt32(env.Spec.Database.Port, 5432)))
+	// ConnectHost, not Host: with a proxy these differ, and everything that
+	// opens a connection has to agree on which one it is.
+	b.WriteString(fmt.Sprintf("db_host = %s\n", env.Spec.Database.ConnectHost()))
+	b.WriteString(fmt.Sprintf("db_port = %d\n", env.Spec.Database.ConnectPort()))
 	b.WriteString(fmt.Sprintf("db_user = %s\n", env.Spec.Database.User))
 	b.WriteString(fmt.Sprintf("db_name = %s\n", envDBName(env)))
 	// list_db off and no database manager: this environment may be public, and
@@ -170,20 +172,45 @@ func envVolumes(env *doblurav1alpha1.OdooEnvironment) ([]corev1.Volume, []corev1
 	addonVols, addonMounts, _ := addonsPlumbing(&env.Spec.Addons)
 	vols = append(vols, addonVols...)
 	mounts = append(mounts, addonMounts...)
+
+	// Declared on the pod, mounted only into the sidecar. No entry is added to
+	// `mounts`, and that omission is deliberate rather than forgotten.
+	if env.Spec.Database.ProxyEnabled() {
+		vols = append(vols, dbProxyVolumes(&env.Spec.Database)...)
+	}
 	return vols, mounts
 }
 
+// envInitContainers is the addon plumbing plus, when configured, the pooler.
+//
+// The pooler goes LAST: init containers run in order and a native sidecar starts
+// the ones after it only once it is ready, so putting it first would mean every
+// addon clone waits on a proxy none of them use. Placed last it is running before
+// the main containers start, which is the only ordering that matters.
+func envInitContainers(env *doblurav1alpha1.OdooEnvironment, inits []corev1.Container) []corev1.Container {
+	if env.Spec.Database.ProxyEnabled() {
+		inits = append(inits, dbProxySidecar(&env.Spec.Database))
+	}
+	return inits
+}
+
 func envEnv(env *doblurav1alpha1.OdooEnvironment) []corev1.EnvVar {
-	return []corev1.EnvVar{
-		{Name: "PGHOST", Value: env.Spec.Database.Host},
-		{Name: "PGPORT", Value: fmt.Sprint(orDefaultInt32(env.Spec.Database.Port, 5432))},
+	vars := []corev1.EnvVar{
+		{Name: "PGHOST", Value: env.Spec.Database.ConnectHost()},
+		{Name: "PGPORT", Value: fmt.Sprint(env.Spec.Database.ConnectPort())},
 		{Name: "PGUSER", Value: env.Spec.Database.User},
 		{Name: "PGDATABASE", Value: envDBName(env)},
-		{Name: "PGPASSWORD", ValueFrom: secretRef(env.Spec.Database.PasswordSecret, "password")},
 		// HOME so anything that writes a dotfile has somewhere to put it. The
 		// pod runs as 65532, which usually has no home directory in the image.
 		{Name: "HOME", Value: "/tmp"},
 	}
+	// The whole point of the proxy: with one in front, this container is never
+	// given the password. Not as an env var, not as a file, not at all.
+	if !env.Spec.Database.ProxyEnabled() {
+		vars = append(vars, corev1.EnvVar{
+			Name: "PGPASSWORD", ValueFrom: secretRef(env.Spec.Database.PasswordSecret, "password")})
+	}
+	return vars
 }
 
 func envSecurityContext() *corev1.SecurityContext {
@@ -243,7 +270,7 @@ func envJobPod(env *doblurav1alpha1.OdooEnvironment, step envPhaseStep) corev1.P
 		Spec: corev1.PodSpec{
 			RestartPolicy:   corev1.RestartPolicyNever,
 			SecurityContext: envPodSecurityContext(env),
-			InitContainers:  inits,
+			InitContainers:  envInitContainers(env, inits),
 			Containers: []corev1.Container{{
 				Name:            step.name,
 				Image:           env.Spec.Image,
@@ -268,7 +295,7 @@ func envServingPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec 
 		ObjectMeta: metav1.ObjectMeta{Labels: envLabels(env, "odoo")},
 		Spec: corev1.PodSpec{
 			SecurityContext: envPodSecurityContext(env),
-			InitContainers:  inits,
+			InitContainers:  envInitContainers(env, inits),
 			Containers: []corev1.Container{{
 				Name:  "odoo",
 				Image: env.Spec.Image,
@@ -318,7 +345,7 @@ func envCronPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec {
 		ObjectMeta: metav1.ObjectMeta{Labels: envTierLabels(env, "cron")},
 		Spec: corev1.PodSpec{
 			SecurityContext: envPodSecurityContext(env),
-			InitContainers:  inits,
+			InitContainers:  envInitContainers(env, inits),
 			Containers: []corev1.Container{{
 				Name:  "odoo-cron",
 				Image: env.Spec.Image,
@@ -513,10 +540,26 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 		// payment providers and carriers; it does not touch the API tokens and
 		// webhook URLs your own modules keep in ir_config_parameter. That is how
 		// a test environment ends up writing into a supplier's ERP.
+		//
+		// The pattern is deliberately broad, and broad patterns hit things they
+		// were not aimed at. This one used to delete `database.secret` — which is
+		// not an external credential at all, but the key Odoo signs CSRF tokens
+		// and sessions with. Every login page then rendered a 500 with
+		// "CSRF protection requires a configured database secret", from a step
+		// whose log line says it is removing API tokens. Two more of Odoo's own
+		// settings were caught the same way.
+		//
+		// So the pattern stays broad and Odoo's own namespace is excluded, and
+		// what is deleted is PRINTED. A pattern like this will over-match again
+		// on somebody's module; the difference is whether that shows up in this
+		// job's log or in a browser three days later.
 		b.WriteString(`echo ">> stripping external credentials from ir_config_parameter"` + "\n")
 		b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\nBEGIN;\n")
 		b.WriteString("DELETE FROM ir_config_parameter WHERE key ~* " +
-			"'(token|secret|api[_.]?key|password|webhook|client[_.]?id|private[_.]?key)';\n")
+			"'(token|secret|api[_.]?key|password|webhook|client[_.]?id|private[_.]?key)'\n" +
+			"  AND key NOT IN ('database.secret', 'password.hashing.rounds')\n" +
+			"  AND key NOT LIKE 'auth\\_password\\_policy.%'\n" +
+			"RETURNING '   removed: ' || key;\n")
 		b.WriteString("COMMIT;\nSQL\n")
 	}
 

@@ -119,8 +119,24 @@ func (r *OdooSnapshotReconciler) ensureConfig(ctx context.Context, snap *doblura
 func (r *OdooSnapshotReconciler) ensureNetworkPolicy(ctx context.Context, snap *doblurav1alpha1.OdooSnapshot) error {
 	tcp := corev1.ProtocolTCP
 	udp := corev1.ProtocolUDP
-	pg := intstrFromInt(5432)
+	// Both configured ports, not 5432 twice. A snapshot talks to two servers —
+	// the source it reads and the work database it rebuilds in — and either can
+	// be somewhere other than the default. Hardcoding the port turned that into
+	// a hang with no explanation anywhere near the cause.
 	dns := intstrFromInt(53)
+	ports := []networkingv1.NetworkPolicyPort{}
+	seen := map[int32]bool{}
+	for _, p := range []int32{
+		orDefaultInt32(snap.Spec.Source.Port, 5432),
+		orDefaultInt32(snap.Spec.Work.Port, 5432),
+	} {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		port := intstrFromInt(p)
+		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &tcp, Port: &port})
+	}
 
 	np := &networkingv1.NetworkPolicy{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
@@ -135,7 +151,7 @@ func (r *OdooSnapshotReconciler) ensureNetworkPolicy(ctx context.Context, snap *
 					{Protocol: &udp, Port: &dns},
 					{Protocol: &tcp, Port: &dns},
 				}},
-				{Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &pg}}},
+				{Ports: ports},
 			},
 		},
 	}

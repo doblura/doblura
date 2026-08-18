@@ -191,6 +191,28 @@ check "3 replicas, Database filestore"       "$ENV  data: {type: Demo}
   storage: {filestore: {mode: Database}}
   workload: {web: {replicas: 3}}" ok
 
+echo "-- the connection proxy --"
+# Mode is the only field with a safe default, so an absent proxy block and an
+# explicit None must both be accepted without dragging anything else in.
+check "no proxy block"                       "$ENV  data: {type: Demo}" ok
+check "proxy mode None"                      "$ENV  data: {type: Demo}
+  database: {host: h, user: u, passwordSecret: s, proxy: {mode: None}}" ok
+check "Sidecar without an image"             "$ENV  data: {type: Demo}
+  database: {host: h, user: u, passwordSecret: s, proxy: {mode: Sidecar}}" rejected
+check "Sidecar with an image"                "$ENV  data: {type: Demo}
+  database: {host: h, user: u, passwordSecret: s, proxy: {mode: Sidecar, image: pgb:1}}" ok
+# Transaction pooling loses Odoo's bus. The rule guards on has() first: without
+# it CEL raises "no such key" instead of failing validation, which rejects for
+# the wrong reason and says nothing useful.
+check "Transaction without acknowledgement"  "$ENV  data: {type: Demo}
+  database: {host: h, user: u, passwordSecret: s, proxy: {mode: Sidecar, image: pgb:1, poolMode: Transaction}}" rejected
+check "Transaction with a wrong value"       "$ENV  data: {type: Demo}
+  database: {host: h, user: u, passwordSecret: s, proxy: {mode: Sidecar, image: pgb:1, poolMode: Transaction, unsafeAcknowledgement: yes-ok}}" rejected
+check "Transaction acknowledged"             "$ENV  data: {type: Demo}
+  database: {host: h, user: u, passwordSecret: s, proxy: {mode: Sidecar, image: pgb:1, poolMode: Transaction, unsafeAcknowledgement: i-accept-transaction-pooling-breaks-the-odoo-bus}}" ok
+check "Session needs no acknowledgement"     "$ENV  data: {type: Demo}
+  database: {host: h, user: u, passwordSecret: s, proxy: {mode: Sidecar, image: pgb:1, poolMode: Session}}" ok
+
 echo "-- crons and jobs --"
 # A cron tier is a SECOND pod writing the filestore, so it carries the same
 # sharing requirement as a second web replica. These checks exist because the

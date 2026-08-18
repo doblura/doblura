@@ -261,6 +261,55 @@ orphaned attachments, and that breaks migrations in confusing ways.
 
 ---
 
+## The database can live outside, without the workload holding the key
+
+`spec.database.proxy` puts pgbouncer in the pod, as a native sidecar, with the
+credential Secret mounted into **that container and nowhere else**:
+
+```yaml
+spec:
+  database:
+    host: postgres.internal.example.com   # anywhere: managed, on-prem, another cluster
+    port: 5432
+    user: odoo
+    passwordSecret: prod-db
+    proxy:
+      mode: Sidecar
+      image: edoburu/pgbouncer:1.25
+      poolMode: Session
+```
+
+Odoo then connects to `127.0.0.1` with no password at all. Containers in a pod
+share a network namespace and not a filesystem, so the Odoo container has no
+`PGPASSWORD`, cannot read the file the sidecar reads, and its `odoo.conf` says
+`db_host = 127.0.0.1` — it does not learn the address it is being forwarded to.
+The operator never reads the password either: pgbouncer's configuration is
+generated inside the pod, from the mounted file, into a `tmpfs`.
+
+**`poolMode` defaults to `Session`, and that default is the feature.** Odoo's bus
+issues `listen imbus` and then waits on the socket (`bus.py`), and `LISTEN` is
+session state that transaction pooling does not preserve. Everything else Odoo
+does is transaction-scoped and would survive: `ir_cron` serialises with
+`FOR NO KEY UPDATE SKIP LOCKED`, `mail_thread` uses `pg_try_advisory_xact_lock`.
+The bus is the single exception and it is enough. `Transaction` is available and
+requires an explicit acknowledgement, because the failure is silent — live
+notifications simply stop — and it appears under concurrency rather than in
+testing.
+
+Two limits, stated because this is a boundary and not a wall:
+
+- It stops the **workload** reading the credential. It does not stop anything
+  that can use the pod's ServiceAccount from asking the API server for the
+  Secret. Environment pods should have a ServiceAccount with no secret access.
+- Anyone who can exec into the Odoo container can still *use* the database over
+  the loopback socket. What you gain is rotation without redeploying, and a blast
+  radius that stops at one database — not confidentiality against someone who is
+  already inside.
+
+The same field exists on `OdooRehearsal`, which is the case that wants it most:
+a rehearsal restores a copy of production, so it is simultaneously the pod most
+worth compromising and the one whose credential it makes least sense to hand out.
+
 ## Web and crons are separate tiers
 
 Odoo's default is one process that both serves HTTP and fires scheduled actions.
