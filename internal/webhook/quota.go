@@ -147,6 +147,16 @@ func (m *EnvironmentCreator) Handle(ctx context.Context, req admission.Request) 
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	// Both, from the client, is a mistake worth naming. Checked here rather than
+	// in CEL because CEL runs after this webhook, by which point resolving the
+	// catalogue name has legitimately set both.
+	if env.Spec.ImageRef != "" && env.Spec.Image != "" {
+		return admission.Denied(
+			"name either spec.imageRef or spec.image, not both: a precedence rule is one more " +
+				"thing to remember, and remembering it wrong here means running a different " +
+				"version of the product than the screen says")
+	}
+
 	// A hand-built patch rather than decode-mutate-remarshal.
 	//
 	// The usual PatchResponseFromRaw round-trip diffs the whole object, so it
@@ -160,9 +170,12 @@ func (m *EnvironmentCreator) Handle(ctx context.Context, req admission.Request) 
 		patch = jsonpatch.NewOperation("add", "/metadata/annotations",
 			map[string]string{CreatorAnnotation: req.UserInfo.Username})
 	}
-	ops := []jsonpatch.Operation{patch}
-	ops = append(ops, m.defaultsFrom(ctx, &env)...)
-	return admission.Patched("recorded the creator from the authenticated identity", ops...)
+	ops, deny := m.defaultsFrom(ctx, &env)
+	if deny != "" {
+		return admission.Denied(deny)
+	}
+	return admission.Patched("recorded the creator from the authenticated identity",
+		append([]jsonpatch.Operation{patch}, ops...)...)
 }
 
 // defaultsFrom fills the infrastructure fields from the customer record.
@@ -181,9 +194,9 @@ func (m *EnvironmentCreator) Handle(ctx context.Context, req admission.Request) 
 func (m *EnvironmentCreator) defaultsFrom(
 	ctx context.Context,
 	env *doblurav1alpha1.OdooEnvironment,
-) []jsonpatch.Operation {
+) ([]jsonpatch.Operation, string) {
 	if m.Client == nil || env.Spec.ForTenant == "" {
-		return nil
+		return nil, ""
 	}
 	var tenant doblurav1alpha1.OdooTenant
 	if err := m.Client.Get(ctx, client.ObjectKey{
@@ -192,16 +205,44 @@ func (m *EnvironmentCreator) defaultsFrom(
 		// Deliberately not an error. A missing customer record is caught by the
 		// validating half with a message about the tenant; failing here would
 		// report it as a defaulting failure, which names the wrong thing.
-		return nil
-	}
-	d := tenant.Spec.EnvironmentDefaults
-	if d == nil {
-		return nil
+		return nil, ""
 	}
 
 	var ops []jsonpatch.Operation
-	if env.Spec.Image == "" && d.Image != "" {
-		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", d.Image))
+
+	// An imageRef that does not resolve is REFUSED, never quietly replaced by the
+	// customer's default. Falling back was the first implementation and it was
+	// wrong in the worst available way: a typo in a catalogue name produced a
+	// working environment running a different version of the product than the
+	// person asked for, with nothing anywhere saying so.
+	if env.Spec.ImageRef != "" {
+		e := tenant.Spec.ImageByName(env.Spec.ImageRef)
+		if e == nil {
+			return nil, fmt.Sprintf(
+				"%q is not in %s's image catalogue. Available: %s",
+				env.Spec.ImageRef, tenant.Name, catalogueNames(&tenant))
+		}
+		return append(ops, jsonpatch.NewOperation("add", "/spec/image", e.Image)), ""
+	}
+
+	d := tenant.Spec.EnvironmentDefaults
+	if d == nil {
+		// No environmentDefaults, but a catalogue may still answer the question.
+		if e := tenant.Spec.DefaultImage(); e != nil && env.Spec.Image == "" {
+			ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", e.Image))
+		}
+		return ops, ""
+	}
+
+	if env.Spec.Image == "" {
+		// The catalogue's default wins over environmentDefaults.image: the
+		// catalogue is the field a person edits when they change versions, and
+		// the other is a leftover from before there was one.
+		if e := tenant.Spec.DefaultImage(); e != nil {
+			ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", e.Image))
+		} else if d.Image != "" {
+			ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", d.Image))
+		}
 	}
 	if env.Spec.Database.Host == "" && d.Database != nil {
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/database", d.Database))
@@ -212,8 +253,25 @@ func (m *EnvironmentCreator) defaultsFrom(
 	if env.Spec.Size == "" && d.Size != "" {
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/size", d.Size))
 	}
-	return ops
+	return ops, ""
 }
+
+// catalogueNames lists what the person could have meant.
+//
+// Printed in the refusal because "hms-18 is not in the catalogue" leaves them
+// guessing, and the list is three or four short names.
+func catalogueNames(t *doblurav1alpha1.OdooTenant) string {
+	if len(t.Spec.Images) == 0 {
+		return "the catalogue is empty"
+	}
+	names := make([]string, 0, len(t.Spec.Images))
+	for i := range t.Spec.Images {
+		names = append(names, t.Spec.Images[i].Name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 
 // escapeJSONPointer encodes a map key for use in a JSON Pointer path. The
 // annotation contains a `/`, which is the pointer's own separator.

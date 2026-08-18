@@ -619,6 +619,28 @@ spec:
               image:
                 minLength: 1
                 type: string
+              imageRef:
+                description: |-
+                  ImageRef names an entry in the customer's image catalogue.
+
+                  The field a person fills in. spec.image is the registry reference it
+                  resolves to, written by the mutating webhook — which means an environment
+                  records WHICH image it ran even after the catalogue entry is repointed at a
+                  new build, and that is the difference between a reproducible environment
+                  and one that quietly changed underneath somebody.
+
+                  Naming both is an error rather than a precedence rule: a precedence rule is
+                  a thing people have to remember, and getting it wrong here means running a
+                  different version of the product than the screen says.
+
+                  That check is in the mutating webhook and NOT a CEL rule, and the reason is
+                  worth keeping. A CEL rule saying "not both" runs after admission mutation,
+                  by which point the webhook has resolved imageRef into image and produced
+                  exactly the state the rule forbids. It rejected every environment that used
+                  a catalogue name — a rule firing on a condition the system itself creates.
+                  Only the webhook sees what the client actually sent.
+                maxLength: 63
+                type: string
               lifecycle:
                 default: {}
                 description: EnvLifecycle is how long it lives.

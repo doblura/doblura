@@ -52,3 +52,25 @@ webhooks:
     - odooenvironments
   sideEffects: None
   timeoutSeconds: 5
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: doblura-webhook
+      namespace: doblura-system
+      path: /validate-doblura-dev-v1alpha1-odootenant
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: tenant.odootenant.doblura.dev
+  rules:
+  - apiGroups:
+    - doblura.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - odootenants
+  sideEffects: None
+  timeoutSeconds: 5

@@ -256,6 +256,28 @@ type EnvLifecycle struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="more than one web replica needs a filestore every pod can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database, which has no filestore to share: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.cron) || self.workload.cron.replicas == 0 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="a cron tier is a second pod writing the same filestore and needs one both tiers can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database: scheduled jobs that generate reports or attachments would otherwise write them where the web tier cannot read them, and a ReadWriteOnce claim only appears to work while both pods happen to land on the same node"
 type OdooEnvironmentSpec struct {
+	// ImageRef names an entry in the customer's image catalogue.
+	//
+	// The field a person fills in. spec.image is the registry reference it
+	// resolves to, written by the mutating webhook — which means an environment
+	// records WHICH image it ran even after the catalogue entry is repointed at a
+	// new build, and that is the difference between a reproducible environment
+	// and one that quietly changed underneath somebody.
+	//
+	// Naming both is an error rather than a precedence rule: a precedence rule is
+	// a thing people have to remember, and getting it wrong here means running a
+	// different version of the product than the screen says.
+	//
+	// That check is in the mutating webhook and NOT a CEL rule, and the reason is
+	// worth keeping. A CEL rule saying "not both" runs after admission mutation,
+	// by which point the webhook has resolved imageRef into image and produced
+	// exactly the state the rule forbids. It rejected every environment that used
+	// a catalogue name — a rule firing on a condition the system itself creates.
+	// Only the webhook sees what the client actually sent.
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	ImageRef string `json:"imageRef,omitempty"`
+
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
 

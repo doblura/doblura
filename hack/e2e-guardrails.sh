@@ -283,12 +283,47 @@ else printf '  FAIL  an explicit quota of zero came back as %s\n' "${zero:-<noth
 # It SAYS when it is skipping. A quota check that silently does nothing in the
 # cluster where it matters is the failure mode this project keeps rediscovering.
 echo
+echo "-- the image catalogue --"
+check "one default"                          "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: '18.0', default: true}
+    - {name: b, image: 'x:2', odooVersion: '18.1'}" ok
+# Two defaults means which image a new environment gets depends on list order,
+# and list order is not something anybody edits on purpose.
+check "two defaults"                         "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: '18.0', default: true}
+    - {name: b, image: 'x:2', odooVersion: '18.1', default: true}" rejected
+check "no default is allowed"                "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: '18.0'}" ok
+# listType=map keyed on name: the API server enforces uniqueness itself, which
+# is why there is no CEL rule doing it in quadratic time.
+check "duplicate catalogue names"            "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: '18.0'}
+    - {name: a, image: 'x:2', odooVersion: '18.1'}" rejected
+# The version is declared, never parsed from the tag: hms:18, hms:18.0-rc2 and
+# hms:stable may all be Odoo 18, and guessing is how a major slips through.
+check "a version that is not a version"      "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: latest}" rejected
+check "a name that is not a DNS label"       "$TEN  images:
+    - {name: 'Not A Name', image: 'x:1', odooVersion: '18.0'}" rejected
+check "majorUpgrade naming no entry"         "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: '18.0', default: true}
+  majorUpgrade: {toImage: nope, rehearsalRef: r, acknowledgement: i-accept-a-major-upgrade-rewrites-the-database-and-cannot-be-rolled-back}" rejected
+check "majorUpgrade without the literal"     "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: '18.0', default: true}
+  majorUpgrade: {toImage: a, rehearsalRef: r, acknowledgement: sure}" rejected
+# A fresh customer record is not an upgrade: there is nothing to cross FROM, and
+# demanding a rehearsal would be asking for evidence about a migration that is
+# not happening.
+check "a new customer on any major"          "$TEN  images:
+    - {name: a, image: 'x:1', odooVersion: '19.0', default: true}" ok
+echo
 WHC=$(kubectl get validatingwebhookconfiguration -l app.kubernetes.io/name=doblura \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [ -z "$WHC" ]; then
   echo "-- environment quota: SKIPPED (no quota webhook in this cluster; run make e2e-quota) --"
   echo
-  [ $fails -eq 0 ] && echo "  all guardrails OK" || { echo "  $fails guardrail(s) failed"; exit 1; }
+
+[ $fails -eq 0 ] && echo "  all guardrails OK" || { echo "  $fails guardrail(s) failed"; exit 1; }
   exit 0
 fi
 

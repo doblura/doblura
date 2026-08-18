@@ -250,6 +250,110 @@ spec:
                             !has(self.size))
                     type: object
                 type: object
+              images:
+                description: |-
+                  Images is the catalogue of images this customer may run.
+
+                  A catalogue rather than a free-text field, because nobody should have to
+                  remember that this customer runs `ghcr.io/example/hms:18` while the one
+                  below them runs something else. Support picks a name from a list; the
+                  registry reference is written once, by whoever builds the images.
+
+                  A listType=map keyed on name, so the API server enforces uniqueness itself
+                  rather than a CEL rule doing it in quadratic time.
+                items:
+                  description: |-
+                    OdooTenant is a customer.
+
+                    ImageCatalogueEntry is one image this customer may run.
+                  properties:
+                    default:
+                      description: |-
+                        Default marks the entry new environments get when none is named. Exactly
+                        one entry may set it.
+                      type: boolean
+                    image:
+                      description: Image is the pullable reference.
+                      minLength: 1
+                      type: string
+                    name:
+                      description: 'Name is what a person picks from a list: "hms-18",
+                        not a registry path.'
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                      type: string
+                    notes:
+                      description: |-
+                        Notes is free text shown beside the name: "current production", "security
+                        backports only".
+                      maxLength: 200
+                      type: string
+                    odooVersion:
+                      description: |-
+                        OdooVersion this image is, for example "18.0".
+
+                        Declared rather than parsed out of the tag. A tag is a string somebody
+                        chose: `hms:18` and `hms:18.0-rc2` and `hms:stable` may all be Odoo 18, and
+                        guessing from the text is how a major upgrade gets waved through because
+                        the tag did not look like one.
+                      pattern: ^[0-9]+\.[0-9]+$
+                      type: string
+                  required:
+                  - image
+                  - name
+                  - odooVersion
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              majorUpgrade:
+                description: |-
+                  MajorUpgrade authorises a change of major version, and nothing else.
+
+                  It exists because promoting a customer from 18 to 19 must not be the same
+                  gesture as promoting them from one 18 build to the next. The first is a
+                  rollout: the image changes, the schema does not, and rolling back is
+                  redeploying the old tag. The second rewrites the database, and there is no
+                  rollback — there is only a restore from before it started.
+
+                  A dropdown cannot tell those apart, so the API does: changing which
+                  catalogue entry is default WITHIN a major is an ordinary edit, and changing
+                  it ACROSS majors is refused unless this field names a rehearsal that
+                  actually succeeded against exactly that image.
+                properties:
+                  acknowledgement:
+                    minLength: 1
+                    type: string
+                  rehearsalRef:
+                    description: |-
+                      RehearsalRef is an OdooRehearsal in this namespace that succeeded against
+                      exactly the image being promoted.
+
+                      The webhook reads the object; it does not take your word for it. A
+                      rehearsal that failed, that is still running, or that ran against a
+                      different image is not evidence, and each of those is refused by name.
+                    minLength: 1
+                    type: string
+                  toImage:
+                    description: |-
+                      ToImage is the catalogue entry name being promoted. Named explicitly so
+                      this authorisation cannot be left behind and silently authorise the NEXT
+                      major upgrade too.
+                    minLength: 1
+                    type: string
+                required:
+                - acknowledgement
+                - rehearsalRef
+                - toImage
+                type: object
+                x-kubernetes-validations:
+                - message: 'majorUpgrade.acknowledgement must be set to its literal
+                    value: crossing a major version rewrites the database in place,
+                    and the way back is a restore from before it started, not a redeploy'
+                  rule: self.acknowledgement == 'i-accept-a-major-upgrade-rewrites-the-database-and-cannot-be-rolled-back'
               maxEphemeralEnvironments:
                 default: 3
                 description: |-
@@ -287,6 +391,16 @@ spec:
             required:
             - displayName
             type: object
+            x-kubernetes-validations:
+            - message: 'only one image may be the default: with two, which one a new
+                environment gets depends on list order, and list order is not something
+                anybody edits on purpose'
+              rule: '!has(self.images) || self.images.filter(i, has(i.default) &&
+                i.default).size() <= 1'
+            - message: majorUpgrade.toImage must name an entry in this customer's
+                image catalogue
+              rule: '!has(self.majorUpgrade) || (has(self.images) && self.images.exists(i,
+                i.name == self.majorUpgrade.toImage))'
           status:
             description: OdooTenantStatus is written by the controller only.
             properties:

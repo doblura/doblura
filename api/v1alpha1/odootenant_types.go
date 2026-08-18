@@ -4,6 +4,8 @@
 package v1alpha1
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -24,6 +26,9 @@ import (
 //   - It is the subject of the handover question: "can this copy go to them?"
 
 // OdooTenantSpec describes a customer.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.images) || self.images.filter(i, has(i.default) && i.default).size() <= 1",message="only one image may be the default: with two, which one a new environment gets depends on list order, and list order is not something anybody edits on purpose"
+// +kubebuilder:validation:XValidation:rule="!has(self.majorUpgrade) || (has(self.images) && self.images.exists(i, i.name == self.majorUpgrade.toImage))",message="majorUpgrade.toImage must name an entry in this customer's image catalogue"
 type OdooTenantSpec struct {
 	// DisplayName is what humans call them. The object name is a DNS label and
 	// makes a poor thing to show people.
@@ -62,6 +67,36 @@ type OdooTenantSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MaxEphemeralEnvironments *int32 `json:"maxEphemeralEnvironments,omitempty"`
+
+	// Images is the catalogue of images this customer may run.
+	//
+	// A catalogue rather than a free-text field, because nobody should have to
+	// remember that this customer runs `ghcr.io/example/hms:18` while the one
+	// below them runs something else. Support picks a name from a list; the
+	// registry reference is written once, by whoever builds the images.
+	//
+	// A listType=map keyed on name, so the API server enforces uniqueness itself
+	// rather than a CEL rule doing it in quadratic time.
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=32
+	// +optional
+	Images []ImageCatalogueEntry `json:"images,omitempty"`
+
+	// MajorUpgrade authorises a change of major version, and nothing else.
+	//
+	// It exists because promoting a customer from 18 to 19 must not be the same
+	// gesture as promoting them from one 18 build to the next. The first is a
+	// rollout: the image changes, the schema does not, and rolling back is
+	// redeploying the old tag. The second rewrites the database, and there is no
+	// rollback — there is only a restore from before it started.
+	//
+	// A dropdown cannot tell those apart, so the API does: changing which
+	// catalogue entry is default WITHIN a major is an ordinary edit, and changing
+	// it ACROSS majors is refused unless this field names a rehearsal that
+	// actually succeeded against exactly that image.
+	// +optional
+	MajorUpgrade *MajorUpgrade `json:"majorUpgrade,omitempty"`
 
 	// EnvironmentDefaults is how this customer's environments are built.
 	//
@@ -178,6 +213,99 @@ type OdooTenantStatus struct {
 
 // OdooTenant is a customer.
 //
+// ImageCatalogueEntry is one image this customer may run.
+type ImageCatalogueEntry struct {
+	// Name is what a person picks from a list: "hms-18", not a registry path.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// Image is the pullable reference.
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
+
+	// OdooVersion this image is, for example "18.0".
+	//
+	// Declared rather than parsed out of the tag. A tag is a string somebody
+	// chose: `hms:18` and `hms:18.0-rc2` and `hms:stable` may all be Odoo 18, and
+	// guessing from the text is how a major upgrade gets waved through because
+	// the tag did not look like one.
+	// +kubebuilder:validation:Pattern=`^[0-9]+\.[0-9]+$`
+	OdooVersion string `json:"odooVersion"`
+
+	// Default marks the entry new environments get when none is named. Exactly
+	// one entry may set it.
+	// +optional
+	Default bool `json:"default,omitempty"`
+
+	// Notes is free text shown beside the name: "current production", "security
+	// backports only".
+	// +kubebuilder:validation:MaxLength=200
+	// +optional
+	Notes string `json:"notes,omitempty"`
+}
+
+// MajorUpgradeAck is the literal that authorises crossing a major version.
+const MajorUpgradeAck = "i-accept-a-major-upgrade-rewrites-the-database-and-cannot-be-rolled-back"
+
+// MajorUpgrade is the evidence for a major version change.
+//
+// +kubebuilder:validation:XValidation:rule="self.acknowledgement == 'i-accept-a-major-upgrade-rewrites-the-database-and-cannot-be-rolled-back'",message="majorUpgrade.acknowledgement must be set to its literal value: crossing a major version rewrites the database in place, and the way back is a restore from before it started, not a redeploy"
+type MajorUpgrade struct {
+	// ToImage is the catalogue entry name being promoted. Named explicitly so
+	// this authorisation cannot be left behind and silently authorise the NEXT
+	// major upgrade too.
+	// +kubebuilder:validation:MinLength=1
+	ToImage string `json:"toImage"`
+
+	// RehearsalRef is an OdooRehearsal in this namespace that succeeded against
+	// exactly the image being promoted.
+	//
+	// The webhook reads the object; it does not take your word for it. A
+	// rehearsal that failed, that is still running, or that ran against a
+	// different image is not evidence, and each of those is refused by name.
+	// +kubebuilder:validation:MinLength=1
+	RehearsalRef string `json:"rehearsalRef"`
+
+	// +kubebuilder:validation:MinLength=1
+	Acknowledgement string `json:"acknowledgement"`
+}
+
+// DefaultImage returns the catalogue entry new environments use.
+func (s *OdooTenantSpec) DefaultImage() *ImageCatalogueEntry {
+	for i := range s.Images {
+		if s.Images[i].Default {
+			return &s.Images[i]
+		}
+	}
+	// A catalogue with no entry marked default still has an obvious answer when
+	// it holds exactly one image, and refusing to use it would be pedantry.
+	if len(s.Images) == 1 {
+		return &s.Images[0]
+	}
+	return nil
+}
+
+// ImageByName finds a catalogue entry.
+func (s *OdooTenantSpec) ImageByName(name string) *ImageCatalogueEntry {
+	for i := range s.Images {
+		if s.Images[i].Name == name {
+			return &s.Images[i]
+		}
+	}
+	return nil
+}
+
+// Major is the part of the version that cannot be crossed casually.
+func (e *ImageCatalogueEntry) Major() string {
+	if e == nil {
+		return ""
+	}
+	major, _, _ := strings.Cut(e.OdooVersion, ".")
+	return major
+}
+
 // EnvironmentDefaults are the parts of an OdooEnvironment that come from the
 // customer rather than from the person opening it.
 type EnvironmentDefaults struct {

@@ -98,6 +98,10 @@ func Register(mgr ctrl.Manager, o Options, caBundle []byte) error {
 		ExemptUsers:   exemptSet(o.ExemptUsers),
 		MaxPerCreator: int32(o.MaxEnvironmentsPerCreator), //nolint:gosec // a flag, bounded by the schema
 	}})
+	server.Register(TenantPath, &admission.Webhook{Handler: &TenantGuard{
+		Decoder: decoder,
+		Reader:  mgr.GetAPIReader(),
+	}})
 
 	for _, r := range []*CABundleReconciler{
 		{Client: mgr.GetClient(), Name: o.ValidatingConfigName, CABundle: caBundle},
