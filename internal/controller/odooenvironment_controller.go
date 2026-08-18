@@ -216,7 +216,17 @@ func (r *OdooEnvironmentReconciler) phasePipeline(env *doblurav1alpha1.OdooEnvir
 	// OdooRehearsal: there the result of the `-u` decides whether something gets
 	// promoted; here it is simply the errand on the way to a usable environment
 	// running a future version. Same machinery, different purpose.
-	if env.Spec.Migration.Engine != "" {
+	// Only data that came from somewhere ELSE can need migrating. A database this
+	// operator just initialised is, by definition, already at the image's version:
+	// running `-u` on it does nothing except demand that the image ship
+	// click-odoo-contrib, which is how a Demo environment fails with
+	// "click-odoo-update: not found" for a step it never needed.
+	//
+	// The engine field carries a default, so testing it alone made the step
+	// unconditional — an optional phase that everybody paid for.
+	needsMigration := env.Spec.Data.Type == doblurav1alpha1.DataSnapshot ||
+		env.Spec.Data.Type == doblurav1alpha1.DataLive
+	if needsMigration && env.Spec.Migration.Engine != "" {
 		steps = append(steps, envPhaseStep{"migrate", "Migrated", doblurav1alpha1.EnvProvisioning, envMigrateScript})
 	}
 
@@ -299,7 +309,14 @@ func (r *OdooEnvironmentReconciler) ensureConfigAndSecrets(
 			Name: env.Name + "-odoo-conf", Namespace: env.Namespace,
 			Labels: envLabels(env, "config"),
 		},
-		Data: map[string]string{"odoo.conf": envOdooConf(env)},
+		Data: map[string]string{
+			"odoo.conf": envOdooConf(env),
+			// Written unconditionally, even with no cron tier: it costs a few
+			// hundred bytes, and generating it only when the tier exists would
+			// make enabling the tier a two-step dance where the Deployment can
+			// start before the ConfigMap that configures it has been updated.
+			"odoo-cron.conf": envCronConf(env),
+		},
 	}
 	if err := ctrl.SetControllerReference(env, cm, r.Scheme); err != nil {
 		return err
@@ -381,6 +398,59 @@ func (r *OdooEnvironmentReconciler) ensureWorkload(
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Selector: &metav1.LabelSelector{MatchLabels: envSelector(env)},
 			Template: envServingPod(env),
+		},
+	}
+	if err := ctrl.SetControllerReference(env, dep, r.Scheme); err != nil {
+		return err
+	}
+	if err := r.Patch(ctx, dep, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
+		return err
+	}
+	return r.ensureCronTier(ctx, env, replicas)
+}
+
+// ensureCronTier creates the cron Deployment, or removes it.
+//
+// The removal half is the half that matters. The web tier's odoo.conf carries
+// max_cron_threads = 0 for exactly as long as a cron tier exists to pick them up,
+// so creating the tier and deleting the tier are not "add a Deployment" and
+// "stop adding a Deployment" — they are two halves of a switch, and reconciling
+// only forwards would leave an environment whose web tier has stopped running
+// crons and whose cron tier no longer exists. Nothing would run them at all, and
+// nothing would say so: no error, no event, no failing pod. Just an Odoo where
+// scheduled actions quietly never fire.
+//
+// That is why this deletes rather than scales to zero. A Deployment sitting at
+// zero replicas reads, to anyone running kubectl get, exactly like a cron tier
+// that is temporarily down.
+func (r *OdooEnvironmentReconciler) ensureCronTier(
+	ctx context.Context,
+	env *doblurav1alpha1.OdooEnvironment,
+	replicas int32,
+) error {
+	name := env.Name + "-cron"
+
+	if !env.Spec.Workload.SplitsCrons() {
+		dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: env.Namespace}}
+		return client.IgnoreNotFound(r.Delete(ctx, dep))
+	}
+
+	// Hibernation stops the crons with everything else. A hibernated environment
+	// that kept firing scheduled actions would be running the very jobs — mail,
+	// invoicing, stock moves — that hibernation exists to stop.
+	dep := &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: env.Namespace, Labels: envTierLabels(env, "cron"),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			// Recreate, and here it is not a preference. Two cron workers against
+			// one database is the double-execution this whole tier exists to
+			// prevent, and a RollingUpdate deliberately runs both for a while.
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
+			Selector: &metav1.LabelSelector{MatchLabels: envTierSelector(env, "cron")},
+			Template: envCronPod(env),
 		},
 	}
 	if err := ctrl.SetControllerReference(env, dep, r.Scheme); err != nil {
@@ -491,7 +561,13 @@ func (r *OdooEnvironmentReconciler) ensureEnvNetworkPolicy(ctx context.Context, 
 			Labels: envLabels(env, "odoo"),
 		},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: envSelector(env)},
+			// Selected by environment, not by envSelector: envSelector is the
+			// WEB tier's identity, and a policy scoped to it would leave the
+			// cron tier — same database credential, same network — with
+			// unrestricted egress. The environment label is on every pod.
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"doblura.dev/environment": env.Name},
+			},
 			// Egress only: ingress is Traefik's job, and blocking it here would
 			// make the environment unreachable.
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},

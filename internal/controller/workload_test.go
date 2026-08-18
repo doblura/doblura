@@ -120,8 +120,17 @@ func TestDatabaseFilestoreNeedsNoVolumeAndSetsTheParameter(t *testing.T) {
 	if !strings.Contains(got, "ir_attachment.location") || !strings.Contains(got, "'db'") {
 		t.Fatalf("the hardening step must set ir_attachment.location = db:\n%s", got)
 	}
+	// Guarded on the real condition — attachments actually on disk — not on the
+	// data type. A freshly initialised database has none, so it must not be made
+	// to require click-odoo-contrib for nothing.
+	if !strings.Contains(got, "store_fname IS NOT NULL") {
+		t.Error("the migration must be guarded on whether anything is on disk")
+	}
 	if !strings.Contains(got, "force_storage") {
-		t.Error("existing attachments must be migrated, or they stay on a disk that is about to vanish")
+		t.Error("attachments that ARE on disk must still be moved")
+	}
+	if !strings.Contains(got, "nothing to move") {
+		t.Error("the empty case must say so rather than failing")
 	}
 	// And it must NOT be set when the mode is anything else, or a PVC-backed
 	// environment silently starts filling Postgres with blobs.
@@ -129,5 +138,59 @@ func TestDatabaseFilestoreNeedsNoVolumeAndSetsTheParameter(t *testing.T) {
 	env.Spec.Storage.Filestore.ClaimName = "fs"
 	if strings.Contains(envHardenScript(env), "ir_attachment.location") {
 		t.Error("a PVC-backed filestore must not be redirected into the database")
+	}
+}
+
+func TestLocallyInitialisedDataIsNotMigrated(t *testing.T) {
+	// A database this operator just created is already at the image's version.
+	// Running the migrate phase on it does nothing except demand click-odoo-contrib
+	// — which is how a Demo environment failed with "click-odoo-update: not found"
+	// for a step it never needed. The engine field carries a default, so testing it
+	// alone made an optional phase unconditional.
+	r := &OdooEnvironmentReconciler{}
+	for _, dt := range []doblurav1alpha1.EnvDataType{
+		doblurav1alpha1.DataDemo, doblurav1alpha1.DataEmpty,
+	} {
+		env := &doblurav1alpha1.OdooEnvironment{Spec: doblurav1alpha1.OdooEnvironmentSpec{
+			Data:      doblurav1alpha1.EnvData{Type: dt},
+			Migration: doblurav1alpha1.MigrationSpec{Engine: doblurav1alpha1.EngineClickOdooUpdate},
+		}}
+		for _, s := range r.phasePipeline(env) {
+			if s.name == "migrate" {
+				t.Errorf("%s data must not run the migrate phase", dt)
+			}
+		}
+	}
+	// Data that came from somewhere else still does.
+	env := &doblurav1alpha1.OdooEnvironment{Spec: doblurav1alpha1.OdooEnvironmentSpec{
+		Data:      doblurav1alpha1.EnvData{Type: doblurav1alpha1.DataSnapshot},
+		Migration: doblurav1alpha1.MigrationSpec{Engine: doblurav1alpha1.EngineClickOdooUpdate},
+	}}
+	var saw bool
+	for _, s := range r.phasePipeline(env) {
+		saw = saw || s.name == "migrate"
+	}
+	if !saw {
+		t.Error("a snapshot-backed environment must still be migrated")
+	}
+}
+
+func TestMigrateScriptNamesTheMissingRequirement(t *testing.T) {
+	env := &doblurav1alpha1.OdooEnvironment{
+		ObjectMeta: metav1.ObjectMeta{Name: "e", Namespace: "d"},
+		Spec: doblurav1alpha1.OdooEnvironmentSpec{
+			Image:     "odoo:18",
+			Database:  doblurav1alpha1.DatabaseSpec{Host: "h", User: "u", PasswordSecret: "s"},
+			Migration: doblurav1alpha1.MigrationSpec{Engine: doblurav1alpha1.EngineClickOdooUpdate},
+		},
+	}
+	got := envMigrateScript(env)
+	if !strings.Contains(got, "click-odoo-contrib") || !strings.Contains(got, "odoo:18") {
+		t.Fatalf("the failure must name the requirement and the image:\n%s", got)
+	}
+	// odoo -u needs no such tool, so it gets no guard.
+	env.Spec.Migration.Engine = doblurav1alpha1.EngineOdooUpdateAll
+	if strings.Contains(envMigrateScript(env), "click-odoo-contrib") {
+		t.Error("the odoo -u engine needs no click-odoo-contrib guard")
 	}
 }

@@ -192,9 +192,36 @@ check "3 replicas, Database filestore"       "$ENV  data: {type: Demo}
   workload: {web: {replicas: 3}}" ok
 
 echo "-- crons and jobs --"
+# A cron tier is a SECOND pod writing the filestore, so it carries the same
+# sharing requirement as a second web replica. These checks exist because the
+# feature shipped once with the API accepting the combination and the operator
+# creating two pods over one ReadWriteOnce volume, which works right up to the
+# first reschedule.
+check "cron tier, ephemeral filestore"       "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: Ephemeral}}
+  lifecycle: {ttl: 8h}
+  workload: {cron: {replicas: 1}}" rejected
+check "cron tier, RWO PVC filestore"         "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs}}
+  workload: {cron: {replicas: 1}}" rejected
+check "cron tier, PVC declared RWX"          "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs, accessModeReadWriteMany: true}}
+  workload: {cron: {replicas: 1}}" ok
+check "cron tier, Database filestore"        "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: Database}}
+  workload: {cron: {replicas: 1}}" ok
+# replicas 0 is "no cron tier", so it must not drag the filestore rule in.
+check "cron tier disabled needs no sharing"  "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: Ephemeral}}
+  lifecycle: {ttl: 8h}
+  workload: {cron: {replicas: 0}}" ok
+
 check "cron tier with 2 replicas"            "$ENV  data: {type: Demo}
   workload: {cron: {replicas: 2}}" rejected
+# Carries a shareable filestore: with the default (Ephemeral) this is now
+# rejected, and rightly — the check is about cron replicas, not the filestore.
 check "cron tier with 1"                     "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: Database}}
   workload: {cron: {replicas: 1}}" ok
 check "queue_job runner with 2"              "$ENV  data: {type: Demo}
   workload: {queueJob: {replicas: 2}}" rejected

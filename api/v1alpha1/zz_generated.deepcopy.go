@@ -801,6 +801,21 @@ func (in *OdooEnvironmentSpec) DeepCopyInto(out *OdooEnvironmentSpec) {
 	in.Exposure.DeepCopyInto(&out.Exposure)
 	in.Security.DeepCopyInto(&out.Security)
 	out.Database = in.Database
+	if in.RunAsUser != nil {
+		in, out := &in.RunAsUser, &out.RunAsUser
+		*out = new(int64)
+		**out = **in
+	}
+	if in.RunAsGroup != nil {
+		in, out := &in.RunAsGroup, &out.RunAsGroup
+		*out = new(int64)
+		**out = **in
+	}
+	if in.FSGroup != nil {
+		in, out := &in.FSGroup, &out.FSGroup
+		*out = new(int64)
+		**out = **in
+	}
 	if in.Storage != nil {
 		in, out := &in.Storage, &out.Storage
 		*out = new(StorageSpec)

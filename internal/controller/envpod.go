@@ -28,8 +28,44 @@ func envSelector(env *doblurav1alpha1.OdooEnvironment) map[string]string {
 	}
 }
 
+// envTierSelector is the identity of a NON-web tier.
+//
+// It deliberately does NOT extend envSelector with an extra label, for two
+// reasons that pull the same way. A Deployment's selector is immutable, so
+// adding a label to the web tier's selector would break every existing install
+// with "field is immutable". And the Service selects on envSelector: any pod
+// carrying those labels receives HTTP traffic, so a cron pod that merely ADDED a
+// label to them would end up behind the Ingress, serving requests it was
+// created to stop serving.
+//
+// So the cron tier is a different app.kubernetes.io/name. The two selectors are
+// disjoint, neither Deployment can steal the other's pods, and the Service
+// cannot reach the cron tier by construction rather than by care.
+func envTierSelector(env *doblurav1alpha1.OdooEnvironment, tier string) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":     "odoo-" + tier,
+		"app.kubernetes.io/instance": env.Name,
+	}
+}
+
+// envTierLabels is envLabels for a non-web tier.
+func envTierLabels(env *doblurav1alpha1.OdooEnvironment, tier string) map[string]string {
+	l := envTierSelector(env, tier)
+	l["app.kubernetes.io/component"] = tier
+	l["app.kubernetes.io/managed-by"] = "doblura"
+	// The label the NetworkPolicy and the operator's own listings select on: it
+	// is the one thing every pod of the environment shares, whatever its tier.
+	l["doblura.dev/environment"] = env.Name
+	l["doblura.dev/tier"] = tier
+	if env.Spec.ForTenant != "" {
+		l["doblura.dev/tenant"] = env.Spec.ForTenant
+	}
+	return l
+}
+
 func envLabels(env *doblurav1alpha1.OdooEnvironment, component string) map[string]string {
 	l := envSelector(env)
+	l["doblura.dev/tier"] = "web"
 	l["app.kubernetes.io/component"] = component
 	l["app.kubernetes.io/managed-by"] = "doblura"
 	l["doblura.dev/environment"] = env.Name
@@ -73,6 +109,38 @@ func envOdooConf(env *doblurav1alpha1.OdooEnvironment) string {
 	}
 	b.WriteString(fmt.Sprintf("workers = %d\n", workers))
 	b.WriteString(fmt.Sprintf("max_cron_threads = %d\n", w.CronThreadsForWeb()))
+	return b.String()
+}
+
+// envCronConf is the configuration of the cron tier.
+//
+// The inverse of the web tier: no HTTP workers, all the cron threads. workers = 0
+// puts Odoo in threaded mode, where max_cron_threads spawns cron threads directly
+// in the one process — which is what a cron-only pod wants, and what makes the
+// pod's memory footprint predictable.
+//
+// HTTP stays ENABLED even though nothing routes to this tier. Turning it off with
+// http_enable = False would be tidier, but it would also remove the only probe
+// that proves anything: /web/health opens a cursor against the database, so a
+// cron pod that has lost its connection fails its liveness probe and is
+// restarted. Without it the probe would be "is the process running", which stays
+// true for a cron worker that has been doing nothing for six hours. The tier is
+// unreachable because no Service selects it, not because it stopped listening.
+func envCronConf(env *doblurav1alpha1.OdooEnvironment) string {
+	base := envOdooConf(env)
+	threads := env.Spec.Workload.CronThreads()
+
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(base, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "workers "):
+			b.WriteString("workers = 0\n")
+		case strings.HasPrefix(line, "max_cron_threads "):
+			b.WriteString(fmt.Sprintf("max_cron_threads = %d\n", threads))
+		default:
+			b.WriteString(line + "\n")
+		}
+	}
 	return b.String()
 }
 
@@ -126,10 +194,14 @@ func envSecurityContext() *corev1.SecurityContext {
 	}
 }
 
-func envPodSecurityContext() *corev1.PodSecurityContext {
+func envPodSecurityContext(env *doblurav1alpha1.OdooEnvironment) *corev1.PodSecurityContext {
+	// Odoo's uid, not Kubernetes'. See OdooEnvironmentSpec.PodUser.
+	uid, gid, fsg := env.Spec.PodUser()
 	return &corev1.PodSecurityContext{
 		RunAsNonRoot:   ptr(true),
-		RunAsUser:      ptr(int64(65532)),
+		RunAsUser:      ptr(uid),
+		RunAsGroup:     ptr(gid),
+		FSGroup:        ptr(fsg),
 		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
 }
@@ -170,7 +242,7 @@ func envJobPod(env *doblurav1alpha1.OdooEnvironment, step envPhaseStep) corev1.P
 		ObjectMeta: metav1.ObjectMeta{Labels: envLabels(env, step.name)},
 		Spec: corev1.PodSpec{
 			RestartPolicy:   corev1.RestartPolicyNever,
-			SecurityContext: envPodSecurityContext(),
+			SecurityContext: envPodSecurityContext(env),
 			InitContainers:  inits,
 			Containers: []corev1.Container{{
 				Name:            step.name,
@@ -195,7 +267,7 @@ func envServingPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec 
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{Labels: envLabels(env, "odoo")},
 		Spec: corev1.PodSpec{
-			SecurityContext: envPodSecurityContext(),
+			SecurityContext: envPodSecurityContext(env),
 			InitContainers:  inits,
 			Containers: []corev1.Container{{
 				Name:  "odoo",
@@ -226,9 +298,63 @@ func envServingPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec 
 	}
 }
 
+// envCronPod builds the tier that runs the scheduled jobs.
+//
+// The same image, the same volumes, the same database — and a different
+// configuration file. What makes it a cron worker is one line of odoo.conf, not a
+// different program, which is why this shares everything with the serving pod
+// rather than reimplementing it.
+//
+// It mounts the filestore like the web tier does, and that is the constraint that
+// makes this tier interesting rather than trivial: report generation and any job
+// that touches an attachment WRITES to the filestore. Two pods writing one
+// filestore means it has to be genuinely shared, which is why the API refuses a
+// cron tier over a ReadWriteOnce volume.
+func envCronPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec {
+	vols, mounts := envVolumes(env)
+	_, _, inits := addonsPlumbing(&env.Spec.Addons)
+
+	return corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{Labels: envTierLabels(env, "cron")},
+		Spec: corev1.PodSpec{
+			SecurityContext: envPodSecurityContext(env),
+			InitContainers:  inits,
+			Containers: []corev1.Container{{
+				Name:  "odoo-cron",
+				Image: env.Spec.Image,
+				Args:  []string{"-c", envCronConfPath},
+				Env:   envEnv(env),
+				// Named, but no Service selects them. The name is what the
+				// probes below refer to.
+				Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8069}},
+				ReadinessProbe: &corev1.Probe{
+					ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+						Path: "/web/health", Port: intstrFromString("http")}},
+					InitialDelaySeconds: 20, PeriodSeconds: 10,
+				},
+				LivenessProbe: &corev1.Probe{
+					ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+						Path: "/web/health", Port: intstrFromString("http")}},
+					// Longer than the web tier's. A cron worker in the middle of
+					// a long job is busy, not dead, and restarting it there is
+					// how a nightly job never finishes.
+					InitialDelaySeconds: 60, PeriodSeconds: 60, FailureThreshold: 5,
+				},
+				VolumeMounts:    mounts,
+				SecurityContext: envSecurityContext(),
+				Resources:       sizeToResources(env.Spec.Size),
+			}},
+			Volumes: vols,
+		},
+	}
+}
+
 // ─────────────────────── phase scripts ───────────────────────
 
-const envConf = "/etc/doblura/odoo.conf"
+const (
+	envConf         = "/etc/doblura/odoo.conf"
+	envCronConfPath = "/etc/doblura/odoo-cron.conf"
+)
 
 // envInitScript creates the database from nothing, with or without demo data.
 func envInitScript(env *doblurav1alpha1.OdooEnvironment) string {
@@ -273,6 +399,18 @@ echo ">> restore finished"`, db, db, stage, snap.RestoreCommand(db, envConf, sou
 
 // envMigrateScript runs the update. A step, not a gate.
 func envMigrateScript(env *doblurav1alpha1.OdooEnvironment) string {
+	// Preflight, because the alternative message is "/bin/sh: click-odoo-update:
+	// not found", which tells somebody nothing about the requirement they missed.
+	// The README states it — the image must ship click-odoo-contrib — and a tool
+	// that states a requirement should also check it.
+	pre := `if ! command -v click-odoo-update >/dev/null 2>&1; then
+  echo "!! this image does not ship click-odoo-contrib, and migrating needs it." >&2
+  echo "!! Doblura does not provide a base image: the requirement is that yours" >&2
+  echo "!! has click-odoo-contrib installed (pip install click-odoo-contrib)." >&2
+  echo "!! Image: ` + env.Spec.Image + `" >&2
+  exit 1
+fi
+`
 	db := envDBName(env)
 	var cmd string
 	switch env.Spec.Migration.Engine {
@@ -286,9 +424,13 @@ func envMigrateScript(env *doblurav1alpha1.OdooEnvironment) string {
 	if extra := env.Spec.Migration.ExtraArgs; len(extra) > 0 {
 		cmd += " " + strings.Join(extra, " ")
 	}
+	guard := ""
+	if strings.HasPrefix(cmd, "click-odoo-update") {
+		guard = pre
+	}
 	return fmt.Sprintf(`echo ">> migrating %s to the declared version"
-%s
-echo ">> migration finished"`, db, cmd)
+%s%s
+echo ">> migration finished"`, db, guard, cmd)
 }
 
 // envHardenScript is the phase the whole design turns on.
@@ -340,15 +482,30 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 		// Existing attachments stay on disk until something moves them, and on an
 		// ephemeral filestore that disk is about to disappear. force_storage() is
 		// Odoo's own migration and it is a per-record ORM write, so it is slow on a
-		// large database — which is exactly why this is reported rather than done
-		// silently, and why Database mode is a choice for rehearsal environments
-		// rather than a default for production.
-		b.WriteString(`echo ">> migrating existing attachments into the database (this is per-record, and slow)"` + "\n")
-		b.WriteString("cat > /tmp/doblura-force-storage.py <<'PYSCRIPT'\n")
+		// large database.
+		//
+		// Guarded on the actual condition rather than on a proxy for it: a freshly
+		// initialised database has no attachments on disk, so there is nothing to
+		// move and no reason to require click-odoo-contrib. Testing the data type
+		// instead would have been a guess that is wrong for a restored snapshot
+		// whose attachments were already in the database.
+		b.WriteString(`n=$(psql -tAX -c "SELECT count(*) FROM ir_attachment WHERE store_fname IS NOT NULL" 2>/dev/null | tr -dc '0-9')` + "\n")
+		b.WriteString(`if [ "${n:-0}" -gt 0 ]; then` + "\n")
+		b.WriteString(`  if ! command -v click-odoo >/dev/null 2>&1; then` + "\n")
+		b.WriteString(`    echo "!! $n attachments are on disk and this image has no click-odoo-contrib," >&2` + "\n")
+		b.WriteString(`    echo "!! so they cannot be moved into the database. They will 404 when the" >&2` + "\n")
+		b.WriteString(`    echo "!! filestore goes. Install click-odoo-contrib, or use a PVC filestore." >&2` + "\n")
+		b.WriteString(`    exit 1` + "\n")
+		b.WriteString(`  fi` + "\n")
+		b.WriteString(`  echo ">> moving $n attachments into the database (per-record, and slow)"` + "\n")
+		b.WriteString("  cat > /tmp/doblura-force-storage.py <<'PYSCRIPT'\n")
 		b.WriteString("env['ir.attachment'].sudo().force_storage()\n")
 		b.WriteString("env.cr.commit()\n")
 		b.WriteString("PYSCRIPT\n")
-		b.WriteString("click-odoo -c " + envConf + " /tmp/doblura-force-storage.py\n")
+		b.WriteString("  click-odoo -c " + envConf + " /tmp/doblura-force-storage.py\n")
+		b.WriteString(`else` + "\n")
+		b.WriteString(`  echo ">> no attachments on disk; nothing to move"` + "\n")
+		b.WriteString(`fi` + "\n")
 	}
 
 	if sec.StripExternalCredentials == nil || *sec.StripExternalCredentials {

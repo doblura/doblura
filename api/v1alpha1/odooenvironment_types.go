@@ -254,6 +254,7 @@ type EnvLifecycle struct {
 //
 // +kubebuilder:validation:XValidation:rule="!has(self.lifecycle) || self.lifecycle.type == 'Ephemeral' || !has(self.storage) || !has(self.storage.filestore) || self.storage.filestore.mode != 'Ephemeral'",message="a Persistent or Hibernating environment cannot use an Ephemeral filestore (use PersistentVolumeClaim, or Database to keep attachments in Postgres and have no filestore at all): the database outlives the pod and the files do not, so every attachment breaks on the first restart while ir_attachment still points at them"
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="more than one web replica needs a filestore every pod can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database, which has no filestore to share: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
+// +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.cron) || self.workload.cron.replicas == 0 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="a cron tier is a second pod writing the same filestore and needs one both tiers can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database: scheduled jobs that generate reports or attachments would otherwise write them where the web tier cannot read them, and a ReadWriteOnce claim only appears to work while both pods happen to land on the same node"
 type OdooEnvironmentSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
@@ -307,6 +308,35 @@ type OdooEnvironmentSpec struct {
 	Security EnvSecurity `json:"security,omitempty"`
 
 	Database DatabaseSpec `json:"database"`
+
+	// RunAsUser is the uid the Odoo containers run as.
+	//
+	// It defaults to 100, which is what the official Odoo image and OCA's OCB both
+	// use. It exists as a field because the operator used to hardcode 65532 — the
+	// distroless convention — and Odoo's startup calls getpass.getuser(), which
+	// does pwd.getpwuid(os.getuid()) and raises KeyError for a uid that has no
+	// passwd entry. Every environment pod failed before Odoo printed a line, with
+	// a traceback that says nothing about uids being the problem.
+	//
+	// Set it if your image uses a different user. Leave it if you do not know:
+	// getting it wrong fails loudly and immediately, which is the good case.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=100
+	// +optional
+	RunAsUser *int64 `json:"runAsUser,omitempty"`
+
+	// RunAsGroup and FSGroup default to 101, Odoo's group in the same images.
+	// FSGroup is what makes a mounted filestore writable: without it a PVC is owned
+	// by root and Odoo cannot write an attachment to it.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=101
+	// +optional
+	RunAsGroup *int64 `json:"runAsGroup,omitempty"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=101
+	// +optional
+	FSGroup *int64 `json:"fsGroup,omitempty"`
 
 	// Storage is where the filestore lives. Absent means ephemeral, which is
 	// correct for a throwaway environment and loses data for anything else.
@@ -578,6 +608,19 @@ func (w *WorkloadSplit) CronThreadsForWeb() int32 {
 	return 1
 }
 
+// CronThreads is what max_cron_threads must be on the cron tier.
+//
+// Only ever read when SplitsCrons() is true, so the zero case is a defence
+// against a future caller rather than a reachable state today: a cron tier
+// configured with no cron threads is a pod that runs Odoo and schedules nothing,
+// which is the same silent failure as having no tier at all.
+func (w *WorkloadSplit) CronThreads() int32 {
+	if !w.SplitsCrons() || w.Cron.Threads <= 0 {
+		return 1
+	}
+	return w.Cron.Threads
+}
+
 // ─────────────── The filestore ───────────────
 //
 // Odoo's filestore is mutable state that lives OUTSIDE the database, and it is the
@@ -704,4 +747,24 @@ func (s *OdooEnvironmentSpec) FilestoreIsEphemeral() bool {
 type StorageSpec struct {
 	// +optional
 	Filestore *FilestoreSpec `json:"filestore,omitempty"`
+}
+
+// PodUser returns the uid, gid and fsGroup for this environment's Odoo containers.
+//
+// Defaults are Odoo's, not Kubernetes'. The distroless 65532 that used to be
+// hardcoded here belongs to images built for it; the images this operator actually
+// runs use 100, and Odoo is the one that notices, because it resolves its own uid
+// through /etc/passwd at startup.
+func (s *OdooEnvironmentSpec) PodUser() (uid, gid, fsGroup int64) {
+	uid, gid, fsGroup = 100, 101, 101
+	if s.RunAsUser != nil {
+		uid = *s.RunAsUser
+	}
+	if s.RunAsGroup != nil {
+		gid = *s.RunAsGroup
+	}
+	if s.FSGroup != nil {
+		fsGroup = *s.FSGroup
+	}
+	return uid, gid, fsGroup
 }
