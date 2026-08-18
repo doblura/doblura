@@ -1,10 +1,14 @@
 {{define "customers.html"}}{{template "top" .}}
-<h1>Customers</h1>
-<p class="lede">Everyone lands here. What each of you can do to a customer
-differs; the list does not.</p>
+<div class="head">
+  <div>
+    <h1>Customers</h1>
+    <p class="sub">Everyone lands here. What each of you can do to a customer
+    differs; the list does not.</p>
+  </div>
+</div>
 
 {{if .Data}}
-<div class="panel"><table>
+<div class="card scroll"><table>
   <thead><tr>
     <th>Customer</th><th>Running</th><th>Odoo</th>
     {{if .Advanced}}<th>Namespace</th><th>Release</th><th class="num">Databases</th>{{end}}
@@ -16,7 +20,7 @@ differs; the list does not.</p>
       <td>{{.Ready}} of {{.Environments}} environment{{if ne .Environments 1}}s{{end}} up</td>
       <td>{{if .Version}}{{.Version}}{{else}}<span class="muted">not set</span>{{end}}</td>
       {{if $.Advanced}}
-        <td class="muted">{{.Tenant.Namespace}}</td>
+        <td class="muted small">{{.Tenant.Namespace}}</td>
         <td>{{if .Tenant.Spec.ProductRelease}}{{.Tenant.Spec.ProductRelease}}{{else}}<span class="muted">—</span>{{end}}</td>
         <td class="num">{{.Tenant.Status.Databases}}</td>
       {{end}}
@@ -25,9 +29,10 @@ differs; the list does not.</p>
   </tbody>
 </table></div>
 {{else}}
-<div class="panel"><table><tbody><tr><td class="muted">
-No customers are visible to you. Either none exist yet, or your groups grant no
-read access in any namespace — <a href="/me">your access</a> says which.
-</td></tr></tbody></table></div>
+<div class="empty">
+  <div class="big">No customers are visible to you</div>
+  <p>Either none exist yet, or your groups grant no read access in any namespace.
+  <a href="/me" class="link">Your access</a> says which.</p>
+</div>
 {{end}}
 {{template "bottom" .}}{{end}}

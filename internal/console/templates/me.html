@@ -1,29 +1,39 @@
 {{define "me.html"}}{{template "top" .}}
-<h1>Your access</h1>
-<p class="lede">Doblura holds no permission list of its own. Everything below was
-answered by the Kubernetes API server, asked as you.</p>
+<div class="head">
+  <div>
+    <h1>Your access</h1>
+    <p class="sub">Doblura holds no permission list of its own. Everything below
+    was answered by the Kubernetes API server, asked as you.</p>
+  </div>
+</div>
 
-<div class="panel pad">
+<div class="card pad">
 <dl class="kv">
   <dt>User</dt><dd>{{.Identity.User}}</dd>
   {{if .Identity.Email}}<dt>Email</dt><dd>{{.Identity.Email}}</dd>{{end}}
   <dt>Groups</dt><dd>{{if .Identity.Groups}}{{join .Identity.Groups ", "}}{{else}}
     <span class="muted">none — you match no group mapping, so you have whatever
-    the cluster grants an authenticated user, which is usually read-only</span>{{end}}</dd>
-  <dt>Sign-in</dt><dd class="muted">{{.AuthMode}}</dd>
+    the cluster grants an authenticated user</span>{{end}}</dd>
+  <dt>Signed in with</dt><dd class="muted">{{.AuthMode}}</dd>
+  <dt>View</dt><dd>{{if .Advanced}}Technical{{else}}Simple{{end}}
+    <span class="muted">— {{.LevelBecause}}</span></dd>
 </dl>
 </div>
 
-<h2>What you can do, per namespace</h2>
-<div class="panel"><table>
+<p class="hint">The view is not a setting. It follows what the API server says
+you can do, so nobody has to find and understand a toggle before the console is
+useful to them — and so two colleagues seeing different screens can find out why.</p>
+
+<h2 class="sect">What you can do, per namespace</h2>
+<div class="card scroll"><table>
   <thead><tr><th>Namespace</th><th>Create environments</th><th>Create rehearsals</th><th>Read logs</th></tr></thead>
   <tbody>
   {{range .Data}}
     <tr>
       <td>{{.Namespace}}</td>
-      <td>{{if can .Perms "create:odooenvironments:"}}yes{{else}}<span class="muted">no</span>{{end}}</td>
-      <td>{{if can .Perms "create:odoorehearsals:"}}yes{{else}}<span class="muted">no</span>{{end}}</td>
-      <td>{{if can .Perms "get:pods/log:"}}yes{{else}}<span class="muted">no</span>{{end}}</td>
+      <td>{{if can .Perms "create:odooenvironments:"}}<span class="state state-up">{{icon "up"}}Yes</span>{{else}}<span class="muted">No</span>{{end}}</td>
+      <td>{{if can .Perms "create:odoorehearsals:"}}<span class="state state-up">{{icon "up"}}Yes</span>{{else}}<span class="muted">No</span>{{end}}</td>
+      <td>{{if can .Perms "get:pods/log:"}}<span class="state state-up">{{icon "up"}}Yes</span>{{else}}<span class="muted">No</span>{{end}}</td>
     </tr>
   {{else}}
     <tr><td class="muted" colspan="4">No namespace is visible to you.</td></tr>

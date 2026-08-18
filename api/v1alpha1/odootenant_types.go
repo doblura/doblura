@@ -333,6 +333,20 @@ type EnvironmentDefaults struct {
 	// Size is the default resource class.
 	// +optional
 	Size Size `json:"size,omitempty"`
+
+	// Addons is the set of modules this customer's environments load.
+	//
+	// Declared once per customer rather than on every environment. A customer
+	// runs the same handful of OCA repositories and the same private one across
+	// every review environment they open; repeating that on each is how one of
+	// them ends up with a different set and nobody notices until a module is
+	// missing in staging and present in production.
+	//
+	// An environment that declares its own addons keeps them: a consultant
+	// testing a branch of one repository should not have to restate the other
+	// six, but they must be able to.
+	// +optional
+	Addons *AddonsSpec `json:"addons,omitempty"`
 }
 
 // +kubebuilder:object:root=true

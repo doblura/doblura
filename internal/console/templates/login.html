@@ -4,9 +4,9 @@
 <title>Sign in · Doblura</title><link rel="stylesheet" href="/assets/console.css">
 </head><body class="centred">
 <div class="signin">
-  <div class="brand">dob<span>l</span>ura</div>
+  <div class="mark">dob<span>l</span>ura</div>
   <p class="lede">Sign in to continue.</p>
-  {{if .Error}}<div class="problem small">{{.Error}}</div>{{end}}
+  {{if .Error}}<div class="problem"><pre>{{.Error}}</pre></div>{{end}}
   <form method="post" action="/auth/login" class="stack">
     <div><label for="user">Username</label><input id="user" name="user" autocomplete="username" autofocus required></div>
     <div><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>

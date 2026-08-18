@@ -43,7 +43,10 @@ type page struct {
 	// two applications, which drift.
 	Level    detailLevel
 	Advanced bool
-	// Path is where the level switch sends you back to.
+	// LevelBecause is what the level was derived from, so a screen that shows two
+	// colleagues different things can say why.
+	LevelBecause string
+	// Path is the current page, for marking the navigation.
 	Path string
 	// SSO says whether the sign-in page should offer the identity provider as
 	// well as the local form.
@@ -54,7 +57,7 @@ type page struct {
 // renderFor is render with the request in hand, so the level and the return path
 // are filled in once rather than at every call site.
 func (s *Server) renderFor(w http.ResponseWriter, r *http.Request, name string, p page) {
-	p.Level = levelFrom(r)
+	p.Level, p.LevelBecause = s.levelFor(r.Context(), p.Identity)
 	p.Advanced = p.Level == levelAdvanced
 	p.Path = r.URL.Path
 	s.render(w, name, p)
@@ -172,6 +175,15 @@ type customerView struct {
 	Quota        int32
 	Open         int32
 	Map          template.HTML
+
+	// Repos is what this customer's environments load. Resolved here rather than
+	// walked in the template: the object nests optionally twice, and a template
+	// that has to reach through two maybe-nil levels renders nothing at all when
+	// it guesses wrong — which is what it did, showing an empty section instead
+	// of an empty state.
+	Repos []doblurav1alpha1.AddonRepo
+	// CanEditRepos is asked of the API server like every other permission.
+	CanEditRepos bool
 }
 
 // envRow is an environment plus the two things a list has to say about it that
@@ -224,13 +236,18 @@ func (s *Server) handleCustomer(w http.ResponseWriter, r *http.Request, id Ident
 	}
 	view.Rehearsals = rehearsals.Items
 	view.Map = customerGraph(&t, view.Environments, rehearsals.Items).render()
+	if d := t.Spec.EnvironmentDefaults; d != nil && d.Addons != nil {
+		view.Repos = d.Addons.Repos
+	}
 
 	perms, err := s.allowed(r.Context(), id,
-		CanCreateEnvironment(ns), CanCreateRehearsal(ns), CanReadLogs(ns))
+		CanCreateEnvironment(ns), CanCreateRehearsal(ns), CanReadLogs(ns),
+		Verb{"patch", "odootenants", ns, name})
 	if err != nil {
 		s.fail(w, id, err)
 		return
 	}
+	view.CanEditRepos = perms[Verb{"patch", "odootenants", ns, name}.key()]
 	s.renderFor(w, r, "customer.html", page{
 		Title: t.Spec.DisplayName, Identity: id, Perms: perms, Data: view,
 	})

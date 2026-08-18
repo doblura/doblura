@@ -1,8 +1,15 @@
 {{define "environment.html"}}{{template "top" .}}
 {{$e := .Data.Env}}{{$perms := .Perms}}{{$adv := .Advanced}}{{$h := .Data.Health}}
-<p class="crumbs"><a href="/">Customers</a> ›
+<p class="crumbs"><a href="/customers">Customers</a> ›
   <a href="/c/{{$e.Namespace}}/{{$e.Spec.ForTenant}}">{{$e.Spec.ForTenant}}</a> › {{$e.Name}}</p>
-<h1>{{$e.Name}}</h1>
+<div class="head">
+  <div>
+    <h1>{{$e.Name}}</h1>
+    <p class="sub">{{$e.Spec.Data.Type}} data, {{$e.Spec.Lifecycle.Type | lower}}{{if $adv}} · {{$e.Namespace}}{{end}}</p>
+  </div>
+  <div class="spacer"></div>
+  {{if $e.Status.URL}}<a class="btn" href="{{$e.Status.URL}}">Open it</a>{{end}}
+</div>
 
 {{/* The answer first. Somebody arrived here with one question. */}}
 <div class="answer {{$h.State}}">
@@ -24,8 +31,8 @@
 </div>
 {{end}}
 
-<div class="grid-2" style="margin-top:22px">
-<div class="panel pad">
+<div class="grid two">
+<div class="card pad">
 <dl class="kv">
   <dt>What it is</dt><dd>{{$e.Spec.Data.Type}} data, {{$e.Spec.Lifecycle.Type | lower}}</dd>
   <dt>Version</dt><dd>{{if $e.Spec.ImageRef}}{{$e.Spec.ImageRef}}{{else}}<span class="muted">set directly</span>{{end}}</dd>
@@ -34,7 +41,7 @@
 </dl>
 </div>
 
-{{if .Data.Map}}<div class="panel pad">{{.Data.Map}}</div>{{end}}
+{{if .Data.Map}}<div class="card pad">{{.Data.Map}}</div>{{end}}
 </div>
 
 {{/* The technical detail is always reachable, but folded away at the simple
@@ -57,8 +64,8 @@
       {{if $e.Status.Message}}<dt>Message</dt><dd>{{$e.Status.Message}}</dd>{{end}}
     </dl>
 
-    <h2>Conditions</h2>
-    <div class="panel"><table>
+    <h2 class="sect">Conditions</h2>
+    <div class="card scroll"><table>
       <thead><tr><th>Condition</th><th>Status</th><th>Reason</th><th>Message</th><th>Changed</th></tr></thead>
       <tbody>
       {{range .Data.Keys}}
@@ -73,8 +80,8 @@
 </details>
 
 {{if $e.Spec.Addons.Repos}}
-<h2>Modules it loads</h2>
-<div class="panel"><table>
+<h2 class="sect">Modules it loads</h2>
+<div class="card scroll"><table>
   <thead><tr><th>Repository</th><th>Asked for</th><th>Actually running</th>
     {{if $adv}}<th>Where from</th>{{end}}</tr></thead>
   <tbody>
@@ -83,20 +90,20 @@
     <tr>
       <td>{{.Name}}</td>
       <td>{{.Ref}}</td>
-      <td class="muted small">{{if $rev}}{{$rev}}{{else}}not recorded yet{{end}}</td>
-      {{if $adv}}<td class="muted small">{{.URL}}</td>{{end}}
+      <td class="muted mono">{{if $rev}}{{$rev}}{{else}}not recorded yet{{end}}</td>
+      {{if $adv}}<td class="muted mono">{{.URL}}</td>{{end}}
     </tr>
   {{end}}
   </tbody>
 </table></div>
-<p class="lede note">The middle column is what was asked for; the right one is the
+<p class="hint">The middle column is what was asked for; the right one is the
 commit that was cloned. A branch moves, so only the right one answers "what code
 is this running". Cloning happens in this environment's own pod with its own
 credentials — the operator never sees the code.</p>
 {{end}}
 
 {{$f := .Data.Form}}
-<h2>Settings</h2>
+<h2 class="sect">Settings</h2>
 {{if can $perms (printf "patch:odooenvironments:%s" $e.Name)}}
 <form method="post" action="/e/{{$e.Namespace}}/{{$e.Name}}/settings" class="settings">
   <fieldset>

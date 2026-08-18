@@ -1,93 +1,182 @@
 {{define "customer.html"}}{{template "top" .}}
-{{$ns := .Data.Tenant.Namespace}}{{$perms := .Perms}}{{$adv := .Advanced}}
-<p class="crumbs"><a href="/">Customers</a> › {{.Data.Tenant.Spec.DisplayName}}</p>
-<h1>{{.Data.Tenant.Spec.DisplayName}}</h1>
-{{if $adv}}<p class="lede">{{$ns}}/{{.Data.Tenant.Name}}</p>{{end}}
-
-<div class="meter">
-  <span>Throwaway environments</span>
-  <progress class="meter-bar{{if ge .Data.Open .Data.Quota}} full{{end}}"
-            value="{{.Data.Open}}" max="{{.Data.Quota}}"></progress>
-  <span>{{.Data.Open}} of {{.Data.Quota}} open</span>
+{{$ns := .Data.Tenant.Namespace}}{{$t := .Data.Tenant}}{{$perms := .Perms}}{{$adv := .Advanced}}
+<p class="crumbs"><a href="/customers">Customers</a> › {{$t.Spec.DisplayName}}</p>
+<div class="head">
+  <div>
+    <h1>{{$t.Spec.DisplayName}}</h1>
+    <p class="sub">{{if $adv}}{{$ns}}/{{$t.Name}} · {{end}}{{.Data.Open}} of {{.Data.Quota}} throwaway environments in use</p>
+  </div>
+  <div class="spacer"></div>
 </div>
 
-<h2>Environments</h2>
-{{if .Data.Environments}}
-<div class="panel"><table>
-  <thead><tr><th>Name</th><th>State</th><th>What it is</th><th>Address</th>
-    {{if $adv}}<th>Image</th><th>Phase</th>{{end}}</tr></thead>
-  <tbody>
-  {{range .Data.Environments}}
-    <tr>
-      <td><a href="/e/{{.Env.Namespace}}/{{.Env.Name}}">{{.Env.Name}}</a>
-          {{if .Expiry}}<div class="muted small">{{.Expiry}}</div>{{end}}</td>
-      <td>{{template "state" .Health.State}}</td>
-      <td>{{.Env.Spec.Data.Type}} data, {{.Env.Spec.Lifecycle.Type | lower}}</td>
-      <td>{{if .Env.Status.URL}}<a href="{{.Env.Status.URL}}">open</a>
-          {{else}}<span class="muted">internal only</span>{{end}}</td>
-      {{if $adv}}
-        <td class="muted small">{{.Env.Spec.Image}}</td>
-        <td class="muted">{{.Env.Status.Phase}}</td>
-      {{end}}
-    </tr>
-  {{end}}
-  </tbody>
-</table></div>
-{{else}}<div class="panel"><table><tbody><tr><td class="muted">Nothing running for this customer.</td></tr></tbody></table></div>{{end}}
-
-<h2>New environment</h2>
 {{if can $perms "create:odooenvironments:"}}
-<form class="launcher" method="post" action="/c/{{$ns}}/{{.Data.Tenant.Name}}/environments">
-  <div><label for="name">Name</label><input id="name" name="name" required
-       pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="review-1421"></div>
-  <div><label for="imageRef">Version</label><select id="imageRef" name="imageRef">
-    {{range .Data.Tenant.Spec.Images}}
-      <option value="{{.Name}}"{{if .Default}} selected{{end}}>{{.Name}} — Odoo {{.OdooVersion}}{{if .Notes}} ({{.Notes}}){{end}}</option>
-    {{else}}
-      <option value="">the customer's default</option>
-    {{end}}
-  </select></div>
-  <div><label for="data">Data</label><select id="data" name="data">
-      <option value="Demo">Demo data</option>
-      <option value="Empty">Empty</option>
-      <option value="Snapshot">A copy of production, anonymised</option>
-  </select></div>
-  <div><button type="submit">Create</button></div>
-</form>
-<p class="lede note">Created as you, and it removes itself when its time is up.
-The image, database and file storage come from this customer's record — not from
-you. If the quota is spent, you will be told in the words of the rule that
-refused it.</p>
+<details class="panel">
+  <summary class="btn">New environment</summary>
+  <div class="body">
+    <fieldset>
+      <legend>New environment</legend>
+      <form class="launcher" method="post" action="/c/{{$ns}}/{{$t.Name}}/environments">
+        <div><label for="name">Name</label><input id="name" name="name" required
+             pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="review-1421"></div>
+        <div><label for="imageRef">Version</label><select id="imageRef" name="imageRef">
+          {{range $t.Spec.Images}}
+            <option value="{{.Name}}"{{if .Default}} selected{{end}}>{{.Name}} — Odoo {{.OdooVersion}}{{if .Notes}} · {{.Notes}}{{end}}</option>
+          {{else}}
+            <option value="">the customer's default</option>
+          {{end}}
+        </select></div>
+        <div><label for="data">Data</label><select id="data" name="data">
+            <option value="Demo">Demo data</option>
+            <option value="Empty">Empty</option>
+            <option value="Snapshot">A copy of production, anonymised</option>
+        </select></div>
+        <div><button type="submit">Create</button></div>
+      </form>
+      <p class="hint">Created as you, and it removes itself when its time is up.
+      The image, database and file storage come from this customer's record — not
+      from you. If the quota is spent you will be told in the words of the rule
+      that refused it.</p>
+    </fieldset>
+  </div>
+</details>
+{{end}}
+
+<h2 class="sect">Environments</h2>
+{{if .Data.Environments}}
+<div class="grid two">
+{{range .Data.Environments}}
+  <a class="env s-{{.Health.State}}" href="/e/{{.Env.Namespace}}/{{.Env.Name}}">
+    <div class="top">
+      <span class="name">{{.Env.Name}}</span>
+      <span class="state state-{{.Health.State}} push">{{icon .Health.State}}{{stateWord .Health.State}}</span>
+    </div>
+    <p class="meta"><b>{{.Env.Spec.Data.Type}}</b> data, {{.Env.Spec.Lifecycle.Type | lower}}</p>
+    <div class="foot">
+      <span>{{if .Env.Status.URL}}published{{else}}internal only{{end}}</span>
+      {{if .Expiry}}<span>{{.Expiry}}</span>{{end}}
+      {{if $adv}}<span class="mono">{{.Env.Spec.Image}}</span>{{end}}
+    </div>
+  </a>
+{{end}}
+</div>
 {{else}}
+<div class="empty">
+  <div class="big">Nothing running for this customer</div>
+  <p>{{if can $perms "create:odooenvironments:"}}Use “New environment” above to
+  open one; it removes itself when its time is up.{{else}}Your groups do not
+  permit creating environments here.{{end}}</p>
+</div>
+{{end}}
+
+{{if not (can $perms "create:odooenvironments:")}}
 <div class="denied">{{icon "locked"}} Your groups do not permit creating
 environments for this customer. The API server was asked; this page holds no
 list of its own.</div>
 {{end}}
 
+<h2 class="sect">Modules these environments load</h2>
+{{if .Data.Repos}}
+<div class="card scroll"><table>
+  <thead><tr><th>Repository</th><th>Pinned to</th><th>Access</th>
+    {{if $adv}}<th>Where from</th>{{end}}
+    {{if $.Data.CanEditRepos}}<th></th>{{end}}</tr></thead>
+  <tbody>
+  {{range .Data.Repos}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td class="mono">{{.Ref}}</td>
+      <td>{{if .Auth}}{{.Auth.Type}}{{else}}<span class="muted">public</span>{{end}}</td>
+      {{if $adv}}<td class="mono muted">{{.URL}}</td>{{end}}
+      {{if $.Data.CanEditRepos}}
+      <td class="num">
+        <form method="post" action="/c/{{$ns}}/{{$t.Name}}/repos/remove">
+          <input type="hidden" name="repoName" value="{{.Name}}">
+          <button class="danger small-btn" type="submit">Remove</button>
+        </form>
+      </td>
+      {{end}}
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}
+<div class="empty">
+  <div class="big">No extra modules</div>
+  <p>These environments run whatever the image already contains.
+  {{if .Data.CanEditRepos}}Add a repository and Doblura clones it into every new
+  environment.{{else}}Adding one is not permitted for your groups.{{end}}</p>
+</div>
+{{end}}
+
+{{if .Data.CanEditRepos}}
+<details class="panel">
+  <summary class="btn ghost">Add a repository</summary>
+  <div class="body">
+    <fieldset>
+      <legend>Add a repository</legend>
+      <form method="post" action="/c/{{$ns}}/{{$t.Name}}/repos" class="settings">
+        <div class="fields">
+          <div><label for="repoName">Name</label>
+            <input id="repoName" name="repoName" required
+                   pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="server-tools"></div>
+          <div><label for="url">Address</label>
+            <input id="url" name="url" required placeholder="https://github.com/OCA/server-tools.git"></div>
+          <div><label for="ref">Branch, tag or commit</label>
+            <input id="ref" name="ref" required placeholder="18.0"></div>
+          <div><label for="paths">Subfolders</label>
+            <input id="paths" name="paths" placeholder="leave empty for the root"></div>
+        </div>
+        <div class="fields">
+          <div><label for="authType">How to get in</label>
+            <select id="authType" name="authType">
+              <option value="Public">Public — no credentials</option>
+              <option value="Token">Token over HTTPS</option>
+              <option value="BasicAuth">Username and password</option>
+              <option value="SSHKey">SSH deploy key</option>
+              <option value="GitHubApp">GitHub App installation</option>
+            </select></div>
+          <div><label for="authSecret">Credentials secret</label>
+            <input id="authSecret" name="authSecret" placeholder="only when not public"></div>
+          <div><label for="authUser">Username override</label>
+            <input id="authUser" name="authUser" placeholder="only for self-hosted forges"></div>
+        </div>
+        <button type="submit">Add repository</button>
+      </form>
+      <p class="hint">A branch is what you type while trying things out; a commit
+      is what makes a result mean something tomorrow. Either way, what was
+      actually cloned is recorded on each environment. The clone happens in that
+      environment's own pod with its own credentials — the operator never sees the
+      code — and adding a repository here only changes what NEW environments get.</p>
+    </fieldset>
+  </div>
+</details>
+{{end}}
+
 {{if .Data.Map}}
-<h2>How this fits together</h2>
-<div class="panel pad">{{.Data.Map}}</div>
-<p class="lede note">Environments share a database server, and that is why
-restarting one is never a local decision.</p>
+<h2 class="sect">How this fits together</h2>
+<div class="card pad">{{.Data.Map}}</div>
+<p class="hint">Environments share a database server, which is why restarting one
+is never a local decision.</p>
 {{end}}
 
 {{if $adv}}
-<h2>Image catalogue</h2>
-<div class="panel"><table>
-  <thead><tr><th>Name</th><th>Odoo</th><th>Image</th><th>Notes</th></tr></thead>
+<h2 class="sect">Image catalogue</h2>
+<div class="card scroll"><table>
+  <thead><tr><th>Name</th><th>Odoo</th><th>Flavour</th><th>Image</th><th>Notes</th></tr></thead>
   <tbody>
-  {{range .Data.Tenant.Spec.Images}}
-    <tr><td>{{.Name}}{{if .Default}} <span class="muted">· default</span>{{end}}</td>
-        <td>{{.OdooVersion}}</td><td class="muted small">{{.Image}}</td>
-        <td class="muted">{{.Notes}}</td></tr>
+  {{range $t.Spec.Images}}
+    <tr><td>{{.Name}}{{if .Default}} <span class="muted small">· default</span>{{end}}</td>
+        <td>{{.OdooVersion}}</td><td>{{.Flavor}}</td>
+        <td class="mono">{{.Image}}</td>
+        <td class="muted small">{{.Notes}}</td></tr>
   {{else}}
-    <tr><td class="muted" colspan="4">No catalogue. Environments fall back to the
+    <tr><td class="muted" colspan="5">No catalogue. Environments fall back to the
     customer's default image.</td></tr>
   {{end}}
   </tbody>
 </table></div>
-<p class="lede note">Moving the default between builds of the same Odoo version
-is an ordinary change. Moving it across versions is refused unless a rehearsal
+<p class="hint">Moving the default between builds of the same Odoo version is an
+ordinary change. Moving it across versions is refused unless a rehearsal
 succeeded against exactly that image first — a major upgrade rewrites the
 database and cannot be undone by redeploying.</p>
 {{end}}

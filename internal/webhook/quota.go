@@ -260,6 +260,14 @@ func (m *EnvironmentCreator) defaultsFrom(
 	if (env.Spec.Storage == nil || env.Spec.Storage.Filestore == nil) && d.Storage != nil {
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/storage", d.Storage))
 	}
+	// Whole-object, never merged. A customer declaring six repositories and an
+	// environment declaring one means the environment wants ONE — merging would
+	// give it seven, including five it did not ask for, and there would be no way
+	// to express "just this repository" at all.
+	if len(env.Spec.Addons.Repos) == 0 && env.Spec.Addons.Volume == nil &&
+		len(env.Spec.Addons.Baked) == 0 && d.Addons != nil {
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/addons", d.Addons))
+	}
 	if env.Spec.Size == "" && d.Size != "" {
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/size", d.Size))
 	}

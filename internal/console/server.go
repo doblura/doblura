@@ -173,8 +173,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /e/{ns}/{name}/delete", s.authenticated(s.handleDeleteEnvironment))
 	mux.HandleFunc("POST /e/{ns}/{name}/settings", s.authenticated(s.handleEnvironmentSettings))
 	mux.HandleFunc("POST /c/{ns}/{name}/environments", s.authenticated(s.handleCreateEnvironment))
+	mux.HandleFunc("POST /c/{ns}/{name}/repos", s.authenticated(s.handleAddRepo))
+	mux.HandleFunc("POST /c/{ns}/{name}/repos/remove", s.authenticated(s.handleRemoveRepo))
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
-	mux.HandleFunc("GET /detail", s.authenticated(s.handleDetail))
 	mux.HandleFunc("GET /o/{kind}", s.authenticated(s.handleObjects))
 
 	return withSecurityHeaders(mux)

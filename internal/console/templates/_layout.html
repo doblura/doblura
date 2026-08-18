@@ -5,45 +5,49 @@
 <title>{{.Title}} · Doblura</title>
 <link rel="stylesheet" href="/assets/console.css">
 </head><body>
-{{if .DevMode}}<div class="dev"><b>Development mode.</b> Nobody is being authenticated — every
-request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}}
-<header class="bar"><div class="bar-in">
-  <a class="brand" href="/">dob<span>l</span>ura</a>
+{{if .DevMode}}<div class="dev"><b>Development mode.</b> Nobody is being authenticated —
+every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}}
+{{/* The rail collapses to icons. A checkbox and a sibling selector, because the
+     CSP loads no JavaScript — the state lives in the DOM, survives no navigation,
+     and that is the honest trade for not shipping a script into a page that holds
+     a session able to act on a cluster. */}}
+<input type="checkbox" id="rail-collapse" class="rail-toggle" hidden>
+<div class="shell">
+{{/* A persistent rail rather than a top bar. Where you are and where you can go
+     should be answerable without reading, and a dark spine beside light content
+     stops the screen being one flat field. */}}
+<aside class="rail">
+  <div class="rail-top">
+    <a class="mark" href="/">dob<span>l</span>ura</a>
+    <label for="rail-collapse" class="collapse" title="Collapse the menu" aria-label="Collapse the menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h16"/></svg>
+    </label>
+  </div>
   <nav>
-    <a href="/"{{if eq .Path "/"}} class="on"{{end}}>Overview</a>
-    <a href="/customers"{{if eq .Path "/customers"}} class="on"{{end}}>Customers</a>
-    {{/* A <details> dropdown, not a script. The Content-Security-Policy loads
-         no JavaScript at all, which is a property worth keeping for a page that
-         holds a session able to act on the cluster — so the menu is markup the
-         browser already knows how to open, and it works with a keyboard for
-         free. */}}
-    <details class="menu">
-      <summary>Objects</summary>
-      <div class="menu-body">
-        <a href="/o/environments">Environments</a>
-        <a href="/o/rehearsals">Rehearsals</a>
-        <a href="/o/snapshots">Snapshots</a>
-        <a href="/o/databases">Databases</a>
-        <a href="/o/servers">Servers</a>
-      </div>
-    </details>
-    <a href="/me"{{if eq .Path "/me"}} class="on"{{end}}>Your access</a>
+    <a href="/"{{if eq .Path "/"}} class="on"{{end}} title="Overview"><i class="dot"></i><span>Overview</span></a>
+    <a href="/customers"{{if eq .Path "/customers"}} class="on"{{end}} title="Customers"><i class="dot"></i><span>Customers</span></a>
+    <div class="group">Objects</div>
+    <a href="/o/environments"{{if eq .Path "/o/environments"}} class="on"{{end}} title="Environments"><i class="dot"></i><span>Environments</span></a>
+    <a href="/o/rehearsals"{{if eq .Path "/o/rehearsals"}} class="on"{{end}} title="Rehearsals"><i class="dot"></i><span>Rehearsals</span></a>
+    <a href="/o/snapshots"{{if eq .Path "/o/snapshots"}} class="on"{{end}} title="Snapshots"><i class="dot"></i><span>Snapshots</span></a>
+    <a href="/o/databases"{{if eq .Path "/o/databases"}} class="on"{{end}} title="Databases"><i class="dot"></i><span>Databases</span></a>
+    <a href="/o/servers"{{if eq .Path "/o/servers"}} class="on"{{end}} title="Servers"><i class="dot"></i><span>Servers</span></a>
   </nav>
-  <span class="levels" role="group" aria-label="How much detail to show">
-    <a href="/detail?to=plain&amp;back={{.Path}}" {{if not .Advanced}}class="on" aria-current="true"{{end}}>Simple</a>
-    <a href="/detail?to=advanced&amp;back={{.Path}}" {{if .Advanced}}class="on" aria-current="true"{{end}}>Technical</a>
-  </span>
-  <span class="who">{{if .Identity.Name}}{{.Identity.Name}}{{else}}{{.Identity.User}}{{end}}
-    · <a href="/auth/logout">sign out</a></span>
-</div></header>
-<main>
+  <div class="foot">
+    <div class="who">{{if .Identity.Name}}{{.Identity.Name}}{{else}}{{.Identity.User}}{{end}}
+      <small>{{if .Advanced}}technical view{{else}}simple view{{end}}{{if .Identity.Groups}} · {{join .Identity.Groups ", "}}{{end}}</small></div>
+    <a href="/me">Your access</a> · <a href="/auth/logout">Sign out</a>
+  </div>
+</aside>
+<main class="page"><div class="inner">
 {{end}}
 
 {{define "bottom"}}
-<footer>Doblura · the console has no permissions of its own; every action is
-performed as you, and Kubernetes RBAC decides.</footer>
-</main></body></html>
+<footer>Doblura holds no permissions of its own. Every action is performed as you,
+and Kubernetes decides what that allows.</footer>
+</div></main></div></body></html>
 {{end}}
 
-{{/* A state, carried by colour, by shape and by the word — never by colour alone. */}}
+{{/* A state carries a hue, a distinct icon silhouette and the word itself, so
+     none of the three is load-bearing alone. */}}
 {{define "state"}}<span class="state state-{{.}}">{{icon .}}{{stateWord .}}</span>{{end}}

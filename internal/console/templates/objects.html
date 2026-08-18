@@ -1,12 +1,16 @@
 {{define "objects.html"}}{{template "top" .}}
-<h1>{{.Data.Kind.Title}}</h1>
-<p class="lede">{{.Data.Kind.Lede}}</p>
+<div class="head">
+  <div>
+    <h1>{{.Data.Kind.Title}}</h1>
+    <p class="sub">{{.Data.Kind.Lede}}</p>
+  </div>
+</div>
 
 {{if .Data.Denied}}
 <div class="denied">{{icon "locked"}} Your groups do not permit reading these.
 The API server was asked; this page holds no list of its own.</div>
 {{else if .Data.Rows}}
-<div class="panel"><table>
+<div class="card scroll"><table>
   <thead><tr>{{range .Data.Kind.Columns}}<th>{{.}}</th>{{end}}
     {{if $.Advanced}}<th>Namespace</th>{{end}}</tr></thead>
   <tbody>
@@ -15,15 +19,17 @@ The API server was asked; this page holds no list of its own.</div>
       <td>{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</td>
       {{range .Cells}}
         {{if .State}}<td><span class="state state-{{.State}}">{{icon .State}}{{if .Word}}{{.Word}}{{else}}{{stateWord .State}}{{end}}</span></td>
-        {{else}}<td{{if .Muted}} class="muted"{{end}}>{{.Text}}</td>{{end}}
+        {{else}}<td{{if .Muted}} class="muted small"{{end}}>{{.Text}}</td>{{end}}
       {{end}}
-      {{if $.Advanced}}<td class="muted">{{.Namespace}}</td>{{end}}
+      {{if $.Advanced}}<td class="muted small">{{.Namespace}}</td>{{end}}
     </tr>
   {{end}}
   </tbody>
 </table></div>
 {{else}}
-<div class="panel"><table><tbody><tr><td class="muted">
-Nothing here that you can see.</td></tr></tbody></table></div>
+<div class="empty">
+  <div class="big">Nothing here that you can see</div>
+  <p>Either none exist, or your groups do not grant read access where they live.</p>
+</div>
 {{end}}
 {{template "bottom" .}}{{end}}

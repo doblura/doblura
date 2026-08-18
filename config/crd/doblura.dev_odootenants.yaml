@@ -88,6 +88,162 @@ spec:
                   policy: a consultant pointing a rehearsal at a different server is a
                   legitimate thing to do, and the quota is what bounds the damage.
                 properties:
+                  addons:
+                    description: |-
+                      Addons is the set of modules this customer's environments load.
+
+                      Declared once per customer rather than on every environment. A customer
+                      runs the same handful of OCA repositories and the same private one across
+                      every review environment they open; repeating that on each is how one of
+                      them ends up with a different set and nobody notices until a module is
+                      missing in staging and present in production.
+
+                      An environment that declares its own addons keeps them: a consultant
+                      testing a branch of one repository should not have to restate the other
+                      six, but they must be able to.
+                    properties:
+                      baked:
+                        description: |-
+                          Baked lists addon paths that ALREADY ship inside the image. They are read
+                          where they are: not copied, not moved, not mounted.
+
+                          Example: ["/opt/odoo/addons-custom", "/opt/odoo/addons-oca"]
+                        items:
+                          type: string
+                        type: array
+                      edition:
+                        default: Community
+                        description: |-
+                          Edition is Community or Enterprise. It does not change the operator's
+                          behaviour, but it does change validation and what gets recorded in the
+                          status: knowing which edition a migration was rehearsed against matters
+                          when something breaks six months later.
+                        enum:
+                        - Community
+                        - Enterprise
+                        type: string
+                      precedence:
+                        default: ExternalFirst
+                        description: |-
+                          AddonsPrecedence decides who wins when the same module appears in more than
+                          one source. In Odoo the first entry on the addons path wins, which is why
+                          this has to be explicit: the alternative is loading different code than you
+                          think, and that is exactly the class of failure Doblura exists to catch.
+                        enum:
+                        - ExternalFirst
+                        - BakedFirst
+                        type: string
+                      repos:
+                        description: |-
+                          Repos are cloned by an init container into an ephemeral emptyDir. Every
+                          pod starts with the volume empty, so no mixture of versions is possible.
+                        items:
+                          description: AddonRepo is a git repository of addons, public
+                            or private.
+                          properties:
+                            auth:
+                              description: |-
+                                Auth authenticates private repos: PAT, username/password, deploy key or
+                                GitHub App. Empty means a public repo.
+
+                                The Odoo Enterprise repository is private, so the EE edition necessarily
+                                goes through here.
+                              properties:
+                                secretRef:
+                                  description: |-
+                                    SecretRef is the Secret holding the keys the Type requires. It must live
+                                    in the same namespace as the OdooRehearsal: reading Secrets from other
+                                    namespaces would turn Doblura into a privilege-escalation vector.
+                                  minLength: 1
+                                  type: string
+                                type:
+                                  description: |-
+                                    Type is the mechanism. Explicit on purpose: see the package comment on
+                                    why it is not inferred.
+                                  enum:
+                                  - Token
+                                  - BasicAuth
+                                  - SSHKey
+                                  - GitHubApp
+                                  type: string
+                                username:
+                                  description: |-
+                                    Username overrides the forge's default username. It only applies to
+                                    Token. Left empty, it is derived from the URL: x-access-token for
+                                    github.com, oauth2 for gitlab.com.
+                                  type: string
+                              required:
+                              - secretRef
+                              - type
+                              type: object
+                            depth:
+                              default: 1
+                              description: |-
+                                Depth is the clone depth. 1 by default: a rehearsal does not need history
+                                and cloning all of OCA costs minutes.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            name:
+                              description: |-
+                                Name identifies the repo and names its directory inside the emptyDir. It
+                                must be unique within the same AddonsSpec.
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
+                            paths:
+                              description: |-
+                                Paths are the subdirectories of the repo that contain addons. Empty means
+                                the root, which is the norm for OCA repositories.
+
+                                A repo with addons in per-version subfolders is declared as:
+                                paths: ["17.0"]
+                              items:
+                                type: string
+                              type: array
+                            ref:
+                              default: main
+                              description: |-
+                                Ref is a branch, a tag or a commit.
+
+                                For a rehearsal, USE A COMMIT. A branch makes the rehearsal
+                                non-reproducible: repeating it tomorrow clones different code and the
+                                result stops meaning anything.
+                              type: string
+                            url:
+                              description: URL of the repository. HTTPS or SSH.
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          - url
+                          type: object
+                        type: array
+                      volume:
+                        description: |-
+                          Volume is a PVC already populated by another process. It is mounted
+                          ReadOnly, so a rehearsal cannot corrupt what others share.
+                        properties:
+                          claimName:
+                            minLength: 1
+                            type: string
+                          paths:
+                            default:
+                            - /addons
+                            description: Paths are the paths inside the volume that
+                              contain addons.
+                            items:
+                              type: string
+                            type: array
+                        required:
+                        - claimName
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'edition Enterprise needs at least one addons source:
+                        the enterprise modules do not ship in the community image'
+                      rule: self.edition != 'Enterprise' || size(self.baked) > 0 ||
+                        size(self.repos) > 0 || has(self.volume)
                   database:
                     description: Database is where this customer's environments create
                       their databases.

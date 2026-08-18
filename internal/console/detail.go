@@ -4,7 +4,7 @@
 package console
 
 import (
-	"net/http"
+	"context"
 	"time"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
@@ -18,49 +18,56 @@ import (
 // wrong. So there is one set of pages and a level, and the level changes how much
 // each page says — never which pages exist or what anyone is allowed to do.
 //
-// The default is the simple level, because the person who has never set it is
-// more likely to be the one who needs it.
+// The level is DERIVED, not chosen. It was a toggle in the rail, and a toggle is
+// a thing somebody has to find, understand and set — on the interface whose whole
+// point is that the person fielding a phone call should not have to configure it
+// first. It now follows what the API server says the person can actually do:
+// somebody who can start a rehearsal or read a Secret is operating the platform
+// and wants the object; somebody who can open a throwaway environment and read
+// its logs wants to know whether it is up.
+//
+// Asked rather than tabulated, like every other question this console asks about
+// permissions. A list of "technical group names" in Go would be a second copy of
+// personas.yaml that goes stale, and would break for anybody who binds the roles
+// to their own group names — which is the documented way to install this.
+//
+// And it is explained rather than merely applied: "Your access" says which level
+// you have and what it was derived from, because a screen that quietly shows two
+// colleagues different things is a screen they will argue about.
 type detailLevel string
 
 const (
 	levelPlain    detailLevel = "plain"
 	levelAdvanced detailLevel = "advanced"
-	detailCookie              = "doblura_detail"
 )
 
-func levelFrom(r *http.Request) detailLevel {
-	if v := r.URL.Query().Get("detail"); v == string(levelAdvanced) || v == string(levelPlain) {
-		return detailLevel(v)
-	}
-	if c, err := r.Cookie(detailCookie); err == nil && c.Value == string(levelAdvanced) {
-		return levelAdvanced
-	}
-	return levelPlain
+// operatorShaped are the capabilities that mean "you operate the platform".
+//
+// Starting a rehearsal is the platform's own operation, and reading a Secret is
+// the permission no persona but platform has. Either is enough; neither is
+// something support or QA can do.
+var operatorShaped = []Verb{
+	{"create", "odoorehearsals", "", ""},
+	{"get", "secrets", "", ""},
 }
 
-// handleDetail records the choice and returns the person to where they were.
+// levelFor asks the API server what this person is.
 //
-// A cookie rather than a field on a user object, because there is no user object:
-// identities come from an identity provider or a Secret, and inventing a place to
-// store a display preference would mean inventing a database. It is a preference,
-// not a permission — losing it costs one click.
-func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request, _ Identity) {
-	level := string(levelPlain)
-	if r.URL.Query().Get("to") == string(levelAdvanced) {
-		level = string(levelAdvanced)
+// A refusal to answer is treated as "not an operator": the simple view is never
+// the wrong one to show, and defaulting the other way would put a wall of
+// conditions in front of somebody the console could not identify.
+func (s *Server) levelFor(ctx context.Context, id Identity) (detailLevel, string) {
+	perms, err := s.allowed(ctx, id, operatorShaped...)
+	if err != nil {
+		return levelPlain, "the API server could not be asked"
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: detailCookie, Value: level, Path: "/", HttpOnly: true,
-		Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode, MaxAge: 365 * 24 * 3600,
-	})
-	back := r.URL.Query().Get("back")
-	if back == "" || back[0] != '/' {
-		// Only same-site paths. An absolute URL here would make the console an
-		// open redirector, which is a phishing primitive on any page that has a
-		// login form.
-		back = "/"
+	if perms[operatorShaped[0].key()] {
+		return levelAdvanced, "you can start a rehearsal"
 	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	if perms[operatorShaped[1].key()] {
+		return levelAdvanced, "you can read Secrets"
+	}
+	return levelPlain, "you open and inspect environments rather than operating the platform"
 }
 
 // ── what a non-technical person actually asks ──
