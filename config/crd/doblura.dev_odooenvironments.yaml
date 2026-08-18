@@ -712,6 +712,7 @@ spec:
                         enum:
                         - Ephemeral
                         - PersistentVolumeClaim
+                        - Database
                         type: string
                       size:
                         description: |-
@@ -733,6 +734,9 @@ spec:
                         would still be an emptyDir and the claim would go unused,
                         which is worse than an error
                       rule: self.mode != 'Ephemeral' || !has(self.claimName)
+                    - message: mode Database keeps attachments in Postgres, so there
+                        is no filestore for a claim or a size to describe
+                      rule: self.mode != 'Database' || (!has(self.claimName) && !has(self.size))
                 type: object
               workload:
                 description: |-
@@ -851,18 +855,22 @@ spec:
             - message: data.type Snapshot requires the data.snapshot field
               rule: self.data.type != 'Snapshot' || has(self.data.snapshot)
             - message: 'a Persistent or Hibernating environment cannot use an Ephemeral
-                filestore: the database outlives the pod and the files do not, so
-                every attachment breaks on the first restart while ir_attachment still
-                points at them'
+                filestore (use PersistentVolumeClaim, or Database to keep attachments
+                in Postgres and have no filestore at all): the database outlives the
+                pod and the files do not, so every attachment breaks on the first
+                restart while ir_attachment still points at them'
               rule: '!has(self.lifecycle) || self.lifecycle.type == ''Ephemeral''
                 || !has(self.storage) || !has(self.storage.filestore) || self.storage.filestore.mode
                 != ''Ephemeral'''
-            - message: 'more than one web replica needs a filestore declared ReadWriteMany:
-                each pod would otherwise serve its own filestore, so an attachment
-                uploaded through one is a 404 through the other'
+            - message: 'more than one web replica needs a filestore every pod can
+                reach: either PersistentVolumeClaim declared ReadWriteMany, or Database,
+                which has no filestore to share: each pod would otherwise serve its
+                own filestore, so an attachment uploaded through one is a 404 through
+                the other'
               rule: '!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas
-                <= 1 || (has(self.storage) && has(self.storage.filestore) && self.storage.filestore.mode
-                == ''PersistentVolumeClaim'' && self.storage.filestore.accessModeReadWriteMany)'
+                <= 1 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode
+                == ''Database'' || (self.storage.filestore.mode == ''PersistentVolumeClaim''
+                && self.storage.filestore.accessModeReadWriteMany)))'
           status:
             description: OdooEnvironmentStatus is written by the controller only.
             properties:

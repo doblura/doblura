@@ -95,3 +95,39 @@ func TestFilestoreIsEphemeralOnlyWhenNothingSaysOtherwise(t *testing.T) {
 		t.Error("the declaration must reach the claim")
 	}
 }
+
+func TestDatabaseFilestoreNeedsNoVolumeAndSetsTheParameter(t *testing.T) {
+	env := &doblurav1alpha1.OdooEnvironment{
+		ObjectMeta: metav1.ObjectMeta{Name: "e", Namespace: "d"},
+		Spec: doblurav1alpha1.OdooEnvironmentSpec{
+			Image:    "img",
+			Database: doblurav1alpha1.DatabaseSpec{Host: "h", User: "u", PasswordSecret: "s"},
+			Storage: &doblurav1alpha1.StorageSpec{
+				Filestore: &doblurav1alpha1.FilestoreSpec{Mode: doblurav1alpha1.FilestoreDatabase},
+			},
+		},
+	}
+	// No PVC: there is nothing to persist, which is the whole point.
+	if v := filestoreVolume(env); v.PersistentVolumeClaim != nil {
+		t.Error("Database mode must not claim a volume")
+	}
+	if FilestoreClaim(env) != nil {
+		t.Error("Database mode must not create a PVC")
+	}
+	// The parameter is what makes Odoo write to db_datas, and it must be set in the
+	// DATABASE, not in odoo.conf: it has to travel with the dump.
+	got := envHardenScript(env)
+	if !strings.Contains(got, "ir_attachment.location") || !strings.Contains(got, "'db'") {
+		t.Fatalf("the hardening step must set ir_attachment.location = db:\n%s", got)
+	}
+	if !strings.Contains(got, "force_storage") {
+		t.Error("existing attachments must be migrated, or they stay on a disk that is about to vanish")
+	}
+	// And it must NOT be set when the mode is anything else, or a PVC-backed
+	// environment silently starts filling Postgres with blobs.
+	env.Spec.Storage.Filestore.Mode = doblurav1alpha1.FilestorePVC
+	env.Spec.Storage.Filestore.ClaimName = "fs"
+	if strings.Contains(envHardenScript(env), "ir_attachment.location") {
+		t.Error("a PVC-backed filestore must not be redirected into the database")
+	}
+}

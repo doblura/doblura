@@ -157,6 +157,15 @@ check "claimName with mode Ephemeral"        "$ENV  lifecycle: {ttl: 8h}
   data: {type: Demo}
   storage: {filestore: {mode: Ephemeral, claimName: fs}}" rejected
 
+# Database mode: Odoo core's ir_attachment.location, no addon and no volume.
+check "persistent env, Database filestore"   "$ENV  lifecycle: {type: Persistent}
+  data: {type: Demo}
+  storage: {filestore: {mode: Database}}" ok
+check "Database filestore with a claimName"  "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: Database, claimName: fs}}" rejected
+check "Database filestore with a size"       "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: Database, size: 20Gi}}" rejected
+
 echo "-- replicas and the filestore they share --"
 check "2 replicas, ephemeral filestore"      "$ENV  data: {type: Demo}
   storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs}}
@@ -167,6 +176,10 @@ check "2 replicas, PVC declared RWX"         "$ENV  data: {type: Demo}
 check "1 replica needs no RWX"               "$ENV  data: {type: Demo}
   storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs}}
   workload: {web: {replicas: 1}}" ok
+# Database mode has no filestore to share, so many replicas need no RWX at all.
+check "3 replicas, Database filestore"       "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: Database}}
+  workload: {web: {replicas: 3}}" ok
 
 echo "-- crons and jobs --"
 check "cron tier with 2 replicas"            "$ENV  data: {type: Demo}

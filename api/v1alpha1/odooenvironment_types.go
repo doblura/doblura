@@ -252,8 +252,8 @@ type EnvLifecycle struct {
 // OdooEnvironment including the valid ones — the trap this project has now hit
 // four times.
 //
-// +kubebuilder:validation:XValidation:rule="!has(self.lifecycle) || self.lifecycle.type == 'Ephemeral' || !has(self.storage) || !has(self.storage.filestore) || self.storage.filestore.mode != 'Ephemeral'",message="a Persistent or Hibernating environment cannot use an Ephemeral filestore: the database outlives the pod and the files do not, so every attachment breaks on the first restart while ir_attachment still points at them"
-// +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)",message="more than one web replica needs a filestore declared ReadWriteMany: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
+// +kubebuilder:validation:XValidation:rule="!has(self.lifecycle) || self.lifecycle.type == 'Ephemeral' || !has(self.storage) || !has(self.storage.filestore) || self.storage.filestore.mode != 'Ephemeral'",message="a Persistent or Hibernating environment cannot use an Ephemeral filestore (use PersistentVolumeClaim, or Database to keep attachments in Postgres and have no filestore at all): the database outlives the pod and the files do not, so every attachment breaks on the first restart while ir_attachment still points at them"
+// +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="more than one web replica needs a filestore every pod can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database, which has no filestore to share: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
 type OdooEnvironmentSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
@@ -603,7 +603,7 @@ func (w *WorkloadSplit) CronThreadsForWeb() int32 {
 // loses data.
 
 // FilestoreMode is where Odoo's filestore lives.
-// +kubebuilder:validation:Enum=Ephemeral;PersistentVolumeClaim
+// +kubebuilder:validation:Enum=Ephemeral;PersistentVolumeClaim;Database
 type FilestoreMode string
 
 const (
@@ -613,15 +613,44 @@ const (
 	// to reproduce a ticket. Wrong for anything that outlives a pod.
 	FilestoreEphemeral FilestoreMode = "Ephemeral"
 
-	// FilestorePVC is a PersistentVolumeClaim, which is what Odoo actually needs:
-	// real read/write while it serves, surviving restarts.
+	// FilestorePVC is a PersistentVolumeClaim: real read/write while Odoo serves,
+	// surviving restarts.
+	//
+	// This is also the answer for "somewhere external", and deliberately the only
+	// one. Whatever backs the claim — NFS, CephFS, JuiceFS, an S3 CSI driver,
+	// Azure Files — is a StorageClass concern, and the operator neither knows nor
+	// needs to. Growing S3 credentials here would be re-implementing what the
+	// platform already expresses, and it would be five providers of code that
+	// still falls short on the sixth. Same reasoning as the snapshot providers.
 	FilestorePVC FilestoreMode = "PersistentVolumeClaim"
+
+	// FilestoreDatabase puts attachments in Postgres and has no filestore at all.
+	//
+	// This is Odoo core, not an addon: ir_attachment reads the system parameter
+	// `ir_attachment.location`, and 'db' stores bytes in ir_attachment.db_datas
+	// instead of on disk. Core supports exactly two values, 'file' and 'db', and
+	// ships force_storage() to move existing attachments between them.
+	//
+	// It solves a problem this project warns about everywhere else: "restoring a
+	// database without its filestore leaves orphaned attachments, and that breaks
+	// migrations in confusing ways." With 'db' there is no separate filestore to
+	// lose — the dump IS the whole artifact, and a rehearsal cannot be quietly
+	// wrong because somebody copied one half.
+	//
+	// The cost, which is real and is why this is not the default: Postgres becomes
+	// a blob store. The database grows by the whole attachment volume, every dump
+	// and restore carries it, and on a database where attachments are most of the
+	// bytes that turns a fast snapshot into a slow one. Sensible for ephemeral and
+	// rehearsal environments; think before choosing it for staging, and do not
+	// assume it for production.
+	FilestoreDatabase FilestoreMode = "Database"
 )
 
 // FilestoreSpec says where the filestore lives and admits what cannot be checked.
 //
 // +kubebuilder:validation:XValidation:rule="self.mode != 'PersistentVolumeClaim' || has(self.claimName) || has(self.size)",message="a PersistentVolumeClaim filestore needs either claimName (a PVC you manage) or size (one to create)"
 // +kubebuilder:validation:XValidation:rule="self.mode != 'Ephemeral' || !has(self.claimName)",message="claimName is meaningless with mode Ephemeral; the filestore would still be an emptyDir and the claim would go unused, which is worse than an error"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Database' || (!has(self.claimName) && !has(self.size))",message="mode Database keeps attachments in Postgres, so there is no filestore for a claim or a size to describe"
 type FilestoreSpec struct {
 	// +kubebuilder:default=Ephemeral
 	// +optional
@@ -660,6 +689,12 @@ type FilestoreSpec struct {
 }
 
 // FilestoreIsEphemeral reports whether the filestore dies with the pod.
+// FilestoreInDatabase reports whether attachments live in Postgres.
+func (s *OdooEnvironmentSpec) FilestoreInDatabase() bool {
+	return s.Storage != nil && s.Storage.Filestore != nil &&
+		s.Storage.Filestore.Mode == FilestoreDatabase
+}
+
 func (s *OdooEnvironmentSpec) FilestoreIsEphemeral() bool {
 	return s.Storage == nil || s.Storage.Filestore == nil ||
 		s.Storage.Filestore.Mode == "" || s.Storage.Filestore.Mode == FilestoreEphemeral

@@ -322,6 +322,35 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 		b.WriteString("done\n")
 	}
 
+	if env.Spec.FilestoreInDatabase() {
+		// Odoo core, not an addon: ir_attachment._storage() reads this parameter and
+		// returns 'file' when it is absent. Setting it to 'db' sends new attachment
+		// bytes to ir_attachment.db_datas instead of to disk.
+		//
+		// Set here rather than in odoo.conf because it is a DATABASE parameter, not
+		// a server option — it travels with the dump, which is the point: a copy of
+		// this database carries its own storage decision.
+		b.WriteString(`echo ">> attachments to the database (ir_attachment.location = db)"` + "\n")
+		b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\nBEGIN;\n")
+		b.WriteString("INSERT INTO ir_config_parameter (key, value, create_uid, write_uid, create_date, write_date)\n")
+		b.WriteString("VALUES ('ir_attachment.location', 'db', 1, 1, now(), now())\n")
+		b.WriteString("ON CONFLICT (key) DO UPDATE SET value = 'db', write_date = now();\n")
+		b.WriteString("COMMIT;\nSQL\n")
+
+		// Existing attachments stay on disk until something moves them, and on an
+		// ephemeral filestore that disk is about to disappear. force_storage() is
+		// Odoo's own migration and it is a per-record ORM write, so it is slow on a
+		// large database — which is exactly why this is reported rather than done
+		// silently, and why Database mode is a choice for rehearsal environments
+		// rather than a default for production.
+		b.WriteString(`echo ">> migrating existing attachments into the database (this is per-record, and slow)"` + "\n")
+		b.WriteString("cat > /tmp/doblura-force-storage.py <<'PYSCRIPT'\n")
+		b.WriteString("env['ir.attachment'].sudo().force_storage()\n")
+		b.WriteString("env.cr.commit()\n")
+		b.WriteString("PYSCRIPT\n")
+		b.WriteString("click-odoo -c " + envConf + " /tmp/doblura-force-storage.py\n")
+	}
+
 	if sec.StripExternalCredentials == nil || *sec.StripExternalCredentials {
 		// The gap neutralization leaves open. `odoo neutralize` cuts mail, crons,
 		// payment providers and carriers; it does not touch the API tokens and
