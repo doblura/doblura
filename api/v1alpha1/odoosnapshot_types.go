@@ -293,7 +293,7 @@ type SnapshotDestination struct {
 	Custom *CustomProvider `json:"custom,omitempty"`
 }
 
-// OdooSnapshotSpec produce un dump anonimizado listo para un doblura.
+// OdooSnapshotSpec produces an anonymised dump ready for a rehearsal.
 type OdooSnapshotSpec struct {
 	// Image is an Odoo image. It is needed to neutralize with the native command
 	// and so the schema matches the source's.

@@ -596,3 +596,18 @@ details.helpbox.tight ul { margin: 0 0 8px; padding-left: 18px; }
 details.helpbox.tight li { margin-bottom: 5px; }
 .state.state-degraded, .state.state-down { font-size: 11.5px; }
 td .state { margin-top: 4px; }
+
+/* An action that follows a table needs room from it: at four pixels the button
+   reads as part of the panel above rather than as the next thing you do. */
+.card + details.panel, .empty + details.panel, .card + .actions { margin-top: 14px; }
+
+/* A <summary> is display:list-item by default, and the .btn rules that centre
+   everything else were losing to it — so the label sat left of centre with the
+   marker's space still reserved beside it. */
+details.panel > summary.btn,
+details.panel > summary.btn.ghost {
+  display: inline-flex; align-items: center; justify-content: center;
+  list-style: none;
+}
+details.panel > summary.btn::-webkit-details-marker,
+details.panel > summary.btn::marker { display: none; content: ""; }

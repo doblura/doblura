@@ -73,8 +73,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: OdooSnapshotSpec produce un dump anonimizado listo para un
-              doblura.
+            description: OdooSnapshotSpec produces an anonymised dump ready for a
+              rehearsal.
             properties:
               denyEgress:
                 default: true

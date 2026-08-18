@@ -73,6 +73,7 @@ rules:
 - apiGroups:
   - doblura.dev
   resources:
+  - odoobackups
   - odoodatabases
   - odooinstances
   - odootenants
@@ -81,6 +82,21 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - doblura.dev
+  resources:
+  - odoobackups/status
+  - odooenvironments/status
+  - odooinstances/status
+  - odoorehearsals/status
+  - odoosnapshots/status
+  - odootenants/status
+  - reviewsets/status
+  - runboatlinks/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - doblura.dev
   resources:
@@ -100,20 +116,6 @@ rules:
   resources:
   - odooenvironments/finalizers
   verbs:
-  - update
-- apiGroups:
-  - doblura.dev
-  resources:
-  - odooenvironments/status
-  - odooinstances/status
-  - odoorehearsals/status
-  - odoosnapshots/status
-  - odootenants/status
-  - reviewsets/status
-  - runboatlinks/status
-  verbs:
-  - get
-  - patch
   - update
 - apiGroups:
   - doblura.dev
