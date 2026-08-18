@@ -272,6 +272,17 @@ spec:
                         Default marks the entry new environments get when none is named. Exactly
                         one entry may set it.
                       type: boolean
+                    flavor:
+                      default: Official
+                      description: |-
+                        Flavor is how the image is put together: the official odoo image, a Doodba
+                        build, or something else. Declared once here rather than on every
+                        environment that uses it.
+                      enum:
+                      - Official
+                      - Doodba
+                      - Custom
+                      type: string
                     image:
                       description: Image is the pullable reference.
                       minLength: 1

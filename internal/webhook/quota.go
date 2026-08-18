@@ -215,34 +215,44 @@ func (m *EnvironmentCreator) defaultsFrom(
 	// wrong in the worst available way: a typo in a catalogue name produced a
 	// working environment running a different version of the product than the
 	// person asked for, with nothing anywhere saying so.
-	if env.Spec.ImageRef != "" {
-		e := tenant.Spec.ImageByName(env.Spec.ImageRef)
-		if e == nil {
+	// Choosing a version must not lose everything else the customer record says.
+	// This block used to RETURN as soon as imageRef resolved, so naming a
+	// catalogue entry skipped the database, the storage and the size — and the
+	// environment then failed schema validation on spec.database, pointing at a
+	// field the person had never had to fill in before.
+	var chosen *doblurav1alpha1.ImageCatalogueEntry
+	switch {
+	case env.Spec.ImageRef != "":
+		chosen = tenant.Spec.ImageByName(env.Spec.ImageRef)
+		if chosen == nil {
 			return nil, fmt.Sprintf(
 				"%q is not in %s's image catalogue. Available: %s",
 				env.Spec.ImageRef, tenant.Name, catalogueNames(&tenant))
 		}
-		return append(ops, jsonpatch.NewOperation("add", "/spec/image", e.Image)), ""
+	case env.Spec.Image == "":
+		// The catalogue's default wins over environmentDefaults.image: the
+		// catalogue is what somebody edits when they change versions, and the
+		// other is a leftover from before there was one.
+		chosen = tenant.Spec.DefaultImage()
 	}
 
 	d := tenant.Spec.EnvironmentDefaults
-	if d == nil {
-		// No environmentDefaults, but a catalogue may still answer the question.
-		if e := tenant.Spec.DefaultImage(); e != nil && env.Spec.Image == "" {
-			ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", e.Image))
+
+	switch {
+	case chosen != nil:
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", chosen.Image))
+		if chosen.Flavor != "" {
+			// The flavour follows the image it belongs to. Written even when it
+			// equals the schema default, so the object records what was decided
+			// rather than what happened to be left unset.
+			ops = append(ops, jsonpatch.NewOperation("add", "/spec/imageFlavor", string(chosen.Flavor)))
 		}
-		return ops, ""
+	case env.Spec.Image == "" && d != nil && d.Image != "":
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", d.Image))
 	}
 
-	if env.Spec.Image == "" {
-		// The catalogue's default wins over environmentDefaults.image: the
-		// catalogue is the field a person edits when they change versions, and
-		// the other is a leftover from before there was one.
-		if e := tenant.Spec.DefaultImage(); e != nil {
-			ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", e.Image))
-		} else if d.Image != "" {
-			ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", d.Image))
-		}
+	if d == nil {
+		return ops, ""
 	}
 	if env.Spec.Database.Host == "" && d.Database != nil {
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/database", d.Database))

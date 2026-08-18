@@ -1,0 +1,76 @@
+{{define "dashboard.html"}}{{template "top" .}}
+<h1>Overview</h1>
+
+{{if .Data.Attention}}
+<h2>Needs attention</h2>
+<div class="panel"><table>
+  <thead><tr><th>Environment</th><th>Customer</th><th>State</th><th>What is happening</th></tr></thead>
+  <tbody>
+  {{range .Data.Attention}}
+    <tr>
+      <td><a href="{{.Href}}">{{.Name}}</a></td>
+      <td>{{.Customer}}</td>
+      <td><span class="state state-{{.State}}">{{icon .State}}{{.Word}}</span></td>
+      <td class="muted">{{.Detail}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}
+<div class="answer up">
+  <span class="icon">{{icon "up"}}</span>
+  <div>
+    <p class="big">Nothing needs attention</p>
+    <p>{{if .Data.WorkloadVisible}}Every environment you can see is answering
+       normally.{{else}}No environment is reporting a problem — though whether
+       they are answering cannot be read with your access.{{end}}</p>
+  </div>
+</div>
+{{end}}
+
+{{if .Data.Expiring}}
+<h2>Disappearing within a day</h2>
+<div class="panel"><table>
+  <thead><tr><th>Environment</th><th>Customer</th><th>Goes</th><th></th></tr></thead>
+  <tbody>
+  {{range .Data.Expiring}}
+    <tr><td><a href="{{.Href}}">{{.Name}}</a></td><td>{{.Customer}}</td>
+        <td><span class="state state-asleep">{{icon "asleep"}}{{.Word}}</span></td>
+        <td class="muted">{{.Detail}}</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{end}}
+
+<h2>Where things stand</h2>
+<div class="tiles">
+  <a class="tile" href="/customers">
+    <span class="tile-n">{{.Data.Customers}}</span>
+    <span class="tile-l">customer{{if ne .Data.Customers 1}}s{{end}}</span>
+  </a>
+  <a class="tile" href="/o/environments">
+    <span class="tile-n">{{.Data.Environments}}</span>
+    <span class="tile-l">environment{{if ne .Data.Environments 1}}s{{end}}</span>
+  </a>
+  <a class="tile" href="/o/environments">
+    <span class="tile-n">{{if .Data.WorkloadVisible}}{{.Data.Up}}{{else}}—{{end}}</span>
+    <span class="tile-l">{{if .Data.WorkloadVisible}}answering{{else}}not readable by you{{end}}</span>
+  </a>
+</div>
+
+{{if .Data.Quotas}}
+<h2>Throwaway environments in use</h2>
+<div class="panel"><table>
+  <thead><tr><th>Customer</th><th>In use</th><th></th></tr></thead>
+  <tbody>
+  {{range .Data.Quotas}}
+    <tr>
+      <td><a href="{{.Href}}">{{.Customer}}</a></td>
+      <td><progress class="meter-bar{{if .Full}} full{{end}}" value="{{.Open}}" max="{{.Quota}}"></progress></td>
+      <td class="muted">{{.Open}} of {{.Quota}}{{if .Full}} — no room for another{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{end}}
+{{template "bottom" .}}{{end}}

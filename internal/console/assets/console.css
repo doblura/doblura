@@ -342,3 +342,48 @@ td .small { display: block; margin-top: 2px; }
 
 .map .edge-label { paint-order: stroke; stroke: var(--surface); stroke-width: 3px;
                    stroke-linejoin: round; }
+
+/* ── the navigation menu ──
+   A <details> element, not a script: the CSP loads no JavaScript, which is a
+   property worth keeping on a page holding a session that can act on a cluster.
+   The browser already knows how to open it, and it works from the keyboard. */
+.bar nav { display: flex; gap: 4px; align-items: center; }
+.bar nav > a, .menu > summary {
+  font-size: 14px; padding: 5px 11px; border-radius: var(--radius);
+  color: var(--ink-2); cursor: pointer; white-space: nowrap;
+}
+.bar nav > a:hover, .menu > summary:hover { background: var(--paper); color: var(--ink); text-decoration: none; }
+.bar nav > a.on { color: var(--ink); font-weight: 580; }
+.menu { position: relative; }
+.menu > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::after {
+  content: ""; width: 0; height: 0; margin-top: 1px;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 4px solid currentColor; opacity: .6;
+}
+.menu[open] > summary { background: var(--paper); color: var(--ink); }
+.menu-body {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 20;
+  min-width: 190px; padding: 6px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14);
+  display: flex; flex-direction: column;
+}
+.menu-body a {
+  padding: 7px 10px; border-radius: 5px; font-size: 14px; color: var(--ink-2);
+}
+.menu-body a:hover { background: var(--paper); color: var(--ink); text-decoration: none; }
+
+/* ── the overview tiles ── */
+.tiles { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.tile {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 16px 18px; color: var(--ink);
+}
+.tile:hover { border-color: var(--accent); text-decoration: none; }
+.tile-n { font-size: 28px; font-weight: 640; letter-spacing: -0.02em; line-height: 1.1; }
+.tile-l { font-size: 13px; color: var(--ink-3); }
+a.brand { color: var(--ink); }
+a.brand:hover { text-decoration: none; opacity: .82; }

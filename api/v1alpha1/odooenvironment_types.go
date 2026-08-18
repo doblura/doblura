@@ -278,6 +278,13 @@ type OdooEnvironmentSpec struct {
 	// +optional
 	ImageRef string `json:"imageRef,omitempty"`
 
+	// ImageFlavor is how this image is put together. Filled from the customer's
+	// catalogue entry when imageRef names one, so it is normally set in exactly
+	// one place per image rather than on every environment.
+	// +kubebuilder:default=Official
+	// +optional
+	ImageFlavor ImageFlavor `json:"imageFlavor,omitempty"`
+
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
 

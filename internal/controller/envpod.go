@@ -82,7 +82,12 @@ func envDBName(env *doblurav1alpha1.OdooEnvironment) string {
 
 // envOdooConf composes the configuration every phase and the serving pod share.
 func envOdooConf(env *doblurav1alpha1.OdooEnvironment) string {
-	paths := env.Spec.Addons.AddonsPathFor(doblurav1alpha1.AddonRepoMountBase)
+	// The flavour's own directories come FIRST, so a repo cloned into the pod
+	// still overrides them: doblura's job is to add to the image, not to be
+	// shadowed by it.
+	paths := append(
+		doblurav1alpha1.FlavorBakedPaths(env.Spec.ImageFlavor),
+		env.Spec.Addons.AddonsPathFor(doblurav1alpha1.AddonRepoMountBase)...)
 
 	var b strings.Builder
 	b.WriteString("[options]\n")
@@ -275,7 +280,7 @@ func envJobPod(env *doblurav1alpha1.OdooEnvironment, step envPhaseStep) corev1.P
 				Name:            step.name,
 				Image:           env.Spec.Image,
 				Command:         []string{"/bin/sh", "-euc"},
-				Args:            []string{step.script(env)},
+				Args:            []string{envPreflight(env) + step.script(env)},
 				Env:             envEnv(env),
 				VolumeMounts:    mounts,
 				SecurityContext: envSecurityContext(),
@@ -297,9 +302,10 @@ func envServingPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec 
 			SecurityContext: envPodSecurityContext(env),
 			InitContainers:  envInitContainers(env, inits),
 			Containers: []corev1.Container{{
-				Name:  "odoo",
-				Image: env.Spec.Image,
-				Args:  []string{"-c", "/etc/doblura/odoo.conf"},
+				Name:    "odoo",
+				Image:   env.Spec.Image,
+				Command: doblurav1alpha1.FlavorCommand(env.Spec.ImageFlavor),
+				Args:    []string{"-c", "/etc/doblura/odoo.conf"},
 				Env:   envEnv(env),
 				Ports: []corev1.ContainerPort{
 					{Name: "http", ContainerPort: 8069},
@@ -347,9 +353,10 @@ func envCronPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec {
 			SecurityContext: envPodSecurityContext(env),
 			InitContainers:  envInitContainers(env, inits),
 			Containers: []corev1.Container{{
-				Name:  "odoo-cron",
-				Image: env.Spec.Image,
-				Args:  []string{"-c", envCronConfPath},
+				Name:    "odoo-cron",
+				Image:   env.Spec.Image,
+				Command: doblurav1alpha1.FlavorCommand(env.Spec.ImageFlavor),
+				Args:    []string{"-c", envCronConfPath},
 				Env:   envEnv(env),
 				// Named, but no Service selects them. The name is what the
 				// probes below refer to.
@@ -647,4 +654,66 @@ func FilestoreClaim(env *doblurav1alpha1.OdooEnvironment) *corev1.PersistentVolu
 		pvc.Spec.StorageClassName = &fs.StorageClass
 	}
 	return pvc
+}
+
+// envPreflight checks what the flavour promised, before the phase does anything.
+//
+// The flavour is a declaration, and a declaration that is never checked is a
+// guess with better manners. Everything here is a thing that, left unverified,
+// fails later and further away:
+//
+//   - `odoo` missing produces "exec: odoo: not found" from a Job whose logs give
+//     no clue that the image was never going to work this way.
+//   - an addons_path entry that does not exist makes Odoo start happily and then
+//     report that a module cannot be found, which reads like a broken repository.
+//   - a data_dir the pod cannot write surfaces as a FileNotFoundError deep inside
+//     a restore, naming a path nobody configured.
+//
+// It runs in every phase Job rather than once, because a phase can be the first
+// thing that ever runs in a new image, and because it costs a few milliseconds.
+func envPreflight(env *doblurav1alpha1.OdooEnvironment) string {
+	flavor := env.Spec.ImageFlavor
+	if flavor == "" {
+		flavor = doblurav1alpha1.FlavorOfficial
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`
+# ── preflight: %s image, checked rather than assumed ──
+_fail() {
+  echo ">> this image does not look like a %[1]s image: $1" >&2
+  echo ">> set spec.imageFlavor (or the flavor on the customer's catalogue entry)" >&2
+  exit 1
+}
+command -v odoo >/dev/null 2>&1 || _fail "there is no 'odoo' on the PATH"
+`, flavor))
+
+	// The data directory is checked by writing to it. Testing -w on a directory
+	// lies under some volume types, and the failure it is guarding against is
+	// exactly a write.
+	b.WriteString(fmt.Sprintf(`if ! (touch %[1]s/.doblura-probe && rm -f %[1]s/.doblura-probe) 2>/dev/null; then
+  echo ">> %[1]s is not writable as uid $(id -u)." >&2
+  echo ">> Odoo keeps its filestore there. Set spec.runAsUser/runAsGroup/fsGroup" >&2
+  echo ">> to a user this image actually has." >&2
+  exit 1
+fi
+`, doblurav1alpha1.DataDirPath))
+
+	for _, p := range doblurav1alpha1.FlavorBakedPaths(flavor) {
+		b.WriteString(fmt.Sprintf(
+			"[ -d %[1]s ] || _fail \"%[1]s does not exist, and every %[2]s image has it\"\n",
+			p, flavor))
+	}
+
+	// click-odoo is only REQUIRED where something actually calls it; warning
+	// otherwise, because refusing to start over a tool this phase will not use
+	// would make the check the problem.
+	b.WriteString(`if ! command -v click-odoo >/dev/null 2>&1; then
+  echo ">> note: click-odoo is not installed. Snapshot restores and moving the" >&2
+  echo ">> filestore into the database need it; nothing else does." >&2
+fi
+echo ">> preflight ok"
+
+`)
+	return b.String()
 }

@@ -8,8 +8,27 @@
 {{if .DevMode}}<div class="dev"><b>Development mode.</b> Nobody is being authenticated — every
 request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}}
 <header class="bar"><div class="bar-in">
-  <span class="brand">dob<span>l</span>ura</span>
-  <nav><a href="/">Customers</a><a href="/me">Your access</a></nav>
+  <a class="brand" href="/">dob<span>l</span>ura</a>
+  <nav>
+    <a href="/"{{if eq .Path "/"}} class="on"{{end}}>Overview</a>
+    <a href="/customers"{{if eq .Path "/customers"}} class="on"{{end}}>Customers</a>
+    {{/* A <details> dropdown, not a script. The Content-Security-Policy loads
+         no JavaScript at all, which is a property worth keeping for a page that
+         holds a session able to act on the cluster — so the menu is markup the
+         browser already knows how to open, and it works with a keyboard for
+         free. */}}
+    <details class="menu">
+      <summary>Objects</summary>
+      <div class="menu-body">
+        <a href="/o/environments">Environments</a>
+        <a href="/o/rehearsals">Rehearsals</a>
+        <a href="/o/snapshots">Snapshots</a>
+        <a href="/o/databases">Databases</a>
+        <a href="/o/servers">Servers</a>
+      </div>
+    </details>
+    <a href="/me"{{if eq .Path "/me"}} class="on"{{end}}>Your access</a>
+  </nav>
   <span class="levels" role="group" aria-label="How much detail to show">
     <a href="/detail?to=plain&amp;back={{.Path}}" {{if not .Advanced}}class="on" aria-current="true"{{end}}>Simple</a>
     <a href="/detail?to=advanced&amp;back={{.Path}}" {{if .Advanced}}class="on" aria-current="true"{{end}}>Technical</a>

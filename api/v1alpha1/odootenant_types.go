@@ -234,6 +234,13 @@ type ImageCatalogueEntry struct {
 	// +kubebuilder:validation:Pattern=`^[0-9]+\.[0-9]+$`
 	OdooVersion string `json:"odooVersion"`
 
+	// Flavor is how the image is put together: the official odoo image, a Doodba
+	// build, or something else. Declared once here rather than on every
+	// environment that uses it.
+	// +kubebuilder:default=Official
+	// +optional
+	Flavor ImageFlavor `json:"flavor,omitempty"`
+
 	// Default marks the entry new environments get when none is named. Exactly
 	// one entry may set it.
 	// +optional

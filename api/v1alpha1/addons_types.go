@@ -188,6 +188,83 @@ func (a *AddonsSpec) AddonsPathFor(mountBase string) []string {
 	return append(external, baked...)
 }
 
+// ─────────────── What the image already provides ───────────────
+//
+// Doblura assumed the official odoo image everywhere: `odoo` on the PATH, the
+// server's own addons found without help, uid 100. That assumption is wrong for
+// the scaffolding most Odoo shops actually build on, and wrong in ways that do
+// not announce themselves.
+//
+// Measured against ghcr.io/tecnativa/doodba:18.0 rather than remembered:
+//
+//	                     official odoo:18        doodba:18.0
+//	 runs as             uid 100 (odoo)          root; there is no odoo user
+//	 uid 100 is          odoo                    messagebus
+//	 entrypoint/cmd      entrypoint.sh / odoo    none / python3
+//	 addons              found by the server     /opt/odoo/auto/addons
+//	 config              -c, or /etc/odoo        $OPENERP_SERVER, /opt/odoo/auto
+//	 click-odoo-contrib  absent                  present, on the PATH
+//	 /var/lib/odoo       exists                  does not exist
+//
+// Two of those are not cosmetic. Doodba's cmd is `python3`, so the arguments
+// doblura passes — `-c /etc/doblura/odoo.conf` — would hand the configuration
+// file to the Python interpreter as a program to execute. And Doodba's own
+// entrypoint writes /opt/odoo/auto/odoo.conf at startup, into a root-owned 755
+// directory, which cannot work under runAsNonRoot.
+//
+// The second one turns out not to matter, because doblura generates the
+// configuration itself and mounts it read-only: the entrypoint is not needed and
+// is deliberately bypassed. The first one matters a great deal, and is why the
+// flavour sets the command rather than only the paths.
+//
+// The flavour is DECLARED and then VERIFIED. It is not sniffed: probing an image
+// to guess its layout is how a wrong guess becomes a confusing runtime failure
+// instead of an admission error. The preflight in every phase Job checks what the
+// flavour promised and fails naming exactly what was missing.
+
+// ImageFlavor says how an Odoo image is put together.
+// +kubebuilder:validation:Enum=Official;Doodba;Custom
+type ImageFlavor string
+
+const (
+	// FlavorOfficial is the odoo image published by Odoo SA.
+	FlavorOfficial ImageFlavor = "Official"
+	// FlavorDoodba is Tecnativa's scaffolding, and images built from it.
+	FlavorDoodba ImageFlavor = "Doodba"
+	// FlavorCustom promises nothing. Declare addons.baked yourself; the
+	// preflight still checks that what you declared exists.
+	FlavorCustom ImageFlavor = "Custom"
+)
+
+// DoodbaAddonsPath is where Doodba's build step assembles every addon it has.
+const DoodbaAddonsPath = "/opt/odoo/auto/addons"
+
+// FlavorBakedPaths are the addon directories the image ships, by flavour.
+//
+// Prepended to whatever the user declared in addons.baked rather than replacing
+// it: an image can be Doodba AND carry something else, and silently dropping a
+// declared path would be the worse failure of the two.
+func FlavorBakedPaths(f ImageFlavor) []string {
+	if f == FlavorDoodba {
+		return []string{DoodbaAddonsPath}
+	}
+	return nil
+}
+
+// FlavorCommand is the entrypoint override, or nil to use the image's own.
+//
+// Doodba needs one. Its cmd is `python3`, so appending doblura's arguments would
+// run `python3 -c /etc/doblura/odoo.conf`, handing an ini file to the Python
+// interpreter — which fails with a SyntaxError about a config file, in a pod
+// whose logs give no hint that the image was never going to accept those
+// arguments.
+func FlavorCommand(f ImageFlavor) []string {
+	if f == FlavorDoodba {
+		return []string{"odoo"}
+	}
+	return nil
+}
+
 // AddonVolumeMountPath is where the addons PVC is mounted.
 const AddonVolumeMountPath = "/mnt/addons-volume"
 

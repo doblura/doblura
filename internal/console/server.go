@@ -166,13 +166,15 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /auth/logout", s.handleLogout)
 
-	mux.HandleFunc("GET /{$}", s.authenticated(s.handleCustomers))
+	mux.HandleFunc("GET /{$}", s.authenticated(s.handleDashboard))
+	mux.HandleFunc("GET /customers", s.authenticated(s.handleCustomers))
 	mux.HandleFunc("GET /c/{ns}/{name}", s.authenticated(s.handleCustomer))
 	mux.HandleFunc("GET /e/{ns}/{name}", s.authenticated(s.handleEnvironment))
 	mux.HandleFunc("POST /e/{ns}/{name}/delete", s.authenticated(s.handleDeleteEnvironment))
 	mux.HandleFunc("POST /c/{ns}/{name}/environments", s.authenticated(s.handleCreateEnvironment))
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
 	mux.HandleFunc("GET /detail", s.authenticated(s.handleDetail))
+	mux.HandleFunc("GET /o/{kind}", s.authenticated(s.handleObjects))
 
 	return withSecurityHeaders(mux)
 }
