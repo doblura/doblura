@@ -916,6 +916,36 @@ spec:
                       with a plain bool an explicit "no" is indistinguishable from "unset" and
                       would be overwritten by the purpose.
                     type: boolean
+                  rollback:
+                    description: |-
+                      Rollback takes a copy of the database before updating and puts it back if
+                      the update fails.
+
+                      This is what makes updating production something other than frightening. A
+                      module update that fails halfway leaves a database that is neither the old
+                      schema nor the new one: some tables altered, some not, and the registry
+                      describing a state that does not exist. There is no forward fix for that
+                      and the only real recovery is a restore — so the copy is taken while
+                      somebody is still watching, rather than found to be missing afterwards.
+
+                      odoo.sh does the same thing and calls it reverting to the previous working
+                      state. The mechanism here is click-odoo-copydb, which uses Postgres's own
+                      CREATE DATABASE ... TEMPLATE and copies the filestore beside it.
+
+                      Two costs, both real and both worth saying rather than discovering:
+
+                        - It needs as much free disk as the database occupies, for as long as the
+                          update runs. A 40 GiB database needs 40 GiB spare.
+                        - CREATE DATABASE ... TEMPLATE refuses while anything else is connected.
+                          The update runs in an init container with the server not yet started
+                          and the Deployment on the Recreate strategy, so nothing is — but an
+                          external tool holding a session will make the copy fail, and the
+                          message says so.
+
+                      Left unset it follows the purpose: off for Review, on for QA, Staging and
+                      Production. A review environment holds demo data and the recovery is to
+                      delete it; paying for a copy of that would be paying for nothing.
+                    type: boolean
                   timeout:
                     default: 20m
                     description: |-

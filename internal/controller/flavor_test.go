@@ -159,3 +159,65 @@ func hasInit(inits []corev1.Container, name string) bool {
 	}
 	return false
 }
+
+// The rollback is what makes updating production something other than
+// frightening, so the shape of the script is worth pinning.
+func TestRollbackTakesACopyBeforeUpdatingAndPutsItBack(t *testing.T) {
+	env := flavourEnv(doblurav1alpha1.FlavorOfficial)
+	env.Spec.Purpose = doblurav1alpha1.PurposeStaging
+	s := updateScript(env, "")
+
+	for _, want := range []string{
+		"click-odoo-copydb",             // the copy exists
+		"dropdb --if-exists",            // and stale ones are cleared
+		"the database is back as it was", // and it says so
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("a rolling-back update must contain %q:\n%s", want, s)
+		}
+	}
+
+	// The copy is taken BEFORE the update runs, or it is not a rollback.
+	//
+	// Compared against the INVOCATION and not the name: click-odoo-update is
+	// mentioned in the preflight above the copy, and matching that made this
+	// assertion measure the wrong thing.
+	copyAt := strings.Index(s, "click-odoo-copydb -c")
+	updateAt := strings.Index(s, "click-odoo-update -c")
+	if copyAt < 0 || updateAt < 0 || copyAt > updateAt {
+		t.Errorf("the copy must be taken before the update runs (copy at %d, update at %d)",
+			copyAt, updateAt)
+	}
+
+	// A review environment holds demo data; paying for a copy of it is paying
+	// for nothing.
+	env.Spec.Purpose = doblurav1alpha1.PurposeReview
+	if strings.Contains(updateScript(env, ""), "click-odoo-copydb") {
+		t.Error("a Review environment should not copy demo data before updating")
+	}
+}
+
+// The purpose decides, and an explicit answer beats it.
+func TestPurposeDecidesRollback(t *testing.T) {
+	for _, tc := range []struct {
+		purpose doblurav1alpha1.EnvPurpose
+		want    bool
+	}{
+		{doblurav1alpha1.PurposeReview, false},
+		{doblurav1alpha1.PurposeQA, true},
+		{doblurav1alpha1.PurposeStaging, true},
+		{doblurav1alpha1.PurposeProduction, true},
+	} {
+		env := flavourEnv(doblurav1alpha1.FlavorOfficial)
+		env.Spec.Purpose = tc.purpose
+		if got := env.Spec.RollsBack(); got != tc.want {
+			t.Errorf("purpose %q: rolls back = %v, want %v", tc.purpose, got, tc.want)
+		}
+	}
+	env := flavourEnv(doblurav1alpha1.FlavorOfficial)
+	env.Spec.Purpose = doblurav1alpha1.PurposeProduction
+	env.Spec.Update = &doblurav1alpha1.UpdateSpec{Rollback: ptr(false)}
+	if env.Spec.RollsBack() {
+		t.Error("an explicit no must beat the purpose's yes")
+	}
+}

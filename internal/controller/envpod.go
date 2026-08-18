@@ -229,19 +229,7 @@ func updateContainer(env *doblurav1alpha1.OdooEnvironment) corev1.Container {
 		target = " --update " + strings.Join(u.Modules, ",")
 	}
 
-	// timeout, so an update that hangs fails the pod instead of leaving it in
-	// Init for ever — which reads as "the image is broken" and is not.
-	script := fmt.Sprintf(`
-if ! command -v click-odoo-update >/dev/null 2>&1; then
-  echo "!! spec.update.onStart is on and this image has no click-odoo-contrib." >&2
-  echo "!! Either install it (pip install click-odoo-contrib) or set" >&2
-  echo "!! spec.update.onStart to false and update deliberately instead." >&2
-  exit 1
-fi
-echo ">> bringing modules level with the code"
-timeout %d click-odoo-update -c %s -d "%s"%s
-echo ">> modules are level"
-`, int(env.Spec.UpdateTimeout().Seconds()), envConf, envDBName(env), target)
+	script := updateScript(env, target)
 
 	return corev1.Container{
 		Name:            "update",
@@ -777,4 +765,80 @@ echo ">> preflight ok"
 
 `)
 	return b.String()
+}
+
+// updateScript brings the modules level, and puts the database back if it fails.
+//
+// The shape is: copy, update, and on failure swap the copy back. Written as one
+// script rather than as three containers because the recovery has to happen in
+// the same breath as the failure — a separate rollback step would need to know
+// that the previous one failed, and an init container that failed does not run
+// the next one.
+//
+// The copy is dropped on success. Leaving it would be a slowly accumulating
+// second copy of every database on the server, which is how a disk fills up in a
+// way nobody attributes to the thing that did it.
+func updateScript(env *doblurav1alpha1.OdooEnvironment, target string) string {
+	db := envDBName(env)
+	timeout := int(env.Spec.UpdateTimeout().Seconds())
+
+	preflight := `
+if ! command -v click-odoo-update >/dev/null 2>&1; then
+  echo "!! spec.update.onStart is on and this image has no click-odoo-contrib." >&2
+  echo "!! Either install it (pip install click-odoo-contrib) or set" >&2
+  echo "!! spec.update.onStart to false and update deliberately instead." >&2
+  exit 1
+fi
+`
+
+	if !env.Spec.RollsBack() {
+		return preflight + fmt.Sprintf(`
+echo ">> bringing modules level with the code"
+timeout %d click-odoo-update -c %s -d "%s"%s
+echo ">> modules are level"
+`, timeout, envConf, db, target)
+	}
+
+	safe := db + "_before_update"
+	return preflight + fmt.Sprintf(`
+if ! command -v click-odoo-copydb >/dev/null 2>&1; then
+  echo "!! spec.update.rollback is on and this image has no click-odoo-copydb." >&2
+  exit 1
+fi
+
+# A copy left over from a previous attempt is dropped, not reused: it describes
+# a database from before an update that may since have succeeded, and restoring
+# it would undo work nobody asked to undo.
+dropdb --if-exists "%[1]s" 2>/dev/null || true
+
+echo ">> copying %[2]s before updating, so a failure can be undone"
+if ! click-odoo-copydb -c %[3]s "%[2]s" "%[1]s"; then
+  echo "!! could not copy the database. Postgres refuses CREATE DATABASE ... TEMPLATE" >&2
+  echo "!! while anything else is connected to it, and it needs as much free disk" >&2
+  echo "!! as the database occupies. Not updating, because a failure could not be undone." >&2
+  exit 1
+fi
+
+echo ">> bringing modules level with the code"
+if timeout %[4]d click-odoo-update -c %[3]s -d "%[2]s"%[5]s; then
+  echo ">> modules are level; dropping the copy"
+  dropdb --if-exists "%[1]s" || true
+else
+  rc=$?
+  echo "!! the update failed (exit $rc). Putting the database back as it was." >&2
+  # The order matters: the broken database has to go before the copy can take
+  # its name, and if THAT fails the copy is still there under its own name —
+  # which is worth saying, because it is the difference between a bad morning
+  # and a lost database.
+  if dropdb --if-exists "%[2]s" && click-odoo-copydb -c %[3]s "%[1]s" "%[2]s"; then
+    dropdb --if-exists "%[1]s" || true
+    echo "!! the database is back as it was before the update." >&2
+    echo "!! Nothing was migrated. Read the failure above and try again." >&2
+  else
+    echo "!! THE ROLLBACK ALSO FAILED. Your data is in the database named" >&2
+    echo "!! %[1]s — it has not been touched. Do not delete it." >&2
+  fi
+  exit $rc
+fi
+`, safe, db, envConf, timeout, target)
 }

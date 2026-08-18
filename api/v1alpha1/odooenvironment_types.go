@@ -489,6 +489,36 @@ type UpdateSpec struct {
 	// +kubebuilder:default="20m"
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+
+	// Rollback takes a copy of the database before updating and puts it back if
+	// the update fails.
+	//
+	// This is what makes updating production something other than frightening. A
+	// module update that fails halfway leaves a database that is neither the old
+	// schema nor the new one: some tables altered, some not, and the registry
+	// describing a state that does not exist. There is no forward fix for that
+	// and the only real recovery is a restore — so the copy is taken while
+	// somebody is still watching, rather than found to be missing afterwards.
+	//
+	// odoo.sh does the same thing and calls it reverting to the previous working
+	// state. The mechanism here is click-odoo-copydb, which uses Postgres's own
+	// CREATE DATABASE ... TEMPLATE and copies the filestore beside it.
+	//
+	// Two costs, both real and both worth saying rather than discovering:
+	//
+	//   - It needs as much free disk as the database occupies, for as long as the
+	//     update runs. A 40 GiB database needs 40 GiB spare.
+	//   - CREATE DATABASE ... TEMPLATE refuses while anything else is connected.
+	//     The update runs in an init container with the server not yet started
+	//     and the Deployment on the Recreate strategy, so nothing is — but an
+	//     external tool holding a session will make the copy fail, and the
+	//     message says so.
+	//
+	// Left unset it follows the purpose: off for Review, on for QA, Staging and
+	// Production. A review environment holds demo data and the recovery is to
+	// delete it; paying for a copy of that would be paying for nothing.
+	// +optional
+	Rollback *bool `json:"rollback,omitempty"`
 }
 
 // UpdatesOnStart reports whether this environment updates its modules as it
@@ -506,6 +536,21 @@ func (s *OdooEnvironmentSpec) UpdatesOnStart() bool {
 	// No purpose at all: off. An environment that updates its own schema without
 	// anybody asking is a surprise, and surprises belong on the side somebody
 	// opted into.
+	return false
+}
+
+// RollsBack reports whether a failed update is undone, resolving the purpose
+// default when nothing was said.
+func (s *OdooEnvironmentSpec) RollsBack() bool {
+	if s.Update != nil && s.Update.Rollback != nil {
+		return *s.Update.Rollback
+	}
+	switch s.Purpose {
+	case PurposeQA, PurposeStaging, PurposeProduction:
+		return true
+	}
+	// Review, and anything with no purpose at all: no. Demo data, and the
+	// recovery is to delete the environment.
 	return false
 }
 
