@@ -193,6 +193,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.OdooReviewSetReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to register controller", "controller", "ReviewSet")
+		os.Exit(1)
+	}
+
 	if err := (&controller.OdooTenantReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),

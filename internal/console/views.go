@@ -48,6 +48,8 @@ type page struct {
 	LevelBecause string
 	// Path is the current page, for marking the navigation.
 	Path string
+	// RailCollapsed is remembered across pages, unlike the checkbox it replaced.
+	RailCollapsed bool
 	// SSO says whether the sign-in page should offer the identity provider as
 	// well as the local form.
 	SSO  bool
@@ -60,6 +62,7 @@ func (s *Server) renderFor(w http.ResponseWriter, r *http.Request, name string, 
 	p.Level, p.LevelBecause = s.levelFor(r.Context(), p.Identity)
 	p.Advanced = p.Level == levelAdvanced
 	p.Path = r.URL.Path
+	p.RailCollapsed = railCollapsed(r)
 	s.render(w, name, p)
 }
 

@@ -213,6 +213,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /c/{ns}/{name}/repos/remove", s.authenticated(s.handleRemoveRepo))
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
 	mux.HandleFunc("GET /o/{kind}", s.authenticated(s.handleObjects))
+	mux.HandleFunc("GET /rail", s.authenticated(s.handleRail))
 
 	return withSecurityHeaders(mux)
 }

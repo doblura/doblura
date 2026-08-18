@@ -76,6 +76,7 @@ rules:
   - odoodatabases
   - odooinstances
   - odootenants
+  - reviewsets
   verbs:
   - get
   - list
@@ -108,6 +109,7 @@ rules:
   - odoorehearsals/status
   - odoosnapshots/status
   - odootenants/status
+  - reviewsets/status
   - runboatlinks/status
   verbs:
   - get

@@ -717,6 +717,31 @@ spec:
                       type: string
                     type: array
                 type: object
+              purpose:
+                description: |-
+                  Purpose is what this environment is FOR, and it is the field to fill in
+                  first.
+
+                  Everything else in this spec is a mechanism: a data source, a lifecycle, a
+                  filestore mode, an exposure. Getting a staging server right means choosing
+                  four of them consistently, and the combinations that are wrong are not
+                  obviously wrong — a staging server with an Ephemeral filestore loses every
+                  attachment on the first restart, and looks fine until somebody opens an
+                  invoice.
+
+                  So the purpose expands into those four, in the admission webhook, and only
+                  where they were left empty. It is a starting point and not a straitjacket:
+                  a consultant who needs a Persistent review environment says so and gets it.
+
+                  What the purpose DOES enforce is the handful of combinations that are not
+                  a preference but a mistake — production running demo data, or production
+                  that deletes itself after three days.
+                enum:
+                - Review
+                - QA
+                - Staging
+                - Production
+                type: string
               runAsGroup:
                 default: 101
                 description: |-
@@ -993,6 +1018,24 @@ spec:
                 == ''i-accept-anonymized-data-can-still-be-reidentified'''
             - message: data.type Snapshot requires the data.snapshot field
               rule: self.data.type != 'Snapshot' || has(self.data.snapshot)
+            - message: 'a Production environment runs the customer''s own data: demo
+                data is not production, and an anonymized snapshot called production
+                is a copy people will start trusting. Set data.type to Live, or change
+                the purpose'
+              rule: '!has(self.purpose) || self.purpose != ''Production'' || self.data.type
+                == ''Live'''
+            - message: 'a Production environment cannot be Ephemeral or Hibernating:
+                the first deletes the customer''s Odoo when its time is up and the
+                second switches it off'
+              rule: '!has(self.purpose) || self.purpose != ''Production'' || !has(self.lifecycle)
+                || self.lifecycle.type == ''Persistent'''
+            - message: 'a Staging or Production environment cannot keep its filestore
+                in an emptyDir: the database outlives the pod and the files do not,
+                so every attachment breaks on the first restart while ir_attachment
+                still points at them'
+              rule: '!has(self.purpose) || (self.purpose != ''Staging'' && self.purpose
+                != ''Production'') || !has(self.storage) || !has(self.storage.filestore)
+                || self.storage.filestore.mode != ''Ephemeral'''
             - message: 'a Persistent or Hibernating environment cannot use an Ephemeral
                 filestore (use PersistentVolumeClaim, or Database to keep attachments
                 in Postgres and have no filestore at all): the database outlives the

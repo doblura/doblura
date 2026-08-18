@@ -7,19 +7,27 @@
 </head><body>
 {{if .DevMode}}<div class="dev"><b>Development mode.</b> Nobody is being authenticated —
 every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}}
-{{/* The rail collapses to icons. A checkbox and sibling selectors, because the
-     CSP loads no JavaScript — which is worth keeping on a page holding a session
-     able to act on a cluster. Collapsed, the icon is all that is left, so each
-     one is a distinct silhouette and each carries its name as a tooltip drawn in
-     CSS rather than left to the browser's slow one. */}}
-<input type="checkbox" id="rail-collapse" class="rail-toggle" hidden>
-<div class="shell">
+{{/* The rail collapses to icons, and REMEMBERS it: the state is a cookie the
+     server renders into this class, not a checkbox that resets the moment you
+     follow a link. Still no JavaScript, which is worth keeping on a page holding
+     a session able to act on a cluster. Collapsed, the icon is all that is left,
+     so each one is a distinct silhouette and carries its name as a tooltip drawn
+     in CSS rather than left to the browser's slow one. */}}
+<div class="shell{{if .RailCollapsed}} collapsed{{end}}">
 <aside class="rail">
   <div class="rail-top">
-    <a class="mark" href="/">dob<span>l</span>ura</a>
-    <label for="rail-collapse" class="collapse" title="Collapse the menu" aria-label="Collapse the menu">
+    {{/* The wordmark collapses to a monogram rather than disappearing: a rail
+         with no mark at all stops looking like an application and starts looking
+         like a toolbar that belongs to something else. */}}
+    <a class="mark" href="/" data-label="Doblura">
+      <span class="full">dob<span class="hi">l</span>ura</span>
+      <span class="mono-mark">d</span>
+    </a>
+    <a class="collapse" href="/rail?to={{if .RailCollapsed}}open{{else}}collapsed{{end}}&amp;back={{.Path}}"
+       title="{{if .RailCollapsed}}Expand{{else}}Collapse{{end}} the menu"
+       aria-label="{{if .RailCollapsed}}Expand{{else}}Collapse{{end}} the menu">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h16"/></svg>
-    </label>
+    </a>
   </div>
   <nav>
     {{template "navitem" dict "Href" "/" "Path" .Path "Icon" "nav-overview" "Label" "Overview"}}

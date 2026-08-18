@@ -129,7 +129,8 @@ h1, h2, h3 { margin: 0; font-weight: 620; letter-spacing: -0.015em; }
   font-size: 19px; font-weight: 660; letter-spacing: -0.02em;
   color: var(--rail-ink-strong);
 }
-.rail .mark span { color: var(--accent); }
+.rail .mark .hi { color: var(--accent); }
+.rail .mark .mono-mark { display: none; }
 
 .rail nav { display: flex; flex-direction: column; gap: 1px; }
 .rail .group {
@@ -492,19 +493,19 @@ td form { margin: 0; }
    A checkbox before the shell, and sibling selectors. No script: the CSP loads
    none, and a page holding a session that can act on a cluster is a good place
    to keep it that way. */
-.rail-toggle:checked ~ .shell { grid-template-columns: 62px 1fr; }
-.rail-toggle:checked ~ .shell .rail { padding-left: 10px; padding-right: 10px; }
-.rail-toggle:checked ~ .shell .rail .mark,
-.rail-toggle:checked ~ .shell .rail .group,
-.rail-toggle:checked ~ .shell .rail nav a span,
-.rail-toggle:checked ~ .shell .rail .who { display: none; }
-.rail-toggle:checked ~ .shell .rail nav a { justify-content: center; padding: 10px 0; }
+.shell.collapsed { grid-template-columns: 62px 1fr; }
+.shell.collapsed .rail { padding-left: 10px; padding-right: 10px; }
+.shell.collapsed .rail .mark .full,
+.shell.collapsed .rail .group,
+.shell.collapsed .rail nav a span,
+.shell.collapsed .rail .who { display: none; }
+.shell.collapsed .rail nav a { justify-content: center; padding: 10px 0; }
 
 /* Collapsed, the icon is all there is, so the name has to come back on hover.
    Drawn here rather than left to the title attribute: the browser's own tooltip
    takes about a second to appear, which is long enough to click the wrong thing
    first. */
-.rail-toggle:checked ~ .shell .rail nav a::after {
+.shell.collapsed .rail nav a::after {
   content: attr(data-label);
   position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
   background: var(--rail-hover); color: var(--rail-ink-strong);
@@ -513,13 +514,20 @@ td form { margin: 0; }
   opacity: 0; pointer-events: none; z-index: 40;
   transition: opacity .1s ease;
 }
-.rail-toggle:checked ~ .shell .rail nav a:hover::after,
-.rail-toggle:checked ~ .shell .rail nav a:focus-visible::after { opacity: 1; }
-.rail-toggle:checked ~ .shell .rail .group { display: block; height: 1px; padding: 10px 0 0;
+.shell.collapsed .rail nav a:hover::after,
+.shell.collapsed .rail nav a:focus-visible::after { opacity: 1; }
+.shell.collapsed .rail .group { display: block; height: 1px; padding: 10px 0 0;
                                              margin: 0 8px; border-top: 1px solid var(--rail-line); }
-.rail-toggle:checked ~ .shell .rail .group span { display: none; }
-.rail-toggle:checked ~ .shell .rail .rail-top { justify-content: center; padding-bottom: 14px; }
-.rail-toggle:checked ~ .shell .rail .foot { border-top: 1px solid var(--rail-line); }
+.shell.collapsed .rail .group span { display: none; }
+.shell.collapsed .rail .rail-top { flex-direction: column; gap: 10px; padding-bottom: 16px; }
+.shell.collapsed .rail .mark { padding: 0; flex: none; }
+.shell.collapsed .rail .mark .mono-mark {
+  display: grid; place-items: center;
+  width: 32px; height: 32px; border-radius: 9px;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 18px; font-weight: 700; letter-spacing: -0.03em; line-height: 1;
+}
+.shell.collapsed .rail .foot { border-top: 1px solid var(--rail-line); }
 
 .rail-top { display: flex; align-items: center; gap: 8px; padding: 0 4px 22px; }
 .rail-top .mark { padding: 0 6px; flex: 1; }

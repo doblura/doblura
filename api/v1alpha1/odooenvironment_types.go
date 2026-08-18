@@ -231,6 +231,9 @@ type EnvLifecycle struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.exposure) || !has(self.exposure.public) || !self.exposure.public || (has(self.security) && (!has(self.security.denyEgress) || self.security.denyEgress))",message="a public environment requires security.denyEgress: if it is compromised it must not be able to reach the internal network or the production database"
 // +kubebuilder:validation:XValidation:rule="!has(self.exposure) || !has(self.exposure.public) || !self.exposure.public || self.data.type != 'Snapshot' || self.data.acknowledgeReidentificationRisk == 'i-accept-anonymized-data-can-still-be-reidentified'",message="combining anonymized data with public access requires data.acknowledgeReidentificationRisk set to its literal value: deterministic masking preserves relations and dates, and that allows re-identification"
 // +kubebuilder:validation:XValidation:rule="self.data.type != 'Snapshot' || has(self.data.snapshot)",message="data.type Snapshot requires the data.snapshot field"
+// +kubebuilder:validation:XValidation:rule="!has(self.purpose) || self.purpose != 'Production' || self.data.type == 'Live'",message="a Production environment runs the customer's own data: demo data is not production, and an anonymized snapshot called production is a copy people will start trusting. Set data.type to Live, or change the purpose"
+// +kubebuilder:validation:XValidation:rule="!has(self.purpose) || self.purpose != 'Production' || !has(self.lifecycle) || self.lifecycle.type == 'Persistent'",message="a Production environment cannot be Ephemeral or Hibernating: the first deletes the customer's Odoo when its time is up and the second switches it off"
+// +kubebuilder:validation:XValidation:rule="!has(self.purpose) || (self.purpose != 'Staging' && self.purpose != 'Production') || !has(self.storage) || !has(self.storage.filestore) || self.storage.filestore.mode != 'Ephemeral'",message="a Staging or Production environment cannot keep its filestore in an emptyDir: the database outlives the pod and the files do not, so every attachment breaks on the first restart while ir_attachment still points at them"
 // The two combinations that silently lose data, refused at apply time rather than
 // discovered when somebody opens an invoice:
 //
@@ -256,6 +259,27 @@ type EnvLifecycle struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="more than one web replica needs a filestore every pod can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database, which has no filestore to share: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.cron) || self.workload.cron.replicas == 0 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="a cron tier is a second pod writing the same filestore and needs one both tiers can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database: scheduled jobs that generate reports or attachments would otherwise write them where the web tier cannot read them, and a ReadWriteOnce claim only appears to work while both pods happen to land on the same node"
 type OdooEnvironmentSpec struct {
+	// Purpose is what this environment is FOR, and it is the field to fill in
+	// first.
+	//
+	// Everything else in this spec is a mechanism: a data source, a lifecycle, a
+	// filestore mode, an exposure. Getting a staging server right means choosing
+	// four of them consistently, and the combinations that are wrong are not
+	// obviously wrong — a staging server with an Ephemeral filestore loses every
+	// attachment on the first restart, and looks fine until somebody opens an
+	// invoice.
+	//
+	// So the purpose expands into those four, in the admission webhook, and only
+	// where they were left empty. It is a starting point and not a straitjacket:
+	// a consultant who needs a Persistent review environment says so and gets it.
+	//
+	// What the purpose DOES enforce is the handful of combinations that are not
+	// a preference but a mistake — production running demo data, or production
+	// that deletes itself after three days.
+	// +kubebuilder:validation:Enum=Review;QA;Staging;Production
+	// +optional
+	Purpose EnvPurpose `json:"purpose,omitempty"`
+
 	// ImageRef names an entry in the customer's image catalogue.
 	//
 	// The field a person fills in. spec.image is the registry reference it
@@ -408,6 +432,74 @@ type AddonRevision struct {
 	// being a moving target for this environment.
 	// +optional
 	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+}
+
+// EnvPurpose is what an environment is for.
+type EnvPurpose string
+
+const (
+	// PurposeReview is one copy per pull request, thrown away when it merges.
+	PurposeReview EnvPurpose = "Review"
+	// PurposeQA is where a change is checked against realistic data before it
+	// goes anywhere near a customer.
+	PurposeQA EnvPurpose = "QA"
+	// PurposeStaging is the long-lived rehearsal of production: same shape, same
+	// data, nobody's real invoices.
+	PurposeStaging EnvPurpose = "Staging"
+	// PurposeProduction is the customer's actual Odoo.
+	PurposeProduction EnvPurpose = "Production"
+)
+
+// PurposeDefaults is what a purpose means, in the fields it expands into.
+//
+// Written as a table rather than a switch so the four rows can be read side by
+// side. The differences between them are the whole design, and a switch buries
+// them in control flow.
+type PurposeDefaults struct {
+	Lifecycle EnvLifecycleType
+	TTL       string
+	Data      EnvDataType
+	Filestore FilestoreMode
+	Size      Size
+}
+
+// DefaultsFor returns what a purpose expands to, and whether it is a known one.
+func DefaultsFor(p EnvPurpose) (PurposeDefaults, bool) {
+	switch p {
+	case PurposeReview:
+		// Demo data, because a review environment exists to look at a change and
+		// most changes do not need real data to look at. Ephemeral filestore is
+		// fine: it dies with the environment, and so does everything in it.
+		return PurposeDefaults{
+			Lifecycle: LifecycleEphemeral, TTL: "72h",
+			Data: DataDemo, Filestore: FilestoreEphemeral, Size: SizeSmall,
+		}, true
+	case PurposeQA:
+		// A copy of production, anonymised — checking a change against demo data
+		// is how a bug that only appears at scale reaches a customer. A week,
+		// because QA runs on a person's calendar and not on a merge.
+		return PurposeDefaults{
+			Lifecycle: LifecycleEphemeral, TTL: "168h",
+			Data: DataSnapshot, Filestore: FilestoreDatabase, Size: SizeMedium,
+		}, true
+	case PurposeStaging:
+		// Persistent, and the filestore has to outlive the pod: this is the one
+		// people get wrong, and the failure is silent until an attachment is
+		// opened weeks later.
+		return PurposeDefaults{
+			Lifecycle: LifecyclePersistent,
+			Data:      DataSnapshot, Filestore: FilestoreDatabase, Size: SizeMedium,
+		}, true
+	case PurposeProduction:
+		// Live data, and a filestore on a real volume. Large by default because
+		// the cost of being one size too small in production is measured in
+		// complaints and the cost of being one too big is measured in money.
+		return PurposeDefaults{
+			Lifecycle: LifecyclePersistent,
+			Data:      DataLive, Filestore: FilestorePVC, Size: SizeLarge,
+		}, true
+	}
+	return PurposeDefaults{}, false
 }
 
 // EnvPhase summarises the state.

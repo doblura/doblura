@@ -31,7 +31,7 @@ rules:
     resources: [cronjobs, jobs]
     verbs: [create, delete, get, list, patch, update, watch]
   - apiGroups: [doblura.dev]
-    resources: [odoodatabases, odooinstances, odootenants]
+    resources: [odoodatabases, odooinstances, odootenants, reviewsets]
     verbs: [get, list, watch]
   - apiGroups: [doblura.dev]
     resources: [odooenvironments, odoorehearsals, odoosnapshots]
@@ -41,7 +41,7 @@ rules:
     verbs: [update]
   - apiGroups: [doblura.dev]
     resources: [odooenvironments/status, odooinstances/status, odoorehearsals/status, odoosnapshots/status,
-  odootenants/status, runboatlinks/status]
+  odootenants/status, reviewsets/status, runboatlinks/status]
     verbs: [get, patch, update]
   - apiGroups: [doblura.dev]
     resources: [runboatlinks]

@@ -236,6 +236,11 @@ func (m *EnvironmentCreator) defaultsFrom(
 		chosen = tenant.Spec.DefaultImage()
 	}
 
+	// The purpose expands FIRST, so the customer's own defaults can still
+	// override it: a customer whose staging must be on a ReadWriteMany claim says
+	// so once, and the purpose does not undo it.
+	ops = append(ops, purposeOps(env)...)
+
 	d := tenant.Spec.EnvironmentDefaults
 
 	switch {
@@ -535,4 +540,57 @@ func describe(names []string) string {
 func isEphemeral(env *doblurav1alpha1.OdooEnvironment) bool {
 	t := env.Spec.Lifecycle.Type
 	return t == "" || t == doblurav1alpha1.LifecycleEphemeral
+}
+
+// purposeOps expands spec.purpose into the fields it implies.
+//
+// Only where they are empty, and never over something the person wrote. The
+// purpose is the answer to "what is this for", and the fields are how that is
+// achieved; somebody who knows they want a Persistent review environment is not
+// wrong, they are being specific.
+//
+// This runs before the customer's environmentDefaults are applied, so a customer
+// with an unusual requirement — staging on a ReadWriteMany claim, say — declares
+// it once on their record and the purpose does not undo it.
+func purposeOps(env *doblurav1alpha1.OdooEnvironment) []jsonpatch.Operation {
+	want, ok := doblurav1alpha1.DefaultsFor(env.Spec.Purpose)
+	if !ok {
+		return nil
+	}
+
+	var ops []jsonpatch.Operation
+
+	// The lifecycle object may be absent entirely, in which case it has to be
+	// added whole: RFC 6902 refuses to add a member to an object that is not
+	// there, which is the same trap the creator annotation hit.
+	if env.Spec.Lifecycle.Type == "" {
+		life := map[string]any{"type": string(want.Lifecycle)}
+		if want.TTL != "" {
+			life["ttl"] = want.TTL
+		}
+		ops = append(ops, jsonpatch.NewOperation("replace", "/spec/lifecycle", life))
+	}
+
+	if env.Spec.Data.Type == "" {
+		ops = append(ops, jsonpatch.NewOperation("replace", "/spec/data",
+			map[string]any{"type": string(want.Data)}))
+	}
+
+	if env.Spec.Storage == nil || env.Spec.Storage.Filestore == nil {
+		fs := map[string]any{"mode": string(want.Filestore)}
+		// A PersistentVolumeClaim filestore needs a size or a claim name, and
+		// the API refuses one with neither. Production is the only purpose that
+		// asks for a volume, and giving it a size it can grow past is better
+		// than giving it a rule it trips over on the first apply.
+		if want.Filestore == doblurav1alpha1.FilestorePVC {
+			fs["size"] = "20Gi"
+		}
+		ops = append(ops, jsonpatch.NewOperation("replace", "/spec/storage",
+			map[string]any{"filestore": fs}))
+	}
+
+	if env.Spec.Size == "" && want.Size != "" {
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/size", string(want.Size)))
+	}
+	return ops
 }
