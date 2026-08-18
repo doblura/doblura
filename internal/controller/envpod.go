@@ -82,8 +82,10 @@ func envVolumes(env *doblurav1alpha1.OdooEnvironment) ([]corev1.Volume, []corev1
 	vols := []corev1.Volume{
 		{Name: "tmp", VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: qty("1Gi")}}},
-		{Name: "data", VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		// The filestore. An emptyDir only when the environment is genuinely
+		// throwaway — the API refuses the combination that would otherwise lose
+		// attachments, and this is the half that honours the choice.
+		filestoreVolume(env),
 		{Name: "stage", VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "odoo-conf", VolumeSource: corev1.VolumeSource{
@@ -349,4 +351,71 @@ func envDropScript(env *doblurav1alpha1.OdooEnvironment) string {
 	return fmt.Sprintf(`echo ">> dropping %[1]s"
 dropdb --if-exists "%[1]s"
 echo ">> dropped"`, envDBName(env))
+}
+
+// filestoreVolume returns the volume Odoo's filestore lives on.
+//
+// The unbounded emptyDir this used to be unconditionally is still the default, and
+// it is correct for an environment that exists for eight hours. What changed is
+// that it is now a choice rather than the only option, and the sizeLimit is set:
+// an unbounded emptyDir is charged to the node's ephemeral storage and evicts the
+// pod when the node fills, which is a failure that arrives as "my environment
+// disappeared" with nothing in the environment's own events.
+func filestoreVolume(env *doblurav1alpha1.OdooEnvironment) corev1.Volume {
+	v := corev1.Volume{Name: "data"}
+	fs := (*doblurav1alpha1.FilestoreSpec)(nil)
+	if env.Spec.Storage != nil {
+		fs = env.Spec.Storage.Filestore
+	}
+	if fs != nil && fs.Mode == doblurav1alpha1.FilestorePVC {
+		name := fs.ClaimName
+		if name == "" {
+			// A claim this environment owns, named after it so the association is
+			// visible in `kubectl get pvc` without cross-referencing anything.
+			name = env.Name + "-filestore"
+		}
+		v.VolumeSource = corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name},
+		}
+		return v
+	}
+	v.VolumeSource = corev1.VolumeSource{
+		EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: qty("8Gi")},
+	}
+	return v
+}
+
+// FilestoreClaim is the PVC to create when the environment owns its filestore.
+//
+// Returns nil when the user named an existing claim: that volume's lifecycle is
+// somebody else's, and creating or deleting it here would be the operator taking
+// ownership of storage it was only asked to mount.
+func FilestoreClaim(env *doblurav1alpha1.OdooEnvironment) *corev1.PersistentVolumeClaim {
+	if env.Spec.Storage == nil || env.Spec.Storage.Filestore == nil {
+		return nil
+	}
+	fs := env.Spec.Storage.Filestore
+	if fs.Mode != doblurav1alpha1.FilestorePVC || fs.ClaimName != "" || fs.Size == "" {
+		return nil
+	}
+	mode := corev1.ReadWriteOnce
+	if fs.AccessModeReadWriteMany {
+		mode = corev1.ReadWriteMany
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: env.Name + "-filestore", Namespace: env.Namespace,
+			Labels: envLabels(env, "filestore"),
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{mode},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: *qty(fs.Size)},
+			},
+		},
+	}
+	if fs.StorageClass != "" {
+		pvc.Spec.StorageClassName = &fs.StorageClass
+	}
+	return pvc
 }

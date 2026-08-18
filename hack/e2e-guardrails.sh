@@ -134,6 +134,50 @@ spec:
   displayName: Guardrail
 '
 
+echo "-- the filestore, which is state outside the database --"
+# The first two expect OK. They are what proves the has() guards are present: a
+# rule that errors on an absent lifecycle rejects every environment, and that is
+# invisible from the rejection side.
+check "ephemeral env, ephemeral filestore"   "$ENV  lifecycle: {ttl: 8h}
+  data: {type: Demo}" ok
+check "persistent env, no storage declared"  "$ENV  lifecycle: {type: Persistent}
+  data: {type: Demo}" ok
+check "persistent env, EPHEMERAL filestore"  "$ENV  lifecycle: {type: Persistent}
+  data: {type: Demo}
+  storage: {filestore: {mode: Ephemeral}}" rejected
+check "hibernating env, EPHEMERAL filestore" "$ENV  lifecycle: {type: Hibernating}
+  data: {type: Demo}
+  storage: {filestore: {mode: Ephemeral}}" rejected
+check "persistent env, PVC filestore"        "$ENV  lifecycle: {type: Persistent}
+  data: {type: Demo}
+  storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs}}" ok
+check "PVC filestore with neither claim nor size" "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: PersistentVolumeClaim}}" rejected
+check "claimName with mode Ephemeral"        "$ENV  lifecycle: {ttl: 8h}
+  data: {type: Demo}
+  storage: {filestore: {mode: Ephemeral, claimName: fs}}" rejected
+
+echo "-- replicas and the filestore they share --"
+check "2 replicas, ephemeral filestore"      "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs}}
+  workload: {web: {replicas: 2}}" rejected
+check "2 replicas, PVC declared RWX"         "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs, accessModeReadWriteMany: true}}
+  workload: {web: {replicas: 2}}" ok
+check "1 replica needs no RWX"               "$ENV  data: {type: Demo}
+  storage: {filestore: {mode: PersistentVolumeClaim, claimName: fs}}
+  workload: {web: {replicas: 1}}" ok
+
+echo "-- crons and jobs --"
+check "cron tier with 2 replicas"            "$ENV  data: {type: Demo}
+  workload: {cron: {replicas: 2}}" rejected
+check "cron tier with 1"                     "$ENV  data: {type: Demo}
+  workload: {cron: {replicas: 1}}" ok
+check "queue_job runner with 2"              "$ENV  data: {type: Demo}
+  workload: {queueJob: {replicas: 2}}" rejected
+
+echo
+
 echo "-- the tenant quota field --"
 check "a negative quota"            "$TEN  maxEphemeralEnvironments: -1" rejected
 check "a quota of zero"             "$TEN  maxEphemeralEnvironments: 0" ok
@@ -320,5 +364,4 @@ for u in $ALICE $BRUNO; do
   kubectl delete clusterrolebinding "quota-guardrail-${u%%@*}" --ignore-not-found >/dev/null 2>&1
 done
 
-echo
 [ $fails -eq 0 ] && echo "  all guardrails OK" || { echo "  $fails guardrail(s) failed"; exit 1; }

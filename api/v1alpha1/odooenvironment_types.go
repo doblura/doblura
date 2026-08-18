@@ -231,6 +231,29 @@ type EnvLifecycle struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.exposure) || !has(self.exposure.public) || !self.exposure.public || (has(self.security) && (!has(self.security.denyEgress) || self.security.denyEgress))",message="a public environment requires security.denyEgress: if it is compromised it must not be able to reach the internal network or the production database"
 // +kubebuilder:validation:XValidation:rule="!has(self.exposure) || !has(self.exposure.public) || !self.exposure.public || self.data.type != 'Snapshot' || self.data.acknowledgeReidentificationRisk == 'i-accept-anonymized-data-can-still-be-reidentified'",message="combining anonymized data with public access requires data.acknowledgeReidentificationRisk set to its literal value: deterministic masking preserves relations and dates, and that allows re-identification"
 // +kubebuilder:validation:XValidation:rule="self.data.type != 'Snapshot' || has(self.data.snapshot)",message="data.type Snapshot requires the data.snapshot field"
+// The two combinations that silently lose data, refused at apply time rather than
+// discovered when somebody opens an invoice:
+//
+//   - a Persistent or Hibernating environment with an ephemeral filestore. The
+//     database survives the pod and the files do not, so ir_attachment keeps rows
+//     pointing at store_fname paths that are gone.
+//
+//     Note the predicate is lifecycle.type, NOT the absence of a ttl. The first
+//     version of this rule tested "no lifecycle.ttl" and never fired, because ttl
+//     carries a 72h default and the API server fills it in — so at CEL evaluation
+//     time every environment has one. Caught by the guardrail check that expected
+//     a rejection and got an accept.
+//
+//   - more than one web replica without a filestore that is really ReadWriteMany.
+//     Each pod would serve its own copy.
+//
+// Both guard with has() first. self.lifecycle on an object that omitted it is an
+// evaluation ERROR, not a missing value, and an erroring rule rejects every
+// OdooEnvironment including the valid ones — the trap this project has now hit
+// four times.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.lifecycle) || self.lifecycle.type == 'Ephemeral' || !has(self.storage) || !has(self.storage.filestore) || self.storage.filestore.mode != 'Ephemeral'",message="a Persistent or Hibernating environment cannot use an Ephemeral filestore: the database outlives the pod and the files do not, so every attachment breaks on the first restart while ir_attachment still points at them"
+// +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)",message="more than one web replica needs a filestore declared ReadWriteMany: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
 type OdooEnvironmentSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
@@ -284,6 +307,11 @@ type OdooEnvironmentSpec struct {
 	Security EnvSecurity `json:"security,omitempty"`
 
 	Database DatabaseSpec `json:"database"`
+
+	// Storage is where the filestore lives. Absent means ephemeral, which is
+	// correct for a throwaway environment and loses data for anything else.
+	// +optional
+	Storage *StorageSpec `json:"storage,omitempty"`
 
 	// Workload splits the environment's processes. Absent means one deployment
 	// serving HTTP and running crons, which is right for a throwaway environment
@@ -548,4 +576,97 @@ func (w *WorkloadSplit) CronThreadsForWeb() int32 {
 		return 0
 	}
 	return 1
+}
+
+// ─────────────── The filestore ───────────────
+//
+// Odoo's filestore is mutable state that lives OUTSIDE the database, and it is the
+// clearest place where Odoo is not a normal stateless application. Every
+// attachment, every generated report, every uploaded image is a file on disk, and
+// ir_attachment.store_fname is a pointer to it. The database and the filestore are
+// one artifact in two places.
+//
+// This was an emptyDir. Three things followed, and the third is embarrassing:
+//
+//  1. A persistent environment lost every attachment on any pod restart, while the
+//     database kept the ir_attachment rows pointing at files that no longer
+//     existed. Not an error at restart — an error later, when somebody opens an
+//     invoice.
+//  2. More than one replica meant more than one filestore. Upload on pod A, 404 on
+//     pod B, with nothing in any log to say why.
+//  3. The Deployment used the Recreate strategy with the comment "the filestore is
+//     RWO" — justifying a real constraint with an architecture that was not there.
+//     An emptyDir is not RWO, and Recreate saves nothing when the data dies with
+//     the pod either way.
+//
+// So the mode is now explicit, and the API refuses the combination that silently
+// loses data.
+
+// FilestoreMode is where Odoo's filestore lives.
+// +kubebuilder:validation:Enum=Ephemeral;PersistentVolumeClaim
+type FilestoreMode string
+
+const (
+	// FilestoreEphemeral is an emptyDir: it dies with the pod.
+	//
+	// Correct, and the default, for an environment somebody opens for eight hours
+	// to reproduce a ticket. Wrong for anything that outlives a pod.
+	FilestoreEphemeral FilestoreMode = "Ephemeral"
+
+	// FilestorePVC is a PersistentVolumeClaim, which is what Odoo actually needs:
+	// real read/write while it serves, surviving restarts.
+	FilestorePVC FilestoreMode = "PersistentVolumeClaim"
+)
+
+// FilestoreSpec says where the filestore lives and admits what cannot be checked.
+//
+// +kubebuilder:validation:XValidation:rule="self.mode != 'PersistentVolumeClaim' || has(self.claimName) || has(self.size)",message="a PersistentVolumeClaim filestore needs either claimName (a PVC you manage) or size (one to create)"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Ephemeral' || !has(self.claimName)",message="claimName is meaningless with mode Ephemeral; the filestore would still be an emptyDir and the claim would go unused, which is worse than an error"
+type FilestoreSpec struct {
+	// +kubebuilder:default=Ephemeral
+	// +optional
+	Mode FilestoreMode `json:"mode,omitempty"`
+
+	// ClaimName is an existing PVC. Use this when something else manages the
+	// volume's lifecycle — which is usually right for staging, because the
+	// filestore should outlive the OdooEnvironment object.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	ClaimName string `json:"claimName,omitempty"`
+
+	// Size creates a PVC owned by this environment. It is deleted with it, so a
+	// staging built this way loses its attachments when the object is deleted.
+	// +kubebuilder:validation:Pattern=`^[0-9]+(Mi|Gi|Ti)$`
+	// +optional
+	Size string `json:"size,omitempty"`
+
+	// StorageClass for a created PVC.
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// AccessModeReadWriteMany declares that the volume really is RWX.
+	//
+	// Declared rather than detected, and the distinction is the honest part: a
+	// StorageClass's supported access modes are not reliably knowable from here,
+	// and a PVC that binds RWO while claiming RWX fails at scheduling rather than
+	// at write time. So the operator requires the claim and refuses more than one
+	// replica without it, instead of pretending it verified something.
+	//
+	// Get it wrong in the optimistic direction and the second pod either never
+	// schedules or serves a different filestore from the first.
+	// +optional
+	AccessModeReadWriteMany bool `json:"accessModeReadWriteMany,omitempty"`
+}
+
+// FilestoreIsEphemeral reports whether the filestore dies with the pod.
+func (s *OdooEnvironmentSpec) FilestoreIsEphemeral() bool {
+	return s.Storage == nil || s.Storage.Filestore == nil ||
+		s.Storage.Filestore.Mode == "" || s.Storage.Filestore.Mode == FilestoreEphemeral
+}
+
+// StorageSpec groups what an environment keeps.
+type StorageSpec struct {
+	// +optional
+	Filestore *FilestoreSpec `json:"filestore,omitempty"`
 }
