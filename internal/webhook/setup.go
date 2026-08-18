@@ -81,7 +81,15 @@ func Register(mgr ctrl.Manager, o Options, caBundle []byte) error {
 	decoder := admission.NewDecoder(mgr.GetScheme())
 	server := mgr.GetWebhookServer()
 
-	server.Register(MutatePath, &admission.Webhook{Handler: &EnvironmentCreator{Decoder: decoder}})
+	server.Register(MutatePath, &admission.Webhook{Handler: &EnvironmentCreator{
+		Decoder: decoder,
+		// The cached client is right here, unlike in the quota half: customer
+		// records change rarely, and a defaulting read that is a few hundred
+		// milliseconds stale fills in the same host it filled in last time. The
+		// quota needs the uncached reader because it is counting objects that
+		// were created seconds ago.
+		Client: mgr.GetClient(),
+	}})
 	server.Register(ValidatePath, &admission.Webhook{Handler: &EnvironmentQuota{
 		// GetAPIReader, not GetClient: the count has to be current. See the
 		// comment on EnvironmentQuota.Reader.

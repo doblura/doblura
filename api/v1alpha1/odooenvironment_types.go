@@ -349,7 +349,14 @@ type OdooEnvironmentSpec struct {
 	// +optional
 	Workload *WorkloadSplit `json:"workload,omitempty"`
 
-	// +kubebuilder:default=medium
+	// Size is the resource class.
+	//
+	// It carries NO schema default, deliberately, and that is a correction. With
+	// `+kubebuilder:default=medium` the API server filled it before any webhook
+	// ran, so the customer's own default could never apply: the field was already
+	// set by the time anything looked, and per-customer sizing was a field that
+	// silently did nothing. An unset size is medium, decided in sizeToResources
+	// where the table already lives.
 	// +optional
 	Size Size `json:"size,omitempty"`
 }

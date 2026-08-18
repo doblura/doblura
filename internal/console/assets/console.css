@@ -1,0 +1,209 @@
+/* The console's stylesheet.
+   Served from the operator's own binary: no CDN, no webfont, no build step.
+   The CSP that ships with it has no 'unsafe-inline', so every rule lives here. */
+
+:root {
+  --paper:   #f6f4ef;
+  --surface: #ffffff;
+  --line:    #dcd9d1;
+  --ink:     #15201e;
+  --ink-2:   #4d5b56;
+  --ink-3:   #7b8983;
+  --accent:  #0d6e63;
+  --accent-ink: #ffffff;
+  --ready:   #2f7d4f;
+  --working: #96690f;
+  --failed:  #a33a2b;
+  --idle:    #6b7a74;
+  --warn-bg: #fbe9b0;
+  --warn-line:#b98c12;
+  --warn-ink: #3d2f05;
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:   #0e1513;
+    --surface: #16201d;
+    --line:    #2a3a35;
+    --ink:     #e6ece9;
+    --ink-2:   #a7b5b0;
+    --ink-3:   #7d8b86;
+    --accent:  #3fbfae;
+    --accent-ink: #06201c;
+    --ready:   #57bd81;
+    --working: #d7a53c;
+    --failed:  #e2705d;
+    --idle:    #8b9a94;
+    --warn-bg: #6b5410;
+    --warn-line:#c9a53a;
+    --warn-ink: #fdf3d8;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:#0e1513; --surface:#16201d; --line:#2a3a35; --ink:#e6ece9;
+  --ink-2:#a7b5b0; --ink-3:#7d8b86; --accent:#3fbfae; --accent-ink:#06201c;
+  --ready:#57bd81; --working:#d7a53c; --failed:#e2705d; --idle:#8b9a94;
+  --warn-bg:#6b5410; --warn-line:#c9a53a; --warn-ink:#fdf3d8;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── chrome ── */
+.bar {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.bar-in {
+  max-width: 1120px; margin: 0 auto; padding: 12px 20px;
+  display: flex; align-items: baseline; gap: 20px;
+}
+.brand {
+  font-weight: 640; letter-spacing: -0.01em; font-size: 17px; color: var(--ink);
+}
+.brand span { color: var(--accent); }
+.bar nav { display: flex; gap: 16px; font-size: 14px; }
+.bar .who { margin-left: auto; font-size: 13px; color: var(--ink-2); }
+
+main { max-width: 1120px; margin: 0 auto; padding: 28px 20px 64px; }
+h1 { font-size: 24px; letter-spacing: -0.015em; margin: 0 0 4px; text-wrap: balance; }
+h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.07em;
+     color: var(--ink-3); margin: 32px 0 10px; font-weight: 620; }
+.lede { color: var(--ink-2); margin: 0 0 20px; max-width: 62ch; }
+
+/* ── the development banner ── */
+.dev {
+  background: var(--warn-bg); border-bottom: 2px solid var(--warn-line);
+  padding: 9px 20px; font-size: 13px; text-align: center; color: var(--warn-ink);
+}
+.dev b { font-weight: 660; }
+
+/* ── tables ── */
+.panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow-x: auto;
+}
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th {
+  text-align: left; font-weight: 600; font-size: 12px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-3);
+  padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+tr:last-child td { border-bottom: 0; }
+td.num { text-align: right; }
+.muted { color: var(--ink-3); }
+
+/* ── phase, as a state and not a colour alone ── */
+.phase {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 560; white-space: nowrap;
+}
+.phase::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--idle); flex: none;
+}
+.phase.ready::before   { background: var(--ready); }
+.phase.working::before { background: var(--working); }
+.phase.failed::before  { background: var(--failed); }
+.phase.ready  { color: var(--ready); }
+.phase.working{ color: var(--working); }
+.phase.failed { color: var(--failed); }
+
+/* ── quota meter ── */
+.meter { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
+progress.meter-bar {
+  appearance: none; -webkit-appearance: none;
+  width: 150px; height: 7px; border: 0; border-radius: 4px;
+  background: var(--line); overflow: hidden;
+}
+progress.meter-bar::-webkit-progress-bar { background: var(--line); border-radius: 4px; }
+progress.meter-bar::-webkit-progress-value { background: var(--accent); border-radius: 4px; }
+progress.meter-bar::-moz-progress-bar { background: var(--accent); border-radius: 4px; }
+progress.meter-bar.full::-webkit-progress-value { background: var(--failed); }
+progress.meter-bar.full::-moz-progress-bar { background: var(--failed); }
+
+/* ── actions ── */
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 0; }
+button, .btn {
+  font: inherit; font-size: 14px; font-weight: 560;
+  height: 38px; padding: 0 16px; border-radius: var(--radius);
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  cursor: pointer;
+}
+button.ghost, .btn.ghost { background: transparent; color: var(--accent); }
+button.danger { border-color: var(--failed); background: transparent; color: var(--failed); }
+button:hover { filter: brightness(1.07); }
+
+/* An action the person's role does not permit is SHOWN and disabled, with the
+   reason. Hiding it makes the interface look different for different people and
+   turns "why can't I" into a question nobody can answer from the screen. */
+.denied {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink-3);
+  border: 1px dashed var(--line); border-radius: var(--radius); padding: 8px 14px;
+}
+
+/* ── forms ── */
+form.launcher {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end; margin-top: 14px;
+}
+label { display: block; font-size: 12px; letter-spacing: 0.04em;
+        text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
+input, select {
+  font: inherit; width: 100%; height: 38px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--paper); color: var(--ink);
+}
+
+/* ── the error page ── */
+.problem {
+  border: 1px solid var(--failed); border-left-width: 3px;
+  border-radius: var(--radius); background: var(--surface);
+  padding: 16px 18px;
+}
+.problem pre {
+  margin: 10px 0 0; white-space: pre-wrap; word-break: break-word;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2);
+}
+
+dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 22px; margin: 0; }
+dl.kv dt { color: var(--ink-3); font-size: 13px; }
+dl.kv dd { margin: 0; font-size: 14px; }
+
+footer { color: var(--ink-3); font-size: 12px; margin-top: 40px; }
+
+/* Utility classes rather than style attributes: the console's own CSP has no
+   'unsafe-inline', so an inline style is silently dropped — which is how the
+   quota meter shipped rendering permanently empty. */
+.panel.pad { padding: 18px 20px; }
+.lede.note { margin-top: 14px; }
+
+/* ── sign-in ── */
+body.centred { display: grid; place-items: center; min-height: 100vh; padding: 24px; }
+.signin {
+  width: 100%; max-width: 360px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; padding: 30px 28px;
+}
+.signin .brand { font-size: 22px; font-weight: 640; letter-spacing: -0.015em; }
+.signin .lede { margin: 6px 0 20px; }
+.stack { display: grid; gap: 14px; }
+.stack button { width: 100%; }
+.or { text-align: center; color: var(--ink-3); font-size: 12px;
+      text-transform: uppercase; letter-spacing: 0.08em; margin: 18px 0 12px; }
+.btn.wide { display: block; text-align: center; line-height: 36px; }
+.fineprint { color: var(--ink-3); font-size: 12px; margin: 22px 0 0; }
+.problem.small { padding: 10px 12px; font-size: 13px; margin-bottom: 16px; }

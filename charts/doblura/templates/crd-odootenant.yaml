@@ -49,7 +49,6 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: OdooTenant is a customer.
         properties:
           apiVersion:
             description: |-
@@ -77,6 +76,190 @@ spec:
                   makes a poor thing to show people.
                 minLength: 1
                 type: string
+              environmentDefaults:
+                description: |-
+                  EnvironmentDefaults is how this customer's environments are built.
+
+                  It exists because of who creates environments. Support opens a throwaway
+                  copy to reproduce a bug; QA opens one to check a fix. Neither of them knows
+                  the Postgres host, the credential Secret or the filestore mode for this
+                  customer, and neither of them should have to — that is the platform team's
+                  decision, made once, per customer.
+
+                  Without this the OdooEnvironment CRD is a form that cannot be filled in by
+                  the people it is for: spec.image, spec.database.host, spec.database.user
+                  and spec.database.passwordSecret are all required, and all four are
+                  infrastructure. The mutating webhook fills them from here, so `kubectl
+                  apply` with a four-line environment works exactly as the console does —
+                  putting this in the console instead would have made the interface a
+                  privileged path, which is the thing the impersonation design refuses.
+
+                  Anything set explicitly on the environment wins. These are defaults, not
+                  policy: a consultant pointing a rehearsal at a different server is a
+                  legitimate thing to do, and the quota is what bounds the damage.
+                properties:
+                  database:
+                    description: Database is where this customer's environments create
+                      their databases.
+                    properties:
+                      host:
+                        description: Host of the Postgres server.
+                        minLength: 1
+                        type: string
+                      passwordSecret:
+                        description: PasswordSecret is the Secret holding the "password"
+                          key.
+                        minLength: 1
+                        type: string
+                      port:
+                        default: 5432
+                        format: int32
+                        type: integer
+                      proxy:
+                        description: Proxy puts a connection pooler between Odoo and
+                          this server.
+                        properties:
+                          defaultPoolSize:
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          image:
+                            description: Image is the pooler. pgbouncer is what the
+                              generated configuration speaks.
+                            minLength: 1
+                            type: string
+                          maxClientConn:
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          mode:
+                            default: None
+                            description: DatabaseProxyMode selects the proxy topology.
+                            enum:
+                            - None
+                            - Sidecar
+                            type: string
+                          poolMode:
+                            default: Session
+                            description: |-
+                              PoolMode defaults to Session, and that default is the whole point.
+
+                              Session is the only mode that keeps a client on one server connection for
+                              the life of the connection, and Odoo needs that: bus.py issues
+                              `listen imbus` and then waits on the socket. Transaction pooling returns
+                              the server connection to the pool the moment the transaction ends, so the
+                              registration is on a backend the listener no longer holds.
+
+                              Everything else Odoo does is transaction-scoped and would be fine —
+                              ir_cron serialises with FOR NO KEY UPDATE SKIP LOCKED, mail_thread uses
+                              pg_try_advisory_xact_lock. The bus is the one exception, and it is enough.
+                            enum:
+                            - Session
+                            - Transaction
+                            type: string
+                          unsafeAcknowledgement:
+                            description: UnsafeAcknowledgement gates Transaction.
+                              See the CEL message.
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: 'proxy mode Sidecar needs an explicit image: there
+                            is no sensible default, because the pooler image is the
+                            one container in the pod that will hold your database
+                            credential and pinning a vendor tag on your behalf is
+                            not a decision this operator should make for you'
+                          rule: self.mode != 'Sidecar' || has(self.image)
+                        - message: 'poolMode Transaction requires unsafeAcknowledgement
+                            set to its literal value: Odoo''s bus registers with LISTEN,
+                            which is session state, and transaction pooling does not
+                            preserve it: the failure is that live notifications silently
+                            stop, and it appears under concurrency rather than in
+                            testing'
+                          rule: self.poolMode != 'Transaction' || (has(self.unsafeAcknowledgement)
+                            && self.unsafeAcknowledgement == 'i-accept-transaction-pooling-breaks-the-odoo-bus')
+                      user:
+                        minLength: 1
+                        type: string
+                    required:
+                    - host
+                    - passwordSecret
+                    - user
+                    type: object
+                  image:
+                    description: Image is the Odoo image this customer's environments
+                      run.
+                    type: string
+                  size:
+                    description: Size is the default resource class.
+                    enum:
+                    - small
+                    - medium
+                    - large
+                    type: string
+                  storage:
+                    description: |-
+                      Storage carries the filestore mode, which is a per-customer decision:
+                      Database mode for a customer with few attachments, a ReadWriteMany claim
+                      for one with many.
+                    properties:
+                      filestore:
+                        description: FilestoreSpec says where the filestore lives
+                          and admits what cannot be checked.
+                        properties:
+                          accessModeReadWriteMany:
+                            description: |-
+                              AccessModeReadWriteMany declares that the volume really is RWX.
+
+                              Declared rather than detected, and the distinction is the honest part: a
+                              StorageClass's supported access modes are not reliably knowable from here,
+                              and a PVC that binds RWO while claiming RWX fails at scheduling rather than
+                              at write time. So the operator requires the claim and refuses more than one
+                              replica without it, instead of pretending it verified something.
+
+                              Get it wrong in the optimistic direction and the second pod either never
+                              schedules or serves a different filestore from the first.
+                            type: boolean
+                          claimName:
+                            description: |-
+                              ClaimName is an existing PVC. Use this when something else manages the
+                              volume's lifecycle — which is usually right for staging, because the
+                              filestore should outlive the OdooEnvironment object.
+                            maxLength: 253
+                            type: string
+                          mode:
+                            default: Ephemeral
+                            description: FilestoreMode is where Odoo's filestore lives.
+                            enum:
+                            - Ephemeral
+                            - PersistentVolumeClaim
+                            - Database
+                            type: string
+                          size:
+                            description: |-
+                              Size creates a PVC owned by this environment. It is deleted with it, so a
+                              staging built this way loses its attachments when the object is deleted.
+                            pattern: ^[0-9]+(Mi|Gi|Ti)$
+                            type: string
+                          storageClass:
+                            description: StorageClass for a created PVC.
+                            maxLength: 253
+                            type: string
+                        type: object
+                        x-kubernetes-validations:
+                        - message: a PersistentVolumeClaim filestore needs either
+                            claimName (a PVC you manage) or size (one to create)
+                          rule: self.mode != 'PersistentVolumeClaim' || has(self.claimName)
+                            || has(self.size)
+                        - message: claimName is meaningless with mode Ephemeral; the
+                            filestore would still be an emptyDir and the claim would
+                            go unused, which is worse than an error
+                          rule: self.mode != 'Ephemeral' || !has(self.claimName)
+                        - message: mode Database keeps attachments in Postgres, so
+                            there is no filestore for a claim or a size to describe
+                          rule: self.mode != 'Database' || (!has(self.claimName) &&
+                            !has(self.size))
+                    type: object
+                type: object
               maxEphemeralEnvironments:
                 default: 3
                 description: |-

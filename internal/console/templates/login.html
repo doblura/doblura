@@ -1,0 +1,21 @@
+{{define "login.html"}}<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Doblura</title><link rel="stylesheet" href="/assets/console.css">
+</head><body class="centred">
+<div class="signin">
+  <div class="brand">dob<span>l</span>ura</div>
+  <p class="lede">Sign in to continue.</p>
+  {{if .Error}}<div class="problem small">{{.Error}}</div>{{end}}
+  <form method="post" action="/auth/login" class="stack">
+    <div><label for="user">Username</label><input id="user" name="user" autocomplete="username" autofocus required></div>
+    <div><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+    <button type="submit">Sign in</button>
+  </form>
+  {{if .SSO}}<p class="or">or</p>
+  <a class="btn ghost wide" href="/auth/sso">Continue with single sign-on</a>{{end}}
+  <p class="fineprint">Your username and groups are what Doblura impersonates.
+  Everything you are allowed to do is decided by Kubernetes, not by this page.</p>
+</div>
+</body></html>
+{{end}}

@@ -62,6 +62,28 @@ type OdooTenantSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MaxEphemeralEnvironments *int32 `json:"maxEphemeralEnvironments,omitempty"`
+
+	// EnvironmentDefaults is how this customer's environments are built.
+	//
+	// It exists because of who creates environments. Support opens a throwaway
+	// copy to reproduce a bug; QA opens one to check a fix. Neither of them knows
+	// the Postgres host, the credential Secret or the filestore mode for this
+	// customer, and neither of them should have to — that is the platform team's
+	// decision, made once, per customer.
+	//
+	// Without this the OdooEnvironment CRD is a form that cannot be filled in by
+	// the people it is for: spec.image, spec.database.host, spec.database.user
+	// and spec.database.passwordSecret are all required, and all four are
+	// infrastructure. The mutating webhook fills them from here, so `kubectl
+	// apply` with a four-line environment works exactly as the console does —
+	// putting this in the console instead would have made the interface a
+	// privileged path, which is the thing the impersonation design refuses.
+	//
+	// Anything set explicitly on the environment wins. These are defaults, not
+	// policy: a consultant pointing a rehearsal at a different server is a
+	// legitimate thing to do, and the quota is what bounds the damage.
+	// +optional
+	EnvironmentDefaults *EnvironmentDefaults `json:"environmentDefaults,omitempty"`
 }
 
 // DefaultMaxEphemeralEnvironments is the quota a tenant that never mentioned one
@@ -156,6 +178,28 @@ type OdooTenantStatus struct {
 
 // OdooTenant is a customer.
 //
+// EnvironmentDefaults are the parts of an OdooEnvironment that come from the
+// customer rather than from the person opening it.
+type EnvironmentDefaults struct {
+	// Image is the Odoo image this customer's environments run.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// Database is where this customer's environments create their databases.
+	// +optional
+	Database *DatabaseSpec `json:"database,omitempty"`
+
+	// Storage carries the filestore mode, which is a per-customer decision:
+	// Database mode for a customer with few attachments, a ReadWriteMany claim
+	// for one with many.
+	// +optional
+	Storage *StorageSpec `json:"storage,omitempty"`
+
+	// Size is the default resource class.
+	// +optional
+	Size Size `json:"size,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=oten

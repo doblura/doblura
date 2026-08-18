@@ -1,0 +1,41 @@
+{{define "environment.html"}}{{template "top" .}}
+{{$e := .Data.Env}}{{$perms := .Perms}}
+<h1>{{$e.Name}}</h1>
+<p class="lede">{{$e.Namespace}} · for {{$e.Spec.ForTenant}}</p>
+
+<div class="panel pad">
+<dl class="kv">
+  <dt>Phase</dt><dd>{{template "phase" (printf "%s" $e.Status.Phase)}}</dd>
+  <dt>Data</dt><dd>{{$e.Spec.Data.Type}}</dd>
+  <dt>Lifecycle</dt><dd>{{$e.Spec.Lifecycle.Type}}</dd>
+  <dt>Image</dt><dd>{{$e.Spec.Image}}</dd>
+  <dt>Filestore</dt><dd>{{if $e.Spec.Storage.Filestore}}{{$e.Spec.Storage.Filestore.Mode}}{{else}}<span class="muted">default</span>{{end}}</dd>
+  <dt>URL</dt><dd>{{if $e.Status.URL}}<a href="{{$e.Status.URL}}">{{$e.Status.URL}}</a>{{else}}<span class="muted">not exposed</span>{{end}}</dd>
+  <dt>Ready</dt><dd>{{since $e.Status.ReadyAt}}{{if $e.Status.ReadyAt}} ago{{end}}</dd>
+  {{if $e.Status.Message}}<dt>Message</dt><dd>{{$e.Status.Message}}</dd>{{end}}
+</dl>
+</div>
+
+<h2>Conditions</h2>
+<div class="panel"><table>
+  <thead><tr><th>Condition</th><th>Status</th><th>Reason</th><th>Message</th><th>Changed</th></tr></thead>
+  <tbody>
+  {{range .Data.Keys}}
+    <tr><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.Reason}}</td>
+        <td class="muted">{{.Message}}</td><td class="muted">{{.Age}} ago</td></tr>
+  {{else}}
+    <tr><td class="muted" colspan="5">The operator has recorded no conditions yet.</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+
+<div class="actions">
+{{if can $perms (printf "delete:odooenvironments:%s" $e.Name)}}
+  <form method="post" action="/e/{{$e.Namespace}}/{{$e.Name}}/delete">
+    <button class="danger" type="submit">Delete environment</button>
+  </form>
+{{else}}
+  <span class="denied">Deleting is not permitted for your groups.</span>
+{{end}}
+</div>
+{{template "bottom" .}}{{end}}

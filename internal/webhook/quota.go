@@ -126,6 +126,11 @@ const (
 // EnvironmentCreator is the mutating half: it stamps who is asking.
 type EnvironmentCreator struct {
 	Decoder admission.Decoder
+
+	// Client reads the customer record, for the environment defaults. Nil is a
+	// supported configuration: the creator stamp still works, and environments
+	// simply have to carry their own infrastructure fields.
+	Client client.Client
 }
 
 // Handle writes the caller's identity into the creator annotation, replacing
@@ -136,7 +141,7 @@ type EnvironmentCreator struct {
 // object without a creator is one that the per-person count cannot see. A
 // stamping webhook that is allowed to fail open produces exactly the invisible
 // under-counting the quota is supposed to prevent.
-func (m *EnvironmentCreator) Handle(_ context.Context, req admission.Request) admission.Response {
+func (m *EnvironmentCreator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	var env doblurav1alpha1.OdooEnvironment
 	if err := m.Decoder.Decode(req, &env); err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
@@ -155,7 +160,59 @@ func (m *EnvironmentCreator) Handle(_ context.Context, req admission.Request) ad
 		patch = jsonpatch.NewOperation("add", "/metadata/annotations",
 			map[string]string{CreatorAnnotation: req.UserInfo.Username})
 	}
-	return admission.Patched("recorded the creator from the authenticated identity", patch)
+	ops := []jsonpatch.Operation{patch}
+	ops = append(ops, m.defaultsFrom(ctx, &env)...)
+	return admission.Patched("recorded the creator from the authenticated identity", ops...)
+}
+
+// defaultsFrom fills the infrastructure fields from the customer record.
+//
+// Done here rather than in the console, and that is the load-bearing choice. The
+// console impersonates the person and holds no privilege of its own, so anything
+// it can do, `kubectl` can do — if defaulting lived there, an environment created
+// from the command line would be missing exactly the four fields the person
+// creating it does not know, and the interface would have quietly become a
+// privileged path.
+//
+// It fills only fields left entirely empty, and never merges half an object. An
+// environment naming a database host but no user is a mistake, and completing it
+// from the customer's credentials would produce a working connection to a server
+// nobody asked for.
+func (m *EnvironmentCreator) defaultsFrom(
+	ctx context.Context,
+	env *doblurav1alpha1.OdooEnvironment,
+) []jsonpatch.Operation {
+	if m.Client == nil || env.Spec.ForTenant == "" {
+		return nil
+	}
+	var tenant doblurav1alpha1.OdooTenant
+	if err := m.Client.Get(ctx, client.ObjectKey{
+		Namespace: env.Namespace, Name: env.Spec.ForTenant,
+	}, &tenant); err != nil {
+		// Deliberately not an error. A missing customer record is caught by the
+		// validating half with a message about the tenant; failing here would
+		// report it as a defaulting failure, which names the wrong thing.
+		return nil
+	}
+	d := tenant.Spec.EnvironmentDefaults
+	if d == nil {
+		return nil
+	}
+
+	var ops []jsonpatch.Operation
+	if env.Spec.Image == "" && d.Image != "" {
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", d.Image))
+	}
+	if env.Spec.Database.Host == "" && d.Database != nil {
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/database", d.Database))
+	}
+	if (env.Spec.Storage == nil || env.Spec.Storage.Filestore == nil) && d.Storage != nil {
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/storage", d.Storage))
+	}
+	if env.Spec.Size == "" && d.Size != "" {
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/size", d.Size))
+	}
+	return ops
 }
 
 // escapeJSONPointer encodes a map key for use in a JSON Pointer path. The

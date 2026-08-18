@@ -1,0 +1,9 @@
+{{define "error.html"}}{{template "top" .}}
+<h1>Not available</h1>
+<p class="lede">This is what the Kubernetes API server said, unedited. A refusal
+here names the verb, the resource and you — which is what whoever administers
+your groups needs.</p>
+<div class="problem"><strong>The request was refused or failed.</strong>
+<pre>{{.Error}}</pre></div>
+<div class="actions"><a class="btn ghost" href="/">Back to customers</a></div>
+{{template "bottom" .}}{{end}}

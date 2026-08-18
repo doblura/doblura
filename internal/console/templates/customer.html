@@ -1,0 +1,51 @@
+{{define "customer.html"}}{{template "top" .}}
+{{$ns := .Data.Tenant.Namespace}}{{$perms := .Perms}}
+<h1>{{.Data.Tenant.Spec.DisplayName}}</h1>
+<p class="lede">{{.Data.Tenant.Namespace}}/{{.Data.Tenant.Name}}</p>
+
+<div class="meter">
+  <span>Ephemeral quota</span>
+  <progress class="meter-bar{{if ge .Data.Open .Data.Quota}} full{{end}}"
+            value="{{.Data.Open}}" max="{{.Data.Quota}}"></progress>
+  <span>{{.Data.Open}} of {{.Data.Quota}} open</span>
+</div>
+
+<h2>Environments</h2>
+{{if .Data.Environments}}
+<div class="panel"><table>
+  <thead><tr><th>Name</th><th>Phase</th><th>Data</th><th>Lifecycle</th><th>URL</th><th>Ready</th></tr></thead>
+  <tbody>
+  {{range .Data.Environments}}
+    <tr>
+      <td><a href="/e/{{.Namespace}}/{{.Name}}">{{.Name}}</a></td>
+      <td>{{template "phase" (printf "%s" .Status.Phase)}}</td>
+      <td>{{.Spec.Data.Type}}</td>
+      <td>{{.Spec.Lifecycle.Type}}</td>
+      <td>{{if .Status.URL}}<a href="{{.Status.URL}}">open</a>{{else}}<span class="muted">not exposed</span>{{end}}</td>
+      <td class="muted">{{since .Status.ReadyAt}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}<div class="panel"><table><tbody><tr><td class="muted">No environments.</td></tr></tbody></table></div>{{end}}
+
+<h2>New environment</h2>
+{{if can $perms (printf "create:odooenvironments:")}}
+<form class="launcher" method="post" action="/c/{{$ns}}/{{.Data.Tenant.Name}}/environments">
+  <div><label for="name">Name</label><input id="name" name="name" required
+       pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="review-1421"></div>
+  <div><label for="data">Data</label><select id="data" name="data">
+      <option value="Demo">Demo</option>
+      <option value="Empty">Empty</option>
+      <option value="Snapshot">Snapshot (anonymised copy)</option>
+  </select></div>
+  <div><button type="submit">Create</button></div>
+</form>
+<p class="lede note">Created as you, and the image, database and filestore come
+from this customer's record — not from you. If the quota is spent, the admission
+webhook refuses it and says so in its own words.</p>
+{{else}}
+<div class="denied">Your groups do not permit creating environments in
+<b>{{$ns}}</b>. The API server was asked, not this page.</div>
+{{end}}
+{{template "bottom" .}}{{end}}

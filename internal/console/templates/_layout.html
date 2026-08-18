@@ -1,0 +1,25 @@
+{{define "top"}}<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Doblura</title>
+<link rel="stylesheet" href="/assets/console.css">
+</head><body>
+{{if .DevMode}}<div class="dev"><b>Development mode.</b> Nobody is being authenticated — every
+request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}}
+<header class="bar"><div class="bar-in">
+  <span class="brand">dob<span>l</span>ura</span>
+  <nav><a href="/">Customers</a><a href="/me">Your access</a></nav>
+  <span class="who">{{if .Identity.Name}}{{.Identity.Name}}{{else}}{{.Identity.User}}{{end}}
+    · <a href="/auth/logout">sign out</a></span>
+</div></header>
+<main>
+{{end}}
+
+{{define "bottom"}}
+<footer>Doblura · the console has no permissions of its own; every action is
+performed as you, and Kubernetes RBAC decides.</footer>
+</main></body></html>
+{{end}}
+
+{{define "phase"}}<span class="phase {{if eq . "Ready"}}ready{{else if eq . "Failed"}}failed{{else if eq . "Expired"}}{{else if eq . "Hibernated"}}{{else}}working{{end}}">{{if .}}{{.}}{{else}}—{{end}}</span>{{end}}
