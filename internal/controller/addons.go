@@ -86,8 +86,18 @@ func cloneContainer(r doblurav1alpha1.AddonRepo) corev1.Container {
 			{Name: "addons-repos", MountPath: doblurav1alpha1.AddonRepoMountBase},
 			{Name: "tmp", MountPath: "/tmp"},
 		},
+		TerminationMessagePath: cloneRevisionPath,
+		// FallbackToLogsOnError and not the default: when the clone fails there
+		// is no revision to write, and the last lines of the log say which repo
+		// and why — which beats an empty message on the one path that matters.
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 	}
 }
+
+// cloneRevisionPath is inside /tmp, which the clone container already mounts
+// writable — the root filesystem is read-only, and the default termination path
+// (/dev/termination-log) is on it.
+const cloneRevisionPath = "/tmp/revision"
 
 // authEnv translates the declared GitAuth into environment variables.
 //
@@ -163,6 +173,13 @@ func cloneScript(r doblurav1alpha1.AddonRepo) string {
 	}
 
 	var b strings.Builder
+	// pipefail, because every git command here is piped through the sed that
+	// obfuscates credentials — and without it the exit status is SED's, which is
+	// always zero. A failed fetch went unnoticed under `set -e` and the script
+	// carried on to check out a FETCH_HEAD that did not exist, reporting the
+	// confusing "--detach does not take a path argument" instead of the network
+	// error that actually happened.
+	b.WriteString("set -o pipefail\n")
 	b.WriteString("export HOME=/tmp\n")
 	b.WriteString(`URL="` + r.URL + `"` + "\n")
 
@@ -184,17 +201,50 @@ func cloneScript(r doblurav1alpha1.AddonRepo) string {
 	b.WriteString(`  fi` + "\n")
 	b.WriteString("fi\n")
 
-	// No --filter=blob:none or sparse checkout: keep it simple and predictable.
-	// depth 1 is already fast, and a rehearsal is not where you optimize.
-	b.WriteString(fmt.Sprintf(`git clone %s --branch "%s" "$URL" "%s" 2>&1 | sed -E "s#://[^@]*@#://***@#g" || {`+"\n", depth, r.Ref, dest))
-	// If Ref was a commit rather than a branch, --branch fails: generic retry.
-	b.WriteString(fmt.Sprintf(`  echo ">> --branch failed; trying clone + checkout of %s"`+"\n", r.Ref))
-	b.WriteString(fmt.Sprintf(`  rm -rf "%s"; git clone "$URL" "%s" 2>&1 | sed -E "s#://[^@]*@#://***@#g"`+"\n", dest, dest))
-	b.WriteString(fmt.Sprintf(`  git -C "%s" checkout --detach "%s"`+"\n", dest, r.Ref))
+	// init + fetch, not clone.
+	//
+	// `git clone --branch` cannot take a commit, so this used to fall back to a
+	// FULL clone and then check the commit out. That made the one thing the API
+	// documentation tells you to do — pin a rehearsal to a commit — by far the
+	// most expensive. Measured on OCA/server-tools: 149 MB and 22 seconds for the
+	// full clone against 4.4 MB for a shallow fetch of the same commit, per repo,
+	// on every environment. A customer with eight repos paid that eight times.
+	//
+	// `git fetch --depth` takes a branch, a tag OR a bare commit against any
+	// server that allows reachable-SHA1-in-want, which GitHub, GitLab and Gitea
+	// all do. So one path serves all three kinds of ref and the fallback is gone
+	// — and with it the case that was fast in testing and slow in production,
+	// because a branch name is what you type while trying things out.
+	b.WriteString(fmt.Sprintf(`mkdir -p "%s" && git -C "%s" init -q`+"\n", dest, dest))
+	b.WriteString(fmt.Sprintf(`git -C "%s" remote add origin "$URL"`+"\n", dest))
+	b.WriteString(fmt.Sprintf(`git -C "%s" fetch -q %s origin "%s" 2>&1 | sed -E "s#://[^@]*@#://***@#g" || {`+"\n", dest, depth, r.Ref))
+	// A server that refuses bare SHAs is the one case left. Say so precisely
+	// rather than retrying blindly: the fix is a branch or a tag, and the person
+	// reading this needs to know that is why.
+	b.WriteString(fmt.Sprintf(`  echo ">> could not fetch %s from %s." >&2`+"\n", r.Ref, r.Name))
+	b.WriteString(`  echo ">> If that is a commit, this server may not serve commits directly;" >&2` + "\n")
+	b.WriteString(`  echo ">> use a branch or tag, or raise depth to reach it by history." >&2` + "\n")
+	b.WriteString("  exit 1\n")
 	b.WriteString("}\n")
+	// checkout FETCH_HEAD, without --detach: git reads `--detach FETCH_HEAD` as a
+	// branch plus a path, and says so in a message about paths.
+	b.WriteString(fmt.Sprintf(`git -C "%s" checkout -q FETCH_HEAD`+"\n", dest))
 	// Record the exact revision: in a rehearsal that is the difference between a
 	// reproducible result and an anecdote.
 	b.WriteString(fmt.Sprintf(`echo ">> %s at $(git -C "%s" rev-parse HEAD)"`+"\n", r.Name, dest))
+
+	// And write it where it OUTLIVES the pod.
+	//
+	// The line above goes to the Job's log, which is gone the moment the Job is
+	// cleaned up — so "which commit was this environment actually running" was
+	// answerable only for as long as nobody tidied. Kubernetes keeps a container's
+	// termination message in the pod status, so the operator can read it and put
+	// it in the environment's own status, where it belongs.
+	//
+	// The message is name=sha, one per line, because an init container has one
+	// message and this is the smallest thing that survives being parsed.
+	b.WriteString(fmt.Sprintf(`printf '%%s=%%s\n' "%s" "$(git -C "%s" rev-parse HEAD)" > %s`+"\n",
+		r.Name, dest, cloneRevisionPath))
 	return b.String()
 }
 

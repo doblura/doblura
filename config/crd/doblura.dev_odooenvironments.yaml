@@ -1013,6 +1013,44 @@ spec:
           status:
             description: OdooEnvironmentStatus is written by the controller only.
             properties:
+              addonRevisions:
+                description: |-
+                  AddonRevisions is the commit each declared repository was ACTUALLY at.
+
+                  spec.addons.repos[].ref is what was ASKED for, and a branch name is not an
+                  answer to "what code is this running". Somebody looking at a broken
+                  environment, or at a rehearsal that passed, needs the commit — and the
+                  clone container's log, which is where it used to live, disappears with the
+                  Job that produced it.
+                items:
+                  description: AddonRevision is one repository, as it was actually
+                    cloned.
+                  properties:
+                    name:
+                      description: Name matches spec.addons.repos[].name.
+                      type: string
+                    observedAt:
+                      description: |-
+                        ObservedAt is when the clone happened, which is the moment a branch stopped
+                        being a moving target for this environment.
+                      format: date-time
+                      type: string
+                    ref:
+                      description: 'Ref is what was asked for: a branch, a tag or
+                        a commit.'
+                      type: string
+                    revision:
+                      description: |-
+                        Revision is the commit it resolved to. With a commit ref the two are the
+                        same, and that is the point — a branch drifts and this does not.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

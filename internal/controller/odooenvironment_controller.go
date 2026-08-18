@@ -15,6 +15,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -275,6 +276,11 @@ func (r *OdooEnvironmentReconciler) runPhase(
 	if err := r.Get(ctx, client.ObjectKeyFromObject(job), &live); err != nil {
 		return false, false, err
 	}
+
+	// Read what the clone containers resolved to, whatever the phase did. Done
+	// before the switch because a FAILED phase is exactly when somebody wants to
+	// know which commit it was running.
+	r.recordAddonRevisions(ctx, env, st, name)
 
 	switch {
 	case live.Status.Succeeded > 0:
@@ -577,12 +583,7 @@ func (r *OdooEnvironmentReconciler) ensureEnvNetworkPolicy(ctx context.Context, 
 			// Egress only: ingress is Traefik's job, and blocking it here would
 			// make the environment unreachable.
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
-			Egress: []networkingv1.NetworkPolicyEgressRule{
-				{Ports: []networkingv1.NetworkPolicyPort{
-					{Protocol: &udp, Port: &dns}, {Protocol: &tcp, Port: &dns},
-				}},
-				{Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &pg}}},
-			},
+			Egress: egressRules(env, &tcp, &udp, &dns, &pg),
 		},
 	}
 	if err := ctrl.SetControllerReference(env, np, r.Scheme); err != nil {
@@ -837,4 +838,125 @@ func svcBackend(name string, port int32) networkingv1.IngressBackend {
 			Port: networkingv1.ServiceBackendPort{Number: port},
 		},
 	}
+}
+
+// recordAddonRevisions copies the commit each repo was cloned at into the
+// environment's status.
+//
+// From the init containers' termination messages, which Kubernetes keeps in the
+// pod status: the clone container writes `name=sha` and exits. The alternative
+// was for the manager to resolve the refs itself with git ls-remote, and that
+// would mean the manager holding every customer's repository credential — the
+// one thing this design has consistently refused. The pod already has the
+// credential because it needs it; the manager only reads back a hash.
+//
+// Failures here are ignored on purpose. This is a record, not a gate: an
+// environment that works but whose revisions could not be read is not a broken
+// environment, and turning it into one would be the observability making the
+// outage.
+func (r *OdooEnvironmentReconciler) recordAddonRevisions(
+	ctx context.Context,
+	env *doblurav1alpha1.OdooEnvironment,
+	st *doblurav1alpha1.OdooEnvironmentStatus,
+	jobName string,
+) {
+	if len(env.Spec.Addons.Repos) == 0 {
+		return
+	}
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(env.Namespace),
+		client.MatchingLabels{"job-name": jobName}); err != nil {
+		return
+	}
+
+	// Indexed by name so a repeated phase updates rather than appends, and so the
+	// ref each revision belongs to comes from the spec rather than being guessed.
+	refOf := make(map[string]string, len(env.Spec.Addons.Repos))
+	for _, repo := range env.Spec.Addons.Repos {
+		refOf[repo.Name] = repo.Ref
+	}
+	seen := make(map[string]doblurav1alpha1.AddonRevision, len(refOf))
+	for _, existing := range st.AddonRevisions {
+		seen[existing.Name] = existing
+	}
+
+	now := metav1.Now()
+	for i := range pods.Items {
+		for _, cs := range pods.Items[i].Status.InitContainerStatuses {
+			t := cs.State.Terminated
+			if t == nil || t.Message == "" {
+				continue
+			}
+			for _, line := range strings.Split(strings.TrimSpace(t.Message), "\n") {
+				name, sha, ok := strings.Cut(strings.TrimSpace(line), "=")
+				if !ok || name == "" || sha == "" {
+					continue
+				}
+				if _, declared := refOf[name]; !declared {
+					// FallbackToLogsOnError means a failed clone puts log output
+					// here instead, and log lines are not name=sha pairs. Only
+					// names the spec declared are accepted.
+					continue
+				}
+				if prev, had := seen[name]; had && prev.Revision == sha {
+					continue
+				}
+				seen[name] = doblurav1alpha1.AddonRevision{
+					Name: name, Ref: refOf[name], Revision: sha, ObservedAt: &now,
+				}
+			}
+		}
+	}
+
+	out := make([]doblurav1alpha1.AddonRevision, 0, len(seen))
+	for _, repo := range env.Spec.Addons.Repos {
+		if rev, ok := seen[repo.Name]; ok {
+			out = append(out, rev)
+		}
+	}
+	st.AddonRevisions = out
+}
+
+// egressRules is what the environment may reach.
+//
+// DNS and its database, always. And HTTPS when — and only when — the environment
+// declares git repositories to clone, because otherwise the addons feature and
+// the egress policy contradict each other and the policy wins silently: the
+// clone container failed to reach github.com, `set -e` did not stop the script
+// because the failure was behind a pipe, and the phase reported a confusing git
+// error about paths. Nothing anywhere said "a NetworkPolicy dropped this".
+//
+// This weakens denyEgress for exactly the environments that need it weakened,
+// and it is worth being blunt about the trade: an environment that can reach
+// github.com over 443 can reach anything else on 443 too. NetworkPolicy has no
+// name-based rules, and pinning GitHub's addresses would break the first time
+// they change.
+//
+// The way to keep an environment with no outbound access at all is
+// spec.addons.volume — a PVC populated once, out of band — and that is the
+// honest recommendation for anything holding a copy of production.
+func egressRules(
+	env *doblurav1alpha1.OdooEnvironment,
+	tcp *corev1.Protocol, udp *corev1.Protocol,
+	dns, pg *intstr.IntOrString,
+) []networkingv1.NetworkPolicyEgressRule {
+	rules := []networkingv1.NetworkPolicyEgressRule{
+		{Ports: []networkingv1.NetworkPolicyPort{
+			{Protocol: udp, Port: dns}, {Protocol: tcp, Port: dns},
+		}},
+		{Ports: []networkingv1.NetworkPolicyPort{{Protocol: tcp, Port: pg}}},
+	}
+	if len(env.Spec.Addons.Repos) > 0 {
+		https := intstrFromInt(443)
+		ssh := intstrFromInt(22)
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			Ports: []networkingv1.NetworkPolicyPort{
+				{Protocol: tcp, Port: &https},
+				// 22 as well: a deploy key is one of the four supported
+				// mechanisms, and it is useless over HTTPS.
+				{Protocol: tcp, Port: &ssh},
+			},
+		})
+	}
+	return rules
 }

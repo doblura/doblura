@@ -390,6 +390,26 @@ type OdooEnvironmentSpec struct {
 	Size Size `json:"size,omitempty"`
 }
 
+// AddonRevision is one repository, as it was actually cloned.
+type AddonRevision struct {
+	// Name matches spec.addons.repos[].name.
+	Name string `json:"name"`
+
+	// Ref is what was asked for: a branch, a tag or a commit.
+	// +optional
+	Ref string `json:"ref,omitempty"`
+
+	// Revision is the commit it resolved to. With a commit ref the two are the
+	// same, and that is the point — a branch drifts and this does not.
+	// +optional
+	Revision string `json:"revision,omitempty"`
+
+	// ObservedAt is when the clone happened, which is the moment a branch stopped
+	// being a moving target for this environment.
+	// +optional
+	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+}
+
 // EnvPhase summarises the state.
 // +kubebuilder:validation:Enum=Pending;Provisioning;Restoring;Hardening;Ready;Hibernated;Expired;Failed
 type EnvPhase string
@@ -432,6 +452,19 @@ type OdooEnvironmentStatus struct {
 	// ExpiresAt is when it gets destroyed.
 	// +optional
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
+
+	// AddonRevisions is the commit each declared repository was ACTUALLY at.
+	//
+	// spec.addons.repos[].ref is what was ASKED for, and a branch name is not an
+	// answer to "what code is this running". Somebody looking at a broken
+	// environment, or at a rehearsal that passed, needs the commit — and the
+	// clone container's log, which is where it used to live, disappears with the
+	// Job that produced it.
+	//
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	AddonRevisions []AddonRevision `json:"addonRevisions,omitempty"`
 
 	// ReadyAt is when this environment first became usable.
 	//

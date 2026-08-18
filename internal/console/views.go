@@ -260,6 +260,10 @@ type environmentView struct {
 	// Form holds the current values, so the settings form opens showing what is
 	// there rather than showing blanks that would wipe it on save.
 	Form settingsForm
+
+	// Revisions is name → commit, so the template can look one up beside the ref
+	// that was asked for without a nested loop.
+	Revisions map[string]string
 }
 
 // settingsForm is the editable surface, already reduced to what a form field
@@ -313,6 +317,10 @@ func (s *Server) handleEnvironment(w http.ResponseWriter, r *http.Request, id Id
 	view.Load, view.LoadDetail, view.LoadState = s.load(r.Context(), id, &env)
 	view.Map = environmentGraph(&env).render()
 	view.Form = formFrom(&env)
+	view.Revisions = make(map[string]string, len(env.Status.AddonRevisions))
+	for _, rev := range env.Status.AddonRevisions {
+		view.Revisions[rev.Name] = rev.Revision
+	}
 
 	for _, cond := range env.Status.Conditions {
 		view.Keys = append(view.Keys, conditionRow{
