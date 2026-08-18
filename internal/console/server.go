@@ -20,6 +20,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// docsBase is where the published documentation lives.
+//
+// Not configurable, on purpose: it is the documentation for the version of the
+// operator this console ships inside, and a per-install override would mostly be
+// used to point somewhere stale.
+const docsBase = "https://doblura.dev"
+
 //go:embed assets/*
 var assets embed.FS
 
@@ -87,6 +94,35 @@ func New(cfg *rest.Config, scheme *runtime.Scheme, opt Options) (*Server, error)
 		"stateWord": stateWord,
 		"can": func(perms map[string]bool, key string) bool {
 			return perms[key]
+		},
+		// dict lets one nav template be reused instead of eight near-identical
+		// blocks that drift the first time an icon or a class changes.
+		"dict": func(pairs ...any) map[string]any {
+			m := make(map[string]any, len(pairs)/2)
+			for i := 0; i+1 < len(pairs); i += 2 {
+				k, _ := pairs[i].(string)
+				m[k] = pairs[i+1]
+			}
+			return m
+		},
+		// safe marks help text as the HTML it is.
+		//
+		// Only ever called with literals written in these templates — never with
+		// anything from the cluster, a form, or an identity provider. That is the
+		// whole rule, and it is why this is a one-line helper rather than
+		// something that takes a variable.
+		"safe": func(s string) template.HTML { return template.HTML(s) }, //nolint:gosec // literals only
+
+		// docs builds a link into the documentation site.
+		//
+		// A helper rather than literal URLs in templates, so the host is in ONE
+		// place: a console pointing at a documentation site that has moved is
+		// worse than one that links nowhere, because it looks like it works.
+		"docs": func(path string) string {
+			if path == "" {
+				return docsBase
+			}
+			return docsBase + "/" + strings.TrimPrefix(path, "/")
 		},
 	}
 	tpl, err := template.New("").Funcs(funcs).ParseFS(templates, "templates/*.html")

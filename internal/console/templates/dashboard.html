@@ -34,6 +34,10 @@
 
 {{if .Data.Expiring}}
 <h2 class="sect">Disappearing within a day</h2>
+{{template "help" (safe `<p>Throwaway environments delete themselves when their
+time is up, and nothing in them is kept — not the database, not uploaded files.</p>
+<p>If somebody still needs one, extend its life from its own page, or copy out
+what matters first.</p>`)}}
 <div class="card scroll"><table>
   <thead><tr><th>Environment</th><th>Customer</th><th>Goes</th><th></th></tr></thead>
   <tbody>

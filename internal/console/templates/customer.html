@@ -42,6 +42,12 @@
 {{end}}
 
 <h2 class="sect">Environments</h2>
+{{template "help" (safe `<p>An <b>environment</b> is one running copy of this
+customer's Odoo: a review copy for a pull request, a staging server, or a
+rehearsal of a version change. Each has its own database.</p>
+<p><b>Ephemeral</b> ones remove themselves when their time is up and nothing is
+kept. <b>Persistent</b> ones stay until somebody deletes them.</p>
+<p><a href="https://doblura.dev/guides/environments" target="_blank" rel="noopener noreferrer">Environments in the documentation</a></p>`)}}
 {{if .Data.Environments}}
 <div class="grid two">
 {{range .Data.Environments}}
@@ -75,6 +81,15 @@ list of its own.</div>
 {{end}}
 
 <h2 class="sect">Modules these environments load</h2>
+{{template "help" (safe `<p>Odoo images usually ship Odoo and nothing else. The
+modules — OCA repositories, or your own private ones — are cloned into each
+environment when it starts.</p>
+<p>Pin to a <b>branch</b> while you are trying things out; pin to a <b>commit</b>
+when the result has to mean the same thing tomorrow. Either way, the commit that
+was actually cloned is recorded on every environment.</p>
+<p>The clone happens inside that environment's own pod, using its own
+credentials. The operator never sees the code.</p>
+<p><a href="https://doblura.dev/guides/addons" target="_blank" rel="noopener noreferrer">Modules in the documentation</a></p>`)}}
 {{if .Data.Repos}}
 <div class="card scroll"><table>
   <thead><tr><th>Repository</th><th>Pinned to</th><th>Access</th>
@@ -161,6 +176,13 @@ is never a local decision.</p>
 
 {{if $adv}}
 <h2 class="sect">Image catalogue</h2>
+{{template "help" (safe `<p>The images this customer may run, by a name a person
+recognises rather than a registry path. One is the default that new environments
+get.</p>
+<p>Moving the default between builds of the <b>same</b> Odoo version is an
+ordinary change. Moving it <b>across</b> versions rewrites the database in place
+and cannot be undone by redeploying, so it is refused unless a rehearsal
+succeeded against exactly that image first.</p>`)}}
 <div class="card scroll"><table>
   <thead><tr><th>Name</th><th>Odoo</th><th>Flavour</th><th>Image</th><th>Notes</th></tr></thead>
   <tbody>
