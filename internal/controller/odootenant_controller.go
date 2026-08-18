@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -62,6 +63,8 @@ type OdooTenantReconciler struct {
 	AccountEvery time.Duration
 }
 
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=doblura.dev,resources=odootenants,verbs=get;list;watch
 // +kubebuilder:rbac:groups=doblura.dev,resources=odootenants/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=doblura.dev,resources=odooenvironments,verbs=get;list;watch
@@ -94,6 +97,17 @@ func (r *OdooTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	accrued := accrueMilliHours(&envs, tenant.Name, st.LastAccountedAt, now)
 	st.EnvironmentMilliHours += accrued
 	st.LastAccountedAt = &now
+
+	// Study each catalogue entry once, and once again if it is repointed. A
+	// failure here is recorded on the entry rather than failing the tenant: the
+	// customer record is not broken because an image would not start, and the
+	// fact that it would not start is exactly the report somebody wants.
+	for _, entry := range tenant.Spec.Images {
+		if err := r.ensureImageStudy(ctx, &tenant, st, entry); err != nil {
+			log.FromContext(ctx).Error(err, "could not study an image",
+				"tenant", tenant.Name, "entry", entry.Name)
+		}
+	}
 
 	quota := tenant.Spec.EphemeralQuota()
 	cond := metav1.Condition{

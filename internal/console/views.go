@@ -197,6 +197,14 @@ type customerView struct {
 
 type imageRow struct {
 	Entry doblurav1alpha1.ImageCatalogueEntry
+	// Study is what the image turned out to contain, or nil if it has not been
+	// looked at yet.
+	Study *doblurav1alpha1.ImageStudy
+	// Disagrees is set when the image reports a different Odoo version than the
+	// catalogue entry claims. That disagreement is the single most useful thing
+	// the study produces, so it gets its own flag rather than being left for
+	// somebody to spot by comparing two columns.
+	Disagrees bool
 	// MajorChange is true when making this the default would cross a major
 	// version — the change that rewrites the database and cannot be undone by
 	// redeploying.
@@ -258,9 +266,18 @@ func (s *Server) handleCustomer(w http.ResponseWriter, r *http.Request, id Ident
 	if d := t.Spec.EnvironmentDefaults; d != nil && d.Addons != nil {
 		view.Repos = d.Addons.Repos
 	}
+	studyOf := map[string]*doblurav1alpha1.ImageStudy{}
+	for i := range t.Status.ImageStudies {
+		st := &t.Status.ImageStudies[i]
+		studyOf[st.Name] = st
+	}
 	current := t.Spec.DefaultImage()
 	for _, e := range t.Spec.Images {
-		row := imageRow{Entry: e}
+		row := imageRow{Entry: e, Study: studyOf[e.Name]}
+		if st := row.Study; st != nil && st.OdooVersion != "" &&
+			st.OdooVersion != e.OdooVersion && st.Image == e.Image {
+			row.Disagrees = true
+		}
 		if current != nil && !e.Default && e.Major() != current.Major() {
 			row.MajorChange = true
 			row.From = current.OdooVersion

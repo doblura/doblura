@@ -668,6 +668,86 @@ spec:
                 description: EphemeralEnvironments currently open, for the quota.
                 format: int32
                 type: integer
+              imageStudies:
+                description: |-
+                  ImageStudies is what each catalogue entry turned out to contain, once the
+                  operator ran it and asked.
+                items:
+                  description: ImageStudy is what an image turned out to contain.
+                  properties:
+                    addonsPaths:
+                      description: AddonsPaths are the directories Odoo will search.
+                      items:
+                        type: string
+                      type: array
+                    extraModules:
+                      description: |-
+                        ExtraModules are the addons beyond the ones Odoo itself ships — the answer
+                        to "what is in this build". Truncated: the point is to recognise a build,
+                        not to enumerate it.
+                      items:
+                        type: string
+                      type: array
+                    failed:
+                      description: Failed says the study could not complete, and why.
+                      type: string
+                    findings:
+                      description: Findings are the things worth saying out loud,
+                        in words.
+                      items:
+                        type: string
+                      type: array
+                    flavor:
+                      description: |-
+                        Flavor is what the layout looks like — reported, never used to override
+                        what was declared. A study that silently corrected the declaration would
+                        remove the check that the declaration is right.
+                      enum:
+                      - Official
+                      - Doodba
+                      - Custom
+                      type: string
+                    hasClickOdoo:
+                      description: |-
+                        HasClickOdoo says whether click-odoo-contrib is installed. Snapshot
+                        restores and moving the filestore into the database both need it.
+                      type: boolean
+                    image:
+                      description: |-
+                        Image is the reference that was studied, so a report cannot be read as
+                        being about a different build after the entry is repointed.
+                      type: string
+                    modules:
+                      description: Modules is how many addons the image ships.
+                      format: int32
+                      type: integer
+                    name:
+                      description: Name matches the catalogue entry.
+                      type: string
+                    odooVersion:
+                      description: |-
+                        OdooVersion is what the image REPORTS, which may differ from what the
+                        catalogue entry claims. That disagreement is the most useful thing this
+                        produces.
+                      type: string
+                    studiedAt:
+                      description: |-
+                        StudiedAt is when. An old report about a tag that moves is worse than no
+                        report, so it is shown beside every figure.
+                      format: date-time
+                      type: string
+                    user:
+                      description: |-
+                        User is the uid and gid it runs as, and whether that user exists at all.
+                        Odoo calls getpwuid at startup and dies if it does not.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               lastAccountedAt:
                 description: |-
                   LastAccountedAt is the watermark: consumption before it is already counted in

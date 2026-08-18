@@ -241,7 +241,7 @@ succeeded against exactly that image first.</p>`)}}
 
 {{if .Data.Images}}
 <div class="card scroll"><table>
-  <thead><tr><th>Name</th><th>Odoo</th><th>Built as</th>
+  <thead><tr><th>Name</th><th>Odoo</th><th>Built as</th><th>What is inside</th>
     {{if $adv}}<th>Image</th>{{end}}<th>Notes</th>
     {{if $.Data.CanEditRepos}}<th></th>{{end}}</tr></thead>
   <tbody>
@@ -249,8 +249,43 @@ succeeded against exactly that image first.</p>`)}}
     <tr>
       <td>{{.Entry.Name}}{{if .Entry.Default}}
         <span class="state state-up">{{icon "up"}}in use</span>{{end}}</td>
-      <td>{{.Entry.OdooVersion}}</td>
+      <td>{{.Entry.OdooVersion}}
+        {{if .Disagrees}}<div class="state state-degraded">{{icon "degraded"}}image says {{.Study.OdooVersion}}</div>{{end}}</td>
       <td class="muted">{{if .Entry.Flavor}}{{.Entry.Flavor}}{{else}}Official{{end}}</td>
+      <td>
+        {{if .Study}}
+          {{if .Study.Failed}}
+            <details class="helpbox tight">
+              <summary>{{icon "down"}}<span>would not start</span></summary>
+              <div class="body"><p>{{.Study.Failed}}</p>
+                <p class="muted small">Looked at {{since .Study.StudiedAt}} ago.</p></div>
+            </details>
+          {{else if .Study.Findings}}
+            <details class="helpbox tight">
+              <summary>{{icon "degraded"}}<span>{{len .Study.Findings}} thing{{if ne (len .Study.Findings) 1}}s{{end}} to know</span></summary>
+              <div class="body">
+                <ul>{{range .Study.Findings}}<li>{{.}}</li>{{end}}</ul>
+                <p class="muted small">Odoo {{if .Study.OdooVersion}}{{.Study.OdooVersion}}{{else}}not reported{{end}} ·
+                  runs as {{.Study.User}} · {{.Study.Modules}} modules ·
+                  click-odoo {{if .Study.HasClickOdoo}}present{{else}}absent{{end}} ·
+                  looked at {{since .Study.StudiedAt}} ago</p>
+              </div>
+            </details>
+          {{else}}
+            <details class="helpbox tight">
+              <summary>{{icon "up"}}<span>{{.Study.Modules}} modules</span></summary>
+              <div class="body">
+                <p>Odoo {{.Study.OdooVersion}}, runs as {{.Study.User}},
+                   {{.Study.Modules}} modules, click-odoo
+                   {{if .Study.HasClickOdoo}}present{{else}}absent{{end}}.</p>
+                {{if .Study.ExtraModules}}<p class="small">Beyond Odoo's own:
+                  <span class="mono">{{join .Study.ExtraModules ", "}}</span></p>{{end}}
+                <p class="muted small">Looked at {{since .Study.StudiedAt}} ago.</p>
+              </div>
+            </details>
+          {{end}}
+        {{else}}<span class="muted small">not looked at yet</span>{{end}}
+      </td>
       {{if $adv}}<td class="mono muted">{{.Entry.Image}}</td>{{end}}
       <td class="muted small">{{.Entry.Notes}}</td>
       {{if $.Data.CanEditRepos}}
@@ -325,6 +360,10 @@ succeeded against exactly that image first.</p>`)}}
         </div>
         <button type="submit">Add version</button>
       </form>
+      <p class="hint">Doblura runs each image once and asks it what it contains — which
+      Odoo, which user, how many modules, whether the tools a restore needs are
+      there. The version you type is what the catalogue claims; the study is what
+      the image says, and where they disagree the table says so.</p>
       <p class="hint">The version is <b>declared</b>, never read from the tag:
       <span class="mono">hms:18</span>, <span class="mono">hms:18.0-rc2</span> and
       <span class="mono">hms:stable</span> can all be Odoo 18, and guessing from

@@ -207,6 +207,13 @@ type OdooTenantStatus struct {
 	// +optional
 	EphemeralEnvironments int32 `json:"ephemeralEnvironments,omitempty"`
 
+	// ImageStudies is what each catalogue entry turned out to contain, once the
+	// operator ran it and asked.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	ImageStudies []ImageStudy `json:"imageStudies,omitempty"`
+
 	// +optional
 	Message string `json:"message,omitempty"`
 }
@@ -347,6 +354,85 @@ type EnvironmentDefaults struct {
 	// six, but they must be able to.
 	// +optional
 	Addons *AddonsSpec `json:"addons,omitempty"`
+}
+
+// ─────────────── What an image actually contains ───────────────
+//
+// The catalogue says a name, a registry reference and a version, and all three
+// are things a person typed. None of them is evidence.
+//
+// The questions that get asked about an image are: which Odoo is really in there,
+// which modules does it ship, which user does it run as, and does it have the
+// tools a restore needs. Every one has been answered wrong at some point in this
+// project by reading a tag or trusting a memory — the official image runs as uid
+// 100 and Doodba's uid 100 is `messagebus`; Doodba's published base ships the
+// scaffolding and not Odoo at all.
+//
+// So the operator runs the image and asks it, and writes the answer to the
+// catalogue entry's status, where it outlives the Job that produced it.
+//
+// It is a REPORT and not a gate. An image whose study failed is not refused: the
+// study runs the image, and an image that will not start is a fact worth showing
+// rather than a reason to block somebody who knows what they are doing.
+
+// ImageStudy is what an image turned out to contain.
+type ImageStudy struct {
+	// Name matches the catalogue entry.
+	Name string `json:"name"`
+
+	// Image is the reference that was studied, so a report cannot be read as
+	// being about a different build after the entry is repointed.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// OdooVersion is what the image REPORTS, which may differ from what the
+	// catalogue entry claims. That disagreement is the most useful thing this
+	// produces.
+	// +optional
+	OdooVersion string `json:"odooVersion,omitempty"`
+
+	// User is the uid and gid it runs as, and whether that user exists at all.
+	// Odoo calls getpwuid at startup and dies if it does not.
+	// +optional
+	User string `json:"user,omitempty"`
+
+	// AddonsPaths are the directories Odoo will search.
+	// +optional
+	AddonsPaths []string `json:"addonsPaths,omitempty"`
+
+	// Modules is how many addons the image ships.
+	// +optional
+	Modules int32 `json:"modules,omitempty"`
+
+	// ExtraModules are the addons beyond the ones Odoo itself ships — the answer
+	// to "what is in this build". Truncated: the point is to recognise a build,
+	// not to enumerate it.
+	// +optional
+	ExtraModules []string `json:"extraModules,omitempty"`
+
+	// HasClickOdoo says whether click-odoo-contrib is installed. Snapshot
+	// restores and moving the filestore into the database both need it.
+	// +optional
+	HasClickOdoo bool `json:"hasClickOdoo,omitempty"`
+
+	// Flavor is what the layout looks like — reported, never used to override
+	// what was declared. A study that silently corrected the declaration would
+	// remove the check that the declaration is right.
+	// +optional
+	Flavor ImageFlavor `json:"flavor,omitempty"`
+
+	// Findings are the things worth saying out loud, in words.
+	// +optional
+	Findings []string `json:"findings,omitempty"`
+
+	// StudiedAt is when. An old report about a tag that moves is worse than no
+	// report, so it is shown beside every figure.
+	// +optional
+	StudiedAt *metav1.Time `json:"studiedAt,omitempty"`
+
+	// Failed says the study could not complete, and why.
+	// +optional
+	Failed string `json:"failed,omitempty"`
 }
 
 // +kubebuilder:object:root=true
