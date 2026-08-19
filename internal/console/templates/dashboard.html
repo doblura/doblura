@@ -1,4 +1,58 @@
 {{define "dashboard.html"}}{{template "top" .}}
+{{/* Nothing here yet.
+     This screen used to congratulate somebody on an empty cluster: a green tick
+     and "every environment you can see is answering normally" over zero customers
+     and zero environments. Somebody who had just installed doblura was told
+     everything was fine and given no idea what this is or what to do next — on the
+     first screen anybody sees, which is the one that decides whether they bother
+     with the second. */}}
+{{if and (eq .Data.Customers 0) (eq .Data.Environments 0) (not .Data.Troubles)}}
+<div class="head">
+  <div>
+    <h1>Nothing here yet</h1>
+    <p class="sub">There are no customers in {{if .Scope}}{{.Scope}}{{else}}this
+      cluster{{end}}, so there is nothing running.</p>
+  </div>
+</div>
+
+<div class="card pad prose">
+  <h3>What this is</h3>
+  <p>Doblura runs Odoo the way delivery actually happens: a copy per pull request,
+    a rehearsal of a version change against anonymised production data, a staging
+    that persists, and production itself — all described the same way, with the
+    same rules enforced by Kubernetes rather than by a checklist.</p>
+  <p>It holds no permissions of its own. Every action here is performed as you, so
+    what you can do is what your access already allows, and nothing more.</p>
+
+  <h3>Start with a customer</h3>
+  <p>A <b>customer</b> is the record everything else hangs off: which Odoo version
+    they run, where their environments are published, what their data holds. With
+    one in place, an environment needs almost nothing said about it.</p>
+  <pre class="snippet">kubectl apply -f - &lt;&lt;&#39;YAML&#39;
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata:
+  name: acme
+  namespace: {{if .Scope}}{{.Scope}}{{else}}your-namespace{{end}}
+spec:
+  displayName: Acme Industries
+  default: true                 # so environments need not name it
+  domain: acme.example.com      # addresses are generated under this
+  images:
+    - name: v18
+      image: odoo:18.0
+      odooVersion: &#34;18.0&#34;
+      default: true
+  environmentDefaults:
+    database: {host: postgres, user: odoo, passwordSecret: odoo-db}
+    storage: {filestore: {mode: Database}}
+    size: small
+YAML</pre>
+  <p class="hint">Creating one needs the <span class="mono">platform</span>
+    persona. If that is not you, this is the paragraph to forward.</p>
+</div>
+
+{{else}}
 <div class="head">
   <div>
     <h1>Overview</h1>
@@ -119,4 +173,6 @@ what matters first.</p>`))}}
   </tbody>
 </table></div>
 {{end}}
+{{end}}
+
 {{template "bottom" .}}{{end}}

@@ -31,6 +31,7 @@
   --rail-ink: #b7c6c1;
   --rail-ink-strong: #ffffff;
   --rail-line:#22302c;
+  --rail-ink-dim: #5f716a;
   --rail-hover:#18231f;
 
   --accent:      #0b6d61;
@@ -62,6 +63,8 @@
     --ink: #e9efec; --ink-2: #a4b3ae; --ink-3: #78877f;
     --rail: #050908; --rail-ink: #93a49e; --rail-ink-strong: #ffffff;
     --rail-line: #1b2523; --rail-hover: #131c1a;
+  --rail-ink-dim: #55665f;
+    --rail-ink-dim: #55665f;
     --accent: #35b7a4; --accent-hover: #45c9b6; --accent-ink: #04201c;
     --accent-soft: #10312c;
     --up: #4fc287;       --up-bg: #10281c;       --up-line: #1f4732;
@@ -135,7 +138,7 @@ h1, h2, h3 { margin: 0; font-weight: 620; letter-spacing: -0.015em; }
 .rail nav { display: flex; flex-direction: column; gap: 1px; }
 .rail .group {
   padding: 20px 10px 7px; font-size: 10.5px; font-weight: 640;
-  letter-spacing: 0.11em; text-transform: uppercase; color: #55665f;
+  letter-spacing: 0.11em; text-transform: uppercase; color: var(--rail-ink-dim);
 }
 .rail nav a {
   position: relative;
@@ -159,10 +162,20 @@ h1, h2, h3 { margin: 0; font-weight: 620; letter-spacing: -0.015em; }
 .clusters { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--rail-line); }
 .clusters + .foot { margin-top: 0; }
 
+/* The cluster picker sits above the footer, with a rule of its own: which cluster
+   you are looking at changes what every page means, so it does not belong among
+   the pages.
+
+   It lived inside the mobile media query for a while — pasted into the middle of
+   a selector list, which broke the rule that hides the rail's group labels on a
+   phone and left them wrapping into the middle of the links. */
+.clusters { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--rail-line); }
+.clusters + .foot { margin-top: 0; }
+
 .rail .foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--rail-line); }
 .rail .who { padding: 12px 10px 2px; margin-top: 8px; border-top: 1px solid var(--rail-line);
              font-size: 13px; color: var(--rail-ink-strong); }
-.rail .who small { display: block; color: #5f716a; font-size: 11.5px; margin-top: 1px; }
+.rail .who small { display: block; color: var(--rail-ink-dim); font-size: 11.5px; margin-top: 1px; }
 /* The foot uses the same nav styling as the rest: this used to override it with
    display:inline-block, which killed the flex layout and dropped each icon on top
    of its own label. */
@@ -408,6 +421,28 @@ details.more[open] > summary::before { transform: rotate(90deg); }
 details.more > summary:hover { color: var(--ink); }
 details.more .body { padding: 4px 18px 18px; }
 
+/* Running text, for the few places that explain rather than list — the first-run
+   screen, mostly. Everything else in this console is a table or a card, and prose
+   set at table density is prose nobody reads. */
+.prose { max-width: 66ch; }
+.prose h3 {
+  font-size: 15px; font-weight: 620; letter-spacing: -0.01em;
+  margin: 22px 0 8px; color: var(--ink);
+}
+.prose h3:first-child { margin-top: 0; }
+.prose p { margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+.prose p:last-child { margin-bottom: 0; }
+
+/* A block somebody is meant to copy. Wide enough to hold a manifest without
+   wrapping, and it scrolls rather than pushing the page sideways. */
+.snippet {
+  margin: 4px 0 14px; padding: 14px 16px; overflow-x: auto;
+  background: var(--rail); color: var(--rail-ink);
+  border-radius: var(--r-sm); font-size: 12.5px; line-height: 1.55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-width: 100%;
+}
+
 /* ─────────────────────────── odds and ends ─────────────────────────── */
 
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 11px 26px; margin: 0; }
@@ -529,13 +564,13 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 44px;
           flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
   .rail .mark { padding: 0 12px 0 0; }
   .rail nav { flex-direction: row; flex-wrap: wrap; }
-  .rail .group, .rail .dot, /* The cluster picker sits above the footer, with a rule of its own: which cluster
-   you are looking at changes what every page means, so it does not belong among
-   the pages. */
-.clusters { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--rail-line); }
-.clusters + .foot { margin-top: 0; }
-
-.rail .foot { display: none; }
+  /* Group labels take a row of their own, or they wrap into the middle of the
+     links and read as one of them. */
+  .rail .group { flex-basis: 100%; padding: 10px 0 2px; }
+  .rail .dot, .rail .foot { display: none; }
+  /* The cluster picker keeps its place at the end of the row rather than being
+     pinned to the bottom of a rail that no longer has one. */
+  .clusters { margin-top: 0; padding-top: 0; border-top: 0; flex-basis: 100%; }
   .page > .inner { padding: 22px 18px 56px; }
 }
 
@@ -612,7 +647,7 @@ td form { margin: 0; }
 .collapse {
   display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: var(--r-sm);
-  color: #5f716a; cursor: pointer; flex: none;
+  color: var(--rail-ink-dim); cursor: pointer; flex: none;
   transition: background .12s ease, color .12s ease;
 }
 .collapse:hover { background: var(--rail-hover); color: var(--rail-ink-strong); }
@@ -708,7 +743,7 @@ details.panel > summary.btn::marker { display: none; content: ""; }
 /* ── logs ── */
 pre.logs {
   margin: 0; padding: 16px 18px; max-height: 62vh; overflow: auto;
-  background: var(--rail); color: #c8d6d1; border: 1px solid var(--line);
+  background: var(--rail); color: var(--rail-ink); border: 1px solid var(--line);
   border-radius: var(--r);
   font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre; tab-size: 4;

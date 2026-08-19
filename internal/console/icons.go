@@ -60,6 +60,8 @@ var icons = map[string]template.HTML{
 	// Two people, for the page about who has access — distinct from nav-access,
 	// which is a key and means "what YOU can do".
 	// Stacked layers, for the cluster picker.
+	// Half-filled circle: the usual sign for a theme, and it reads at 17px.
+	"nav-theme":   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg>`,
 	"nav-cluster": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8.5 4.2L12 11.4 3.5 7.2z"/><path d="m3.5 12 8.5 4.2 8.5-4.2"/><path d="m3.5 16.6 8.5 4.2 8.5-4.2"/></svg>`,
 	"nav-people":  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.4"/><path d="M3.2 19.5a5.8 5.8 0 0 1 11.6 0"/><path d="M16.2 5.2a3.4 3.4 0 0 1 0 5.6"/><path d="M18 14.6a5.8 5.8 0 0 1 2.8 4.9"/></svg>`,
 	"nav-shield":  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 20 6v6c0 4.6-3.3 7.9-8 9.2-4.7-1.3-8-4.6-8-9.2V6z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg>`,

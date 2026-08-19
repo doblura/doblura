@@ -50,6 +50,8 @@ type page struct {
 	Path string
 	// RailCollapsed is remembered across pages, unlike the checkbox it replaced.
 	RailCollapsed bool
+	// Theme is "light", "dark", or empty for whatever the machine says.
+	Theme string
 	// Clusters is the picker, empty on a single-cluster install — where nothing
 	// about this interface changes at all.
 	Clusters []clusterChoice
@@ -74,6 +76,7 @@ func (s *Server) renderFor(w http.ResponseWriter, r *http.Request, name string, 
 	p.Advanced = p.Level == levelAdvanced
 	p.Path = r.URL.Path
 	p.RailCollapsed = railCollapsed(r)
+	p.Theme = themeOf(r)
 	p.Scope = scopeOf(r)
 	p.Clusters = s.clusterChoices(r)
 	p.Cluster = s.clusterOf(r)

@@ -1,5 +1,5 @@
 {{define "top"}}<!doctype html>
-<html lang="en"><head>
+<html lang="en"{{if .Theme}} data-theme="{{.Theme}}"{{end}}><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · Doblura</title>
@@ -67,6 +67,12 @@ every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}
       {{template "navitem" dict "Href" "/me" "Path" .Path "Icon" "nav-access" "Label" "Your access"}}
       <a href="{{docs ""}}" target="_blank" rel="noopener noreferrer" data-label="Documentation">
         {{icon "nav-docs"}}<span>Documentation {{icon "external"}}</span></a>
+      {{/* Three states and no JavaScript: the choice is a cookie and the
+           attribute is rendered by the server, so the right theme is in the first
+           byte instead of being applied after a flash of the wrong one. */}}
+      <a href="/theme?to={{if eq .Theme "dark"}}light{{else if eq .Theme "light"}}auto{{else}}dark{{end}}&amp;back={{.Path}}"
+         data-label="{{if eq .Theme "dark"}}Dark{{else if eq .Theme "light"}}Light{{else}}Follows your machine{{end}}">
+        {{icon "nav-theme"}}<span>{{if eq .Theme "dark"}}Dark{{else if eq .Theme "light"}}Light{{else}}Theme: automatic{{end}}</span></a>
       <a href="/auth/logout" data-label="Sign out">{{icon "nav-signout"}}<span>Sign out</span></a>
     </nav>
     <div class="who">{{if .Identity.Name}}{{.Identity.Name}}{{else}}{{.Identity.User}}{{end}}
