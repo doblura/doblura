@@ -137,18 +137,39 @@ type customerRow struct {
 	// entry over the recorded field: the catalogue is what somebody edits when
 	// they change versions, and the other drifts.
 	Version string
+	// Cluster is where this customer is, shown only in the aggregated view. The
+	// same name in two clusters is two customers, and the list has to say so or
+	// somebody opens the wrong one.
+	Cluster string
+	// Href goes to the customer, switching cluster on the way when needed.
+	Href string
+}
+
+// customersView is the list plus what could not be reached.
+type customersView struct {
+	Rows []customerRow
+	// Everywhere means the rows are from every cluster and carry their own.
+	Everywhere bool
+	// Troubles are the clusters that did not answer. Named rather than dropped:
+	// a customer list missing a cluster is a list somebody uses to conclude a
+	// customer was deleted.
+	Troubles []clusterTrouble
 }
 
 func (s *Server) handleCustomers(w http.ResponseWriter, r *http.Request, id Identity) {
-	c, err := s.clientFor(id)
-	if err != nil {
-		s.fail(w, id, err)
+	if s.Everywhere(r) {
+		results := fanOut(r.Context(), s, id,
+			func(ctx context.Context, who Identity) ([]customerRow, error) {
+				return s.customersIn(ctx, who, scopeOption(r))
+			})
+		s.renderFor(w, r, "customers.html", page{
+			Title: "Customers", Identity: id, Data: mergeCustomers(results),
+		})
 		return
 	}
-	scope := scopeOption(r)
 
-	var tenants doblurav1alpha1.OdooTenantList
-	if err := c.List(r.Context(), &tenants, scope); err != nil {
+	rows, err := s.customersIn(r.Context(), id, scopeOption(r))
+	if err != nil {
 		if clusterWideRefusal(r, err) {
 			s.askForScope(w, r, id, err)
 			return
@@ -156,15 +177,62 @@ func (s *Server) handleCustomers(w http.ResponseWriter, r *http.Request, id Iden
 		s.fail(w, id, err)
 		return
 	}
+	s.renderFor(w, r, "customers.html", page{
+		Title: "Customers", Identity: id, Data: customersView{Rows: rows},
+	})
+}
+
+// mergeCustomers joins what every cluster answered.
+func mergeCustomers(results []clusterResult[[]customerRow]) customersView {
+	out := customersView{Everywhere: true, Troubles: troubles(results)}
+	for _, res := range results {
+		if res.Err != nil {
+			continue
+		}
+		for _, row := range res.Value {
+			row.Cluster = res.Cluster
+			row.Href = crossCluster(res.Cluster, row.Href)
+			out.Rows = append(out.Rows, row)
+		}
+	}
+	sort.Slice(out.Rows, func(i, j int) bool {
+		if out.Rows[i].Tenant.Name != out.Rows[j].Tenant.Name {
+			return out.Rows[i].Tenant.Name < out.Rows[j].Tenant.Name
+		}
+		// Two customers with one name in two clusters: ordered by cluster so the
+		// pair sits together and reads as two rather than as a duplicate.
+		return out.Rows[i].Cluster < out.Rows[j].Cluster
+	})
+	return out
+}
+
+// customersIn is one cluster's customers.
+func (s *Server) customersIn(
+	ctx context.Context,
+	id Identity,
+	scope client.ListOption,
+) ([]customerRow, error) {
+	c, err := s.clientFor(id)
+	if err != nil {
+		return nil, err
+	}
+
+	var tenants doblurav1alpha1.OdooTenantList
+	if err := c.List(ctx, &tenants, scope); err != nil {
+		return nil, err
+	}
 	var envs doblurav1alpha1.OdooEnvironmentList
 	// A viewer can read these; if they somehow cannot, the list still renders
 	// with zero counts rather than failing the whole page over a column.
-	_ = c.List(r.Context(), &envs, scope)
+	_ = c.List(ctx, &envs, scope)
 
 	rows := make([]customerRow, 0, len(tenants.Items))
 	for i := range tenants.Items {
 		t := &tenants.Items[i]
-		row := customerRow{Tenant: t}
+		// The link is built here rather than in the template, so the aggregated
+		// view can point it at another cluster. A template that composes its own
+		// href cannot be redirected without editing the template.
+		row := customerRow{Tenant: t, Href: "/c/" + t.Namespace + "/" + t.Name}
 		for j := range envs.Items {
 			e := &envs.Items[j]
 			if e.Namespace != t.Namespace || e.Spec.ForTenant != t.Name {
@@ -185,8 +253,7 @@ func (s *Server) handleCustomers(w http.ResponseWriter, r *http.Request, id Iden
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].Tenant.Name < rows[j].Tenant.Name
 	})
-
-	s.renderFor(w, r, "customers.html", page{Title: "Customers", Identity: id, Data: rows})
+	return rows, nil
 }
 
 // ── one customer ──

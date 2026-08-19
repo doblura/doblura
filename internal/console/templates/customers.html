@@ -7,18 +7,32 @@
   </div>
 </div>
 
-{{if .Data}}
+{{/* Clusters that did not answer, before the list. A customer list missing a
+     cluster is a list somebody uses to conclude a customer was deleted. */}}
+{{if .Data.Troubles}}
+<div class="answer degraded">
+  <span class="icon">{{icon "degraded"}}</span>
+  <div>
+    <p class="big">{{len .Data.Troubles}} of your clusters did not answer</p>
+    <p>The customers below are the ones the rest of them have.</p>
+    {{range .Data.Troubles}}<p class="hint"><b>{{.Cluster}}</b> — {{.Why}}</p>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{if .Data.Rows}}
 <div class="card scroll"><table>
   <thead><tr>
-    <th>Customer</th><th>Running</th><th>Odoo</th>
+    <th>Customer</th><th>Running</th><th>Odoo</th>{{if .Data.Everywhere}}<th>Cluster</th>{{end}}
     {{if .Advanced}}<th>Namespace</th><th>Release</th><th class="num">Databases</th>{{end}}
   </tr></thead>
   <tbody>
-  {{range .Data}}
+  {{range .Data.Rows}}
     <tr>
-      <td><a href="/c/{{.Tenant.Namespace}}/{{.Tenant.Name}}">{{.Tenant.Spec.DisplayName}}</a></td>
+      <td><a href="{{.Href}}">{{.Tenant.Spec.DisplayName}}</a></td>
       <td>{{.Ready}} of {{.Environments}} environment{{if ne .Environments 1}}s{{end}} up</td>
       <td>{{if .Version}}{{.Version}}{{else}}<span class="muted">not set</span>{{end}}</td>
+      {{if $.Data.Everywhere}}<td class="mono small">{{.Cluster}}</td>{{end}}
       {{if $.Advanced}}
         <td class="muted small">{{.Tenant.Namespace}}</td>
         <td>{{if .Tenant.Spec.ProductRelease}}{{.Tenant.Spec.ProductRelease}}{{else}}<span class="muted">—</span>{{end}}</td>
