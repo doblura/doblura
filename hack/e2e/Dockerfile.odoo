@@ -1,9 +1,13 @@
 # Test fixture for the end-to-end rehearsal.
 #
-# Doblura ships no Odoo image and does not want to: the contract with your image
-# is that it carries click-odoo-contrib. This Dockerfile exists only so the e2e
-# has something real to run against, and it doubles as the minimal example of
-# what "an image Doblura can drive" means.
+# This used to say "Doblura ships no Odoo image and does not want to". It does now
+# — see images/odoo/Dockerfile and DECISIONS.md 11 — because meeting the contract
+# is a Dockerfile most people do not want to own, and an image that does not meet
+# it fails late and reads as doblura being broken.
+#
+# This one stays, minimal, for two reasons: the end-to-end has to run against an
+# image built here rather than pulled, and it is the smallest possible example of
+# what "an image Doblura can drive" means for somebody bringing their own.
 ARG ODOO_VERSION=19.0
 FROM odoo:${ODOO_VERSION}
 

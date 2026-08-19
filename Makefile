@@ -5,6 +5,29 @@ KIND_CHART_CLUSTER ?= doblura-e2e-chart
 # admission from, and the published one does not exist yet.
 WEBHOOK_IMAGE      ?= doblura:e2e
 
+# ── the base image ───────────────────────────────────────────────────────────
+#
+# One per Odoo major, built from the official image plus the tools this operator
+# needs. See images/odoo/Dockerfile for why each line is there, and DECISIONS.md 11
+# for why it carries no modules.
+#
+# The versions are DECISIONS.md 15: the three Odoo supports, plus the one in its
+# grace year — because doblura exists to rehearse the migration off an old version,
+# and dropping it the week Odoo does removes the tool from the people who need it.
+ODOO_VERSIONS ?= 19.0 18.0 17.0 16.0
+IMAGE_PREFIX  ?= doblura/odoo
+
+.PHONY: images
+images: ## Build the Doblura base image for every supported Odoo
+	@for v in $(ODOO_VERSIONS); do \
+		echo "  building $(IMAGE_PREFIX):$$v"; \
+		docker build --build-arg ODOO_VERSION=$$v -t $(IMAGE_PREFIX):$$v images/odoo || exit 1; \
+	done
+
+.PHONY: image
+image: ## Build one: make image ODOO_VERSION=18.0
+	docker build --build-arg ODOO_VERSION=$(ODOO_VERSION) -t $(IMAGE_PREFIX):$(ODOO_VERSION) images/odoo
+
 .PHONY: generate build test chart-sync lint-chart verify-image e2e e2e-chart e2e-quota e2e-real e2e-clean all
 all: generate build test verify-licence lint-chart
 

@@ -378,6 +378,47 @@ Deliberately long and awkward: nobody types it by accident.
 
 ---
 
+## The base image
+
+Doblura drives whatever Odoo image you already have, and the contract is short: it
+must carry `click-odoo-contrib`, because restore, update and backup all shell out
+to it. That contract was right and the cost of meeting it was underestimated — it
+is a Dockerfile most people do not want to own, and an image that does not meet it
+fails on the day somebody needs a restore.
+
+So there is one, per Odoo major:
+
+```bash
+make images                      # 19.0, 18.0, 17.0 and 16.0
+make image ODOO_VERSION=18.0     # just one
+```
+
+It is the official Odoo image plus the tools this operator needs, and the build
+**fails** rather than shipping something that will disappoint later: it checks that
+Odoo is really in there and is the version the tag claims, that every
+`click-odoo-*` entry point exists, that the Postgres client tools are present, and
+that `wkhtmltopdf` is the patched-qt build — the unpatched one silently produces
+broken headers and footers on every PDF a customer sends out.
+
+Every one of those checks is something that went wrong here first. The official
+image runs as uid 100 and Doodba's uid 100 is `messagebus`. Doodba's published base
+ships the scaffolding and no Odoo at all. Doodba's command is `python3`, so
+`-c odoo.conf` hands the config to the interpreter. It is called
+`click-odoo-backupdb`, not `click-odoo-backup`.
+
+**It carries no functional modules**, and that is a decision rather than an
+omission — see [DECISIONS.md 11](DECISIONS.md). The image supplies the runtime;
+doblura supplies the configuration, which it already sets from `size` and
+`workload` and can change without anybody rebuilding anything. A module baked into
+a base image changes what the ERP does in a layer the customer did not choose and
+cannot see. Modules belong in `spec.addons.repos`, named, pinned to a commit, and
+visible on the screen.
+
+Bringing your own stays first-class: point `spec.image` at it and the image study
+will tell you what is actually in there, rather than what its tag claims.
+
+---
+
 ## The console
 
 One interface for every profile, with no permissions of its own: every request is
