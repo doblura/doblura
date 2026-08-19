@@ -6,9 +6,9 @@ package console
 import (
 	"context"
 	"embed"
-	"fmt"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"strings"

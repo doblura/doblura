@@ -295,7 +295,6 @@ func catalogueNames(t *doblurav1alpha1.OdooTenant) string {
 	return strings.Join(names, ", ")
 }
 
-
 // escapeJSONPointer encodes a map key for use in a JSON Pointer path. The
 // annotation contains a `/`, which is the pointer's own separator.
 func escapeJSONPointer(s string) string {

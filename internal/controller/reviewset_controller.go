@@ -75,7 +75,7 @@ func (r *OdooReviewSetReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		// gone.
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
 			Type: "Watching", Status: metav1.ConditionFalse, Reason: "Paused",
-			Message: "paused; no environment is being created or removed",
+			Message:            "paused; no environment is being created or removed",
 			ObservedGeneration: set.Generation,
 		})
 		return r.commitSet(ctx, &set, st, ctrl.Result{RequeueAfter: every})

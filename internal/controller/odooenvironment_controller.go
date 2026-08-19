@@ -15,12 +15,12 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -591,7 +591,7 @@ func (r *OdooEnvironmentReconciler) ensureEnvNetworkPolicy(ctx context.Context, 
 			// Egress only: ingress is Traefik's job, and blocking it here would
 			// make the environment unreachable.
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
-			Egress: egressRules(env, &tcp, &udp, &dns, &pg),
+			Egress:      egressRules(env, &tcp, &udp, &dns, &pg),
 		},
 	}
 	if err := ctrl.SetControllerReference(env, np, r.Scheme); err != nil {

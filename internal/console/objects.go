@@ -70,7 +70,7 @@ var objectKinds = []objectKind{
 	},
 	{
 		Slug: "databases", Title: "Databases", Resource: "odoodatabases",
-		Lede: "The databases the platform knows about, and which customers share them.",
+		Lede:    "The databases the platform knows about, and which customers share them.",
 		Columns: []string{"Name", "Tenancy", "Companies", "Size"},
 	},
 	{
@@ -118,7 +118,7 @@ type cell struct {
 
 func text(s string) cell  { return cell{Text: s} }
 func muted(s string) cell { return cell{Text: s, Muted: true} }
-func pill(s string) cell { return cell{State: s} }
+func pill(s string) cell  { return cell{State: s} }
 
 // verdict is a pill whose word belongs to its own kind.
 func verdict(state, word string) cell { return cell{State: state, Word: word} }

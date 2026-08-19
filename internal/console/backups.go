@@ -23,11 +23,11 @@ import (
 // too, so a page showing one customer cannot submit a restore into another.
 
 type backupView struct {
-	Backup  *doblurav1alpha1.OdooBackup
-	State   string
-	Word    string
-	Copies  []doblurav1alpha1.BackupCopy
-	History []doblurav1alpha1.OdooRestore
+	Backup     *doblurav1alpha1.OdooBackup
+	State      string
+	Word       string
+	Copies     []doblurav1alpha1.BackupCopy
+	History    []doblurav1alpha1.OdooRestore
 	CanRestore bool
 	// Environments this copy could go into, so restoring production's data into
 	// staging is a choice on the page rather than a YAML file somebody writes.

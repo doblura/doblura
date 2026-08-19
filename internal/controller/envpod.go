@@ -364,7 +364,7 @@ func envServingPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec 
 				Image:   env.Spec.Image,
 				Command: doblurav1alpha1.FlavorCommand(env.Spec.ImageFlavor),
 				Args:    []string{"-c", "/etc/doblura/odoo.conf"},
-				Env:   envEnv(env),
+				Env:     envEnv(env),
 				Ports: []corev1.ContainerPort{
 					{Name: "http", ContainerPort: 8069},
 					{Name: "websocket", ContainerPort: 8072},
@@ -420,7 +420,7 @@ func envCronPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec {
 				Image:   env.Spec.Image,
 				Command: doblurav1alpha1.FlavorCommand(env.Spec.ImageFlavor),
 				Args:    []string{"-c", envCronConfPath},
-				Env:   envEnv(env),
+				Env:     envEnv(env),
 				// Named, but no Service selects them. The name is what the
 				// probes below refer to.
 				Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 8069}},

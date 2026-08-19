@@ -6,10 +6,10 @@ package console
 import (
 	"bytes"
 	"context"
-	"net/url"
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"sort"
 	"time"
 
@@ -332,14 +332,14 @@ type environmentView struct {
 // needs. The zero value is never meaningful here: every field is read from the
 // object first.
 type settingsForm struct {
-	WebReplicas int32
-	WebWorkers  int32
-	CronTier    bool
-	CronThreads int32
-	Public      bool
-	Host        string
-	AuthType    string
-	AuthSecret  string
+	WebReplicas   int32
+	WebWorkers    int32
+	CronTier      bool
+	CronThreads   int32
+	Public        bool
+	Host          string
+	AuthType      string
+	AuthSecret    string
 	NoIndex       bool
 	RateLimit     string
 	UpdateOnStart bool
@@ -785,13 +785,13 @@ func environmentGraph(e *doblurav1alpha1.OdooEnvironment) *graph {
 // read back as "not set" and clear whatever the operator had filled in.
 func formFrom(e *doblurav1alpha1.OdooEnvironment) settingsForm {
 	f := settingsForm{
-		WebReplicas: 1,
-		WebWorkers:  2,
-		CronThreads: 2,
-		Host:        e.Spec.Exposure.Host,
-		AuthType:    string(e.Spec.Exposure.Auth.Type),
-		AuthSecret:  e.Spec.Exposure.Auth.SecretRef,
-		Public:      e.Spec.IsPublic(),
+		WebReplicas:   1,
+		WebWorkers:    2,
+		CronThreads:   2,
+		Host:          e.Spec.Exposure.Host,
+		AuthType:      string(e.Spec.Exposure.Auth.Type),
+		AuthSecret:    e.Spec.Exposure.Auth.SecretRef,
+		Public:        e.Spec.IsPublic(),
 		NoIndex:       e.Spec.Exposure.NoIndex == nil || *e.Spec.Exposure.NoIndex,
 		UpdateOnStart: e.Spec.UpdatesOnStart(),
 	}

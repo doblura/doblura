@@ -168,8 +168,8 @@ func TestRollbackTakesACopyBeforeUpdatingAndPutsItBack(t *testing.T) {
 	s := updateScript(env, "")
 
 	for _, want := range []string{
-		"click-odoo-copydb",             // the copy exists
-		"dropdb --if-exists",            // and stale ones are cleared
+		"click-odoo-copydb",              // the copy exists
+		"dropdb --if-exists",             // and stale ones are cleared
 		"the database is back as it was", // and it says so
 	} {
 		if !strings.Contains(s, want) {
