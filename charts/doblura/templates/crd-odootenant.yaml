@@ -475,6 +475,51 @@ spec:
                             !has(self.size))
                     type: object
                 type: object
+              holds:
+                description: |-
+                  Holds says what this customer's production data contains.
+
+                  Doblura cannot make anybody compliant with anything, and a field that
+                  implied otherwise would be worse than no field. What it can do is two
+                  things that are otherwise expensive: make the dangerous configuration
+                  refuse itself, and have the evidence already collected when somebody asks.
+
+                  Declared on the CUSTOMER and not per environment, because it is a fact
+                  about the customer's business rather than a setting: an environment
+                  inherits it, and cannot opt out of what its data is.
+                properties:
+                  cardholderData:
+                    description: |-
+                      CardholderData is card numbers and what PCI DSS calls the cardholder data
+                      environment.
+
+                      What follows from it: data.type Live is refused anywhere but Production,
+                      with no acknowledgement available to get past it, and outgoing mail is
+                      refused outside Production entirely.
+
+                      Not a safety judgement — a scope one, and that is the argument to make to
+                      whoever wants the exception. The moment cardholder data reaches a staging
+                      environment, that environment is in the audit's scope, and so is its
+                      cluster, its backups, and everyone who can read them. Refusing the copy is
+                      cheaper than auditing the copy.
+                    type: boolean
+                  personalData:
+                    description: |-
+                      PersonalData is data about identifiable people: names, addresses, contact
+                      details, employee records. Almost every Odoo holds some.
+
+                      What follows from it, enforced rather than documented: an environment
+                      carrying it cannot turn off noIndex. An environment with personal data
+                      indexed by a search engine is a disclosure that required nobody to attack
+                      anything, and it is reportable in most of Europe within 72 hours.
+                    type: boolean
+                  specialCategory:
+                    description: |-
+                      SpecialCategory is health, biometric, union membership, and the rest of
+                      what the GDPR calls special categories. Rare in an ERP and expensive when
+                      present, so it is named rather than folded into personal data.
+                    type: boolean
+                type: object
               images:
                 description: |-
                   Images is the catalogue of images this customer may run.

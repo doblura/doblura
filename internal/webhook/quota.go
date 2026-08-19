@@ -265,6 +265,33 @@ func (m *EnvironmentCreator) defaultsFrom(
 	// so once, and the purpose does not undo it.
 	ops = append(ops, purposeOps(env)...)
 
+	// What the customer's data is, and the handful of things that follow from it.
+	//
+	// Refused here rather than described in a policy document, which is the whole
+	// difference between a control and a paragraph. See DataHeld for why these
+	// specific ones and not a general compliance mode.
+	if refusal := dataRules(env, &tenant); refusal != "" {
+		return nil, refusal
+	}
+	if kinds := tenant.Spec.Holds.Kinds(); len(kinds) > 0 {
+		// Recorded on the environment so evidence does not have to be inferred
+		// later from a customer record that may have changed since. A LABEL and
+		// not an annotation, because the question it answers is "show me
+		// everything holding personal data", and only labels can be selected on.
+		//
+		// RFC 6902 refuses to add a member to an object that does not exist, so
+		// an environment with no labels at all needs the whole map created in one
+		// operation — the same trap the creator annotation already fell into.
+		value := strings.Join(kinds, "_")
+		if env.Labels == nil {
+			ops = append(ops, jsonpatch.NewOperation("add", "/metadata/labels",
+				map[string]string{dataLabel: value}))
+		} else {
+			ops = append(ops, jsonpatch.NewOperation("add",
+				"/metadata/labels/"+escapeJSONPointer(dataLabel), value))
+		}
+	}
+
 	// The address, generated once and written into the spec.
 	//
 	// Into the SPEC and not resolved at reconcile time, because a hostname
@@ -729,4 +756,72 @@ func (m *EnvironmentCreator) defaultTenant(ctx context.Context, ns string) (stri
 		found = t.Name
 	}
 	return found, nil
+}
+
+// dataRules refuses the configurations that are wrong for what the data is.
+//
+// Three of them, and the shortness is the point: doblura enforces what it can be
+// certain of whatever version of whichever standard applies, and says nothing
+// about the rest. A "compliance mode" that switched on twenty settings would be
+// claiming knowledge of an audit doblura has not read.
+// dataLabel records what kinds of data an environment holds, for selecting on.
+const dataLabel = "doblura.dev/data"
+
+func dataRules(
+	env *doblurav1alpha1.OdooEnvironment,
+	tenant *doblurav1alpha1.OdooTenant,
+) string {
+	held := tenant.Spec.Holds
+	production := env.Spec.Purpose == doblurav1alpha1.PurposeProduction
+
+	if held.HasCardholderData() && !production {
+		// Live data outside production, refused with no way past it.
+		//
+		// A scope argument rather than a safety one, and that is what to say to
+		// whoever wants the exception: the moment cardholder data reaches a
+		// staging environment, that environment is in the audit's scope — and so
+		// is its cluster, its backups, and everybody who can read them. Refusing
+		// the copy is cheaper than auditing the copy.
+		if env.Spec.Data.Type == doblurav1alpha1.DataLive {
+			return fmt.Sprintf(
+				"%s holds cardholder data, so data.type Live is only allowed in a "+
+					"Production environment. This one is %s. There is deliberately "+
+					"no acknowledgement for this: a copy of cardholder data puts the "+
+					"environment holding it, its cluster and its backups inside the "+
+					"audit's scope, and refusing the copy costs less than auditing "+
+					"it. Use Snapshot, which is anonymised",
+				tenant.Name, purposeOrUnset(env))
+		}
+		// And mail, because a non-production environment that can send is one
+		// that can send to real cardholders from a machine nobody is watching.
+		if env.Spec.Mail != nil {
+			return fmt.Sprintf(
+				"%s holds cardholder data, so outgoing mail is only configured on "+
+					"its Production environment. This one is %s",
+				tenant.Name, purposeOrUnset(env))
+		}
+	}
+
+	if held.HasPersonalData() {
+		// noIndex cannot be turned off. An environment holding data about
+		// identifiable people, indexed by a search engine, is a disclosure that
+		// required nobody to attack anything — and one that is reportable within
+		// 72 hours in most of Europe.
+		if env.Spec.Exposure.NoIndex != nil && !*env.Spec.Exposure.NoIndex {
+			return fmt.Sprintf(
+				"%s holds personal data, so exposure.noIndex cannot be turned off: "+
+					"an environment with real people's details indexed by a search "+
+					"engine is a disclosure nobody had to attack anything to get, "+
+					"and it is reportable", tenant.Name)
+		}
+	}
+
+	return ""
+}
+
+func purposeOrUnset(env *doblurav1alpha1.OdooEnvironment) string {
+	if env.Spec.Purpose == "" {
+		return "not marked with a purpose at all"
+	}
+	return string(env.Spec.Purpose)
 }

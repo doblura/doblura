@@ -106,6 +106,41 @@ per database and identifies itself to its own services with it, so two databases
 claiming to be the same installation is already a problem in Community. With
 Enterprise it stops being an inconvenience and becomes a duplicated subscription.
 
+## 9. Regulated data — **classify it, refuse what follows, collect the evidence**
+
+Added the same day, and it belongs here because "make certifications easy" is a
+question about what the product IS, not a feature request.
+
+**Doblura cannot make anybody compliant with anything**, and a field that implied
+otherwise would be worse than no field: whether PCI DSS applies, and which of its
+controls, depends on how cards are taken, by whom, and what the acquirer says.
+Doblura knows none of that.
+
+What it can do are the two things that are otherwise expensive:
+
+- **the dangerous configuration refuses itself.** A customer record says what its
+  production data holds — personal data, cardholder data, special category — and a
+  short list of refusals follows, enforced by the API server rather than described
+  in a policy document. Short on purpose: only the ones that are wrong whichever
+  version of whichever standard applies. A "compliance mode" switching on twenty
+  settings would be claiming knowledge of an audit doblura has not read.
+- **the evidence is already collected.** What an environment holds is a LABEL, so
+  "show me everything with cardholder data in it" is a selector rather than an
+  investigation, and it is recorded at creation rather than inferred later from a
+  customer record that may have changed since.
+
+The refusals, and why each one is certain:
+
+| what is declared | what is refused | why it is not a judgement call |
+| --- | --- | --- |
+| cardholder data | `data.type: Live` outside Production, **with no acknowledgement** | scope: the copy puts its environment, its cluster and its backups inside the audit. Refusing costs less than auditing |
+| cardholder data | outgoing mail outside Production | a non-production environment that can send is one that can send to real cardholders from a machine nobody watches |
+| personal data | turning off `noIndex` | indexed by a search engine is a disclosure nobody had to attack anything to get, and it is reportable |
+
+What is deliberately NOT here: retention and erasure. A right-to-erasure request
+against twelve backups of one database is a real problem doblura can see and
+cannot solve, and pretending otherwise would be the worst thing in this file.
+
 ---
 
 ## What this ordering means for the next work

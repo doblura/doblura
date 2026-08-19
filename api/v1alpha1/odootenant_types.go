@@ -51,6 +51,19 @@ type OdooTenantSpec struct {
 	// +kubebuilder:validation:Pattern=`^[0-9]+\.[0-9]+$`
 	OdooVersion string `json:"odooVersion,omitempty"`
 
+	// Holds says what this customer's production data contains.
+	//
+	// Doblura cannot make anybody compliant with anything, and a field that
+	// implied otherwise would be worse than no field. What it can do is two
+	// things that are otherwise expensive: make the dangerous configuration
+	// refuse itself, and have the evidence already collected when somebody asks.
+	//
+	// Declared on the CUSTOMER and not per environment, because it is a fact
+	// about the customer's business rather than a setting: an environment
+	// inherits it, and cannot opt out of what its data is.
+	// +optional
+	Holds *DataHeld `json:"holds,omitempty"`
+
 	// Default marks this as the customer record used when an environment does not
 	// name one.
 	//
@@ -528,6 +541,82 @@ func init() {
 func (s *OdooTenantSpec) IssuerKindAndName() (kind, name string) {
 	kind, name, _ = strings.Cut(s.CertIssuer, "/")
 	return kind, name
+}
+
+// DataHeld is what a customer's production data contains.
+//
+// Kinds of data rather than names of regimes. "PCI-DSS" is a certification, and
+// which of its controls apply depends on how cards are taken, by whom, and what
+// the acquirer says; doblura knows none of that. What doblura can know is that
+// cardholder data is in there, and refuse the handful of configurations that are
+// wrong whichever version of the standard applies.
+type DataHeld struct {
+	// PersonalData is data about identifiable people: names, addresses, contact
+	// details, employee records. Almost every Odoo holds some.
+	//
+	// What follows from it, enforced rather than documented: an environment
+	// carrying it cannot turn off noIndex. An environment with personal data
+	// indexed by a search engine is a disclosure that required nobody to attack
+	// anything, and it is reportable in most of Europe within 72 hours.
+	// +optional
+	PersonalData *bool `json:"personalData,omitempty"`
+
+	// CardholderData is card numbers and what PCI DSS calls the cardholder data
+	// environment.
+	//
+	// What follows from it: data.type Live is refused anywhere but Production,
+	// with no acknowledgement available to get past it, and outgoing mail is
+	// refused outside Production entirely.
+	//
+	// Not a safety judgement — a scope one, and that is the argument to make to
+	// whoever wants the exception. The moment cardholder data reaches a staging
+	// environment, that environment is in the audit's scope, and so is its
+	// cluster, its backups, and everyone who can read them. Refusing the copy is
+	// cheaper than auditing the copy.
+	// +optional
+	CardholderData *bool `json:"cardholderData,omitempty"`
+
+	// SpecialCategory is health, biometric, union membership, and the rest of
+	// what the GDPR calls special categories. Rare in an ERP and expensive when
+	// present, so it is named rather than folded into personal data.
+	// +optional
+	SpecialCategory *bool `json:"specialCategory,omitempty"`
+}
+
+// HasPersonalData reports whether identifiable people are in there.
+//
+// SpecialCategory implies it: special-category data is personal data with more
+// rules attached, and treating them as separate would let somebody declare the
+// stricter one and skip the looser one's controls.
+func (d *DataHeld) HasPersonalData() bool {
+	if d == nil {
+		return false
+	}
+	return (d.PersonalData != nil && *d.PersonalData) ||
+		(d.SpecialCategory != nil && *d.SpecialCategory)
+}
+
+// HasCardholderData reports whether PCI scope applies.
+func (d *DataHeld) HasCardholderData() bool {
+	return d != nil && d.CardholderData != nil && *d.CardholderData
+}
+
+// Kinds is what this holds, in words, for the record kept on each environment.
+func (d *DataHeld) Kinds() []string {
+	if d == nil {
+		return nil
+	}
+	var out []string
+	if d.PersonalData != nil && *d.PersonalData {
+		out = append(out, "PersonalData")
+	}
+	if d.SpecialCategory != nil && *d.SpecialCategory {
+		out = append(out, "SpecialCategory")
+	}
+	if d.CardholderData != nil && *d.CardholderData {
+		out = append(out, "CardholderData")
+	}
+	return out
 }
 
 // IsDefault reports whether this is the customer record used when none is named.

@@ -454,6 +454,99 @@ esac
 kubectl delete namespace $DNS --ignore-not-found --wait=false >/dev/null 2>&1
 echo
 
+# ── what the data is, and what follows from it ──
+#
+# Doblura cannot make anybody compliant with anything. What it can do is refuse the
+# handful of configurations that are wrong whichever version of whichever standard
+# applies, and have the evidence collected before somebody asks. These check the
+# refusals — a control is a control because it refuses, and a paragraph in a policy
+# document is not.
+echo "-- what the data is --"
+
+CNSD=data-guardrail
+kubectl delete namespace $CNSD --ignore-not-found --wait=false >/dev/null 2>&1
+kubectl wait --for=delete namespace/$CNSD --timeout=120s >/dev/null 2>&1
+kubectl create namespace $CNSD >/dev/null 2>&1
+kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: regulado, namespace: $CNSD}
+spec:
+  displayName: regulado
+  default: true
+  holds: {personalData: true, cardholderData: true}
+  images:
+    - {name: v18, image: 'odoo:18.0', odooVersion: '18.0', default: true}
+  environmentDefaults:
+    database: {host: pg, user: odoo, passwordSecret: pg}
+    storage: {filestore: {mode: Database}}
+    size: small
+YAML
+
+denv() { # label, extra-spec, ok|rejected, [expected words]
+  name="d-$(echo "$1" | tr -cd 'a-z0-9')"
+  out=$(kubectl apply -f - 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: $name, namespace: $CNSD}
+spec:
+$2
+YAML
+)
+  if printf '%s' "$out" | grep -q 'created'; then r=ok; else r=rejected; fi
+  if [ "$3" != "$r" ]; then
+    printf '  FAIL  %s: %s (expected %s)\n         %s\n' "$1" "$r" "$3" \
+      "$(printf '%s' "$out" | sed 's/.*denied the request: //' | head -c 130)"
+    fails=$((fails+1)); return
+  fi
+  if [ -n "${4:-}" ] && ! printf '%s' "$out" | grep -qi "$4"; then
+    printf '  FAIL  %s: refused for the wrong reason: %s\n' "$1" \
+      "$(printf '%s' "$out" | sed 's/.*denied the request: //' | head -c 130)"
+    fails=$((fails+1)); return
+  fi
+  printf '  ok    %s\n' "$1"
+}
+
+# Cardholder data outside production, with no acknowledgement available. It is a
+# scope argument, not a safety one: the copy puts its environment, its cluster and
+# its backups inside the audit.
+denv "live cardholder data outside production" \
+  "  purpose: Staging
+  data: {type: Live}
+  lifecycle: {type: Persistent}" rejected "cardholder data"
+denv "anonymised is how you do that instead" \
+  "  purpose: Staging
+  data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: b}}}}
+  lifecycle: {type: Persistent}" ok
+denv "mail outside production, even acknowledged" \
+  "  purpose: Staging
+  data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: b}}}}
+  lifecycle: {type: Persistent}
+  mail:
+    host: smtp.example.com
+    port: 25
+    unsafeAcknowledgement: i-accept-this-environment-can-send-real-email-to-real-people" \
+  rejected "cardholder data"
+# An environment with real people's details indexed by a search engine is a
+# disclosure nobody had to attack anything to get.
+denv "noindex cannot be turned off" \
+  "  purpose: QA
+  data: {type: Demo}
+  exposure: {noIndex: false}" rejected "personal data"
+
+# And the evidence: what holds regulated data is a label, so it can be selected on
+# rather than inferred from a customer record that may have changed since.
+got=$(kubectl -n $CNSD get odooenvironment d-anonymisedishowyoudothatinstead \
+  -o jsonpath='{.metadata.labels.doblura\.dev/data}' 2>/dev/null)
+if [ "$got" = "PersonalData_CardholderData" ]; then
+  printf '  ok    an environment records what it holds\n'
+else
+  printf '  FAIL  the environment records %s\n' "${got:-nothing}"; fails=$((fails+1))
+fi
+
+kubectl delete namespace $CNSD --ignore-not-found --wait=false >/dev/null 2>&1
+echo
+
 # ── the edge: what stands between the internet and an Odoo ──
 #
 # These exist because spec.exposure was a set of fields nothing applied. The
