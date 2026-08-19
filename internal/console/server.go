@@ -25,7 +25,13 @@ import (
 // Not configurable, on purpose: it is the documentation for the version of the
 // operator this console ships inside, and a per-install override would mostly be
 // used to point somewhere stale.
-const docsBase = "https://doblura.dev"
+// The repository, not doblura.dev.
+//
+// doblura.dev is not registered, so every "Documentation" link in this console
+// went to a browser error — including the one in the footer of every page and the
+// one somebody clicks first when a stranger is being shown this. A link that
+// exists beats a link to where the documentation is going to live.
+const docsBase = "https://github.com/doblura/doblura"
 
 //go:embed assets/*
 var assets embed.FS

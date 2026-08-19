@@ -420,6 +420,15 @@ details.more > summary::before {
 details.more[open] > summary::before { transform: rotate(90deg); }
 details.more > summary:hover { color: var(--ink); }
 details.more .body { padding: 4px 18px 18px; }
+/* Two pairs across, once there is room. Eleven rows in one column made the
+   technical detail the tallest thing on the page by a distance, and it is the
+   part most people never read. */
+@media (min-width: 900px) {
+  details.more .body > dl.kv {
+    grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
+    column-gap: 40px;
+  }
+}
 
 /* Running text, for the few places that explain rather than list — the first-run
    screen, mostly. Everything else in this console is a table or a card, and prose
@@ -483,6 +492,12 @@ dl.kv dd { margin: 0; font-size: 14px; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 22px; }
 
 /* the map */
+/* The drawing sits in the middle of its card.
+   It shares a row with the summary card, and a grid stretches both to the taller
+   one — so a three-box diagram floated at the top of a card with a hand's width
+   of white below it, which reads as something that failed to draw. */
+.mapcard { display: flex; align-items: center; justify-content: center; }
+
 .map { width: 100%; height: auto; max-width: 100%; color: var(--ink-3); }
 .map .edge { fill: none; stroke: currentColor; stroke-width: 1.4; opacity: .5; }
 .map .edge-label { font-size: 10px; fill: var(--ink-3);

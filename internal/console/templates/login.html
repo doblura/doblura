@@ -5,7 +5,12 @@
 </head><body class="centred">
 <div class="signin">
   <div class="mark">dob<span>l</span>ura</div>
-  <p class="lede">Sign in to continue.</p>
+  {{/* One line about what this is. It is the first screen anybody sees, including
+       a stranger being shown the thing, and "Sign in to continue" told them
+       nothing at all. */}}
+  <p class="lede">The Odoo delivery lifecycle, on Kubernetes.<br>
+    <span class="muted">Environments per pull request, migration rehearsals on
+    anonymised data, staging and production — described the same way.</span></p>
   {{if .Error}}<div class="problem"><pre>{{.Error}}</pre></div>{{end}}
   {{if and .Back (ne .Back "/")}}<p class="lede">You will be taken back to
     <span class="mono">{{.Back}}</span> once you are in.</p>{{end}}
