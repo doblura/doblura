@@ -87,6 +87,7 @@ rules:
   - doblura.dev
   resources:
   - odoobackups/status
+  - odoodatabases/status
   - odooenvironments/status
   - odooinstances/status
   - odoorehearsals/status

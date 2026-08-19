@@ -7,6 +7,27 @@ The decisions that shape the product — who it is for, where the paid line fall
 what multi-cluster means — are in [DECISIONS.md](DECISIONS.md). This file is what
 gets built; that one is why.
 
+## The pass that comes after the plumbing
+
+The features have been built the way an operator would want them: refusals that
+explain themselves, evidence collected, nothing that lies when it does not know.
+The next pass is the other half of the same job — the interface.
+
+Three things, and they are not the same thing:
+
+- **Easy to sell.** Somebody who has never seen this has to understand in one
+  screen what it does and why it is safer than what they do now. Today the first
+  screen assumes you already know what an OdooTenant is.
+- **Easy to operate.** The person fielding the phone call should not have to
+  learn the object model. Every screen that names a Kubernetes noun to somebody
+  who cannot act on it is a screen that failed.
+- **Easy to maintain.** For whoever runs it and for whoever changes the code:
+  fewer near-identical templates, one vocabulary for state, one place where a
+  colour or a word is decided.
+
+And it should be good-looking, which is not decoration — a tool that looks
+unfinished is one people assume is unfinished.
+
 ## What this is
 
 A personal project, meant to be published. Three goals, turned into verifiable

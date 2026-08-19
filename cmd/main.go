@@ -192,6 +192,18 @@ func main() {
 		setupLog.Error(err, "unable to register controller", "controller", "OdooInstance")
 		os.Exit(1)
 	}
+	// OdooDatabase had no controller at all: the kind existed, its validation
+	// existed, its status fields and printer columns existed, and the placement
+	// function existed and was tested — and nothing called any of it. A database
+	// could be created, pass every rule, and sit there for ever with an empty
+	// status.
+	if err := (&controller.OdooDatabaseReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to register controller", "controller", "OdooDatabase")
+		os.Exit(1)
+	}
 
 	if err := (&controller.OdooRestoreReconciler{
 		Client: mgr.GetClient(),
