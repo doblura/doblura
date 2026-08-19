@@ -83,6 +83,14 @@ func (r *OdooBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Read back whatever the last run reported, and decide from it.
 	if listing := r.lastListing(ctx, &b); listing != nil {
+		// Anything on the volume doblura cannot date is set aside BEFORE the
+		// policy runs, and never handed to it. The policy's whole job is to
+		// choose what to delete, and a file with no date cannot be placed in any
+		// period — so it would fall through as "not the newest of anything" and
+		// be deleted. Doblura removes what it can identify and reports the rest.
+		listing, foreign := splitUndatable(listing)
+		st.Foreign = foreign
+
 		keep, drop := doblurav1alpha1.Retain(listing, b.Spec.Retention, time.Now())
 		st.Copies = keep
 		st.Kept = int32(len(keep)) //nolint:gosec // bounded by the retention schema
@@ -160,6 +168,25 @@ func (r *OdooBackupReconciler) lastListing(
 		}
 	}
 	return nil
+}
+
+// splitUndatable separates the copies doblura created from anything else that is
+// on the volume.
+//
+// A copy is doblura's if its name is the timestamp doblura writes. Everything
+// else — a copy somebody made by hand, a partial upload, a file restored from
+// somewhere else — is reported and left alone. Deleting a file because it does
+// not match a naming convention is not a decision an operator should make on
+// somebody's backup volume.
+func splitUndatable(in []doblurav1alpha1.BackupCopy) (dated []doblurav1alpha1.BackupCopy, foreign []string) {
+	for _, c := range in {
+		if c.TakenAt.IsZero() {
+			foreign = append(foreign, c.Name)
+			continue
+		}
+		dated = append(dated, c)
+	}
+	return dated, foreign
 }
 
 func lastJSONLine(msg string) string {
@@ -398,10 +425,16 @@ echo ">> backup finished"
     [ -e "$f" ] || continue
     n=$(basename "$f" .zip)
     sz=$(wc -c < "$f" | tr -d ' ')
-    iso=$(echo "$n" | sed -E 's/^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2})-([0-9]{2})-([0-9]{2})Z$/\1T\2:\3:\4Z/')
+    # -n with /p prints ONLY on a match, so a name that is not a timestamp comes
+    # back empty rather than unchanged. It matters: emitting the bare name as a
+    # date produced JSON the operator could not parse, and an unparseable listing
+    # sent it back to the PREVIOUS run's listing, silently, for ever. One .zip
+    # copied onto the volume by hand was enough to freeze retention.
+    iso=$(echo "$n" | sed -nE 's/^([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2})-([0-9]{2})-([0-9]{2})Z$/\1T\2:\3:\4Z/p')
+    if [ -n "$iso" ]; then when="\"$iso\""; else when=null; fi
     [ $first -eq 1 ] || printf ','
     first=0
-    printf '{"name":"%%s","takenAt":"%%s","sizeBytes":%%s}' "$n" "$iso" "$sz"
+    printf '{"name":"%%s","takenAt":%%s,"sizeBytes":%%s}' "$n" "$when" "$sz"
   done
   printf ']\n'
 } | tee %[5]s

@@ -39,6 +39,11 @@ every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}
     {{template "navitem" dict "Href" "/o/snapshots" "Path" .Path "Icon" "nav-snapshots" "Label" "Snapshots"}}
     {{template "navitem" dict "Href" "/o/databases" "Path" .Path "Icon" "nav-databases" "Label" "Databases"}}
     {{template "navitem" dict "Href" "/o/servers" "Path" .Path "Icon" "nav-servers" "Label" "Servers"}}
+    {{/* Administration is its own group rather than an item in Objects: who can
+         reach what is not an Odoo object, and burying it among them is how it
+         stays unread until somebody leaves the company. */}}
+    <div class="group"><span>Administration</span></div>
+    {{template "navitem" dict "Href" "/access" "Path" .Path "Icon" "nav-people" "Label" "People and access"}}
   </nav>
   <div class="foot">
     <nav>

@@ -921,6 +921,11 @@ func (in *OdooBackupStatus) DeepCopyInto(out *OdooBackupStatus) {
 		in, out := &in.LastRun, &out.LastRun
 		*out = (*in).DeepCopy()
 	}
+	if in.Foreign != nil {
+		in, out := &in.Foreign, &out.Foreign
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Pending != nil {
 		in, out := &in.Pending, &out.Pending
 		*out = make([]string, len(*in))

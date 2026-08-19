@@ -161,3 +161,50 @@ func TestBackupNamesAreNotFileNames(t *testing.T) {
 		t.Error("the recorded name carries the extension; the listing strips it")
 	}
 }
+
+// A copy the policy cannot date must never be deleted.
+//
+// This is here because the real path that produced one was invisible: the shell
+// that lists the volume emitted a name it could not convert into a date, the
+// operator failed to parse the whole listing, fell back to the PREVIOUS run's
+// listing, and applied retention to a stale list without logging anything. The
+// controller now sets these aside before calling Retain; this asserts Retain is
+// safe even if it is handed one.
+func TestAnUndatableCopyIsNeverDropped(t *testing.T) {
+	at := func(s string) metav1.Time {
+		p, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return metav1.NewTime(p)
+	}
+	now := at("2026-08-19T03:00:00Z")
+
+	copies := []BackupCopy{
+		{Name: "2026-08-19T02-00-00Z", TakenAt: at("2026-08-19T02:00:00Z")},
+		{Name: "2026-08-18T02-00-00Z", TakenAt: at("2026-08-18T02:00:00Z")},
+		{Name: "2026-01-01T02-00-00Z", TakenAt: at("2026-01-01T02:00:00Z")},
+		{Name: "copia-a-mano"}, // no date at all
+	}
+
+	keep, drop := Retain(copies, BackupRetention{Daily: 2, Weekly: 0, Monthly: 0}, now.Time)
+
+	for _, d := range drop {
+		if d.Name == "copia-a-mano" {
+			t.Fatal("an undatable copy was dropped: retention deleted a file it could not identify")
+		}
+	}
+	var found bool
+	for _, k := range keep {
+		if k.Name == "copia-a-mano" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("an undatable copy vanished from both lists, so nothing would report it")
+	}
+	// And the ordinary decision still happens around it.
+	if len(drop) != 1 || drop[0].Name != "2026-01-01T02-00-00Z" {
+		t.Fatalf("the datable copies were not pruned as expected: drop=%v", names(drop))
+	}
+}

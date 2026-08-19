@@ -346,6 +346,92 @@ check "majorUpgrade without the literal"     "$TEN  images:
 check "a new customer on any major"          "$TEN  images:
     - {name: a, image: 'x:1', odooVersion: '19.0', default: true}" ok
 echo
+
+# ── who may hand out access ──
+#
+# This section exists because the console now has a page that grants access, and a
+# page that grants access is a privilege-escalation path if it is wrong. Nothing
+# here tests the page: it tests what the API server would do to the person the page
+# acts as, which is the only thing that actually decides.
+#
+# It goes ABOVE the quota section on purpose. That section starts with an early
+# `exit 0` when no quota webhook is installed, and checks added below it have
+# silently not run twice already.
+echo "-- who may hand out access --"
+
+ACCESS_NS=access-guardrail
+kubectl create namespace $ACCESS_NS >/dev/null 2>&1 || true
+
+role_for() { kubectl get clusterrole -l "doblura.dev/persona=$1" \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
+PLAT=$(role_for platform); SUPP=$(role_for support); QA=$(role_for qa)
+
+for p in $PLAT $SUPP; do
+  kubectl create clusterrolebinding "access-guardrail-${p##*-}" \
+    --clusterrole="$p" --group="access-guardrail-${p##*-}" >/dev/null 2>&1
+done
+
+# can: ask the API server whether a group may do something, as that group.
+can() { # label, group, verb, resource, namespace-or-empty, yes|no
+  args="--as-group=$2 --as=access-guardrail-probe"
+  if [ -n "$5" ]; then args="$args -n $5"; else args="$args --all-namespaces"; fi
+  # shellcheck disable=SC2086
+  out=$(kubectl auth can-i "$3" "$4" $args 2>&1 | tr -d '[:space:]')
+  case "$out" in yes*) r=yes ;; *) r=no ;; esac
+  if [ "$6" = "$r" ]; then printf '  ok    %s\n' "$1"
+  else printf '  FAIL  %s: %s (expected %s)\n' "$1" "$r" "$6"; fails=$((fails+1)); fi
+}
+
+can "platform reads the personas"       "access-guardrail-platform" list   clusterroles  ""           yes
+can "platform reads the grants"         "access-guardrail-platform" list   rolebindings  ""           yes
+can "platform grants per customer"      "access-guardrail-platform" create rolebindings  $ACCESS_NS   yes
+can "platform revokes per customer"     "access-guardrail-platform" delete rolebindings  $ACCESS_NS   yes
+# The cluster-scoped one is the grant that reaches every customer. The console
+# refuses to make it; RBAC has to refuse it too, or the console's refusal is a
+# suggestion that anybody can bypass with curl.
+can "platform cannot grant cluster-wide" "access-guardrail-platform" create clusterrolebindings "" no
+can "support reads no personas"         "access-guardrail-support"  list   clusterroles  ""           no
+can "support hands out nothing"         "access-guardrail-support"  create rolebindings  $ACCESS_NS   no
+
+# The escalation check, which is the whole point of naming the personas in `bind`.
+#
+# Granting cluster-admin must fail even though platform can create RoleBindings,
+# because platform does not hold cluster-admin's permissions and cluster-admin is
+# not in its list of bindable roles. If this ever passes, the bind rule has been
+# widened into a way for anybody with the platform persona to make themselves
+# cluster administrator.
+grant_as() { # label, group, clusterrole, ok|denied
+  out=$(kubectl create rolebinding "escalation-probe-$3" -n $ACCESS_NS \
+    --clusterrole="$3" --group=whoever \
+    --as=access-guardrail-probe --as-group="$2" 2>&1)
+  kubectl delete rolebinding "escalation-probe-$3" -n $ACCESS_NS >/dev/null 2>&1
+  if printf '%s' "$out" | grep -q 'created'; then r=ok
+  elif printf '%s' "$out" | grep -qi 'forbidden\|not allowed to grant\|escalate'; then r=denied
+  else r="another error entirely"; fi
+  if [ "$4" = "$r" ]; then printf '  ok    %s\n' "$1"
+  else printf '  FAIL  %s: %s (expected %s)\n         %s\n' "$1" "$r" "$4" "$out"; fails=$((fails+1)); fi
+}
+
+grant_as "platform may hand out a doblura persona" "access-guardrail-platform" "$QA"           ok
+grant_as "platform may NOT hand out cluster-admin" "access-guardrail-platform" "cluster-admin" denied
+
+# Every persona carries the label the console lists it by, and a summary. Without
+# the label a persona is invisible on the page; without the summary the page shows
+# a role name and nothing about what it does.
+for p in viewer support qa consultancy platform; do
+  name=$(role_for "$p")
+  sum=$(kubectl get clusterrole "$name" \
+    -o jsonpath='{.metadata.annotations.doblura\.dev/summary}' 2>/dev/null)
+  if [ -n "$name" ] && [ -n "$sum" ]; then printf '  ok    %s is listed and described\n' "$p"
+  else printf '  FAIL  %s: label=%s summary=%s\n' "$p" "${name:-missing}" "${sum:-missing}"; fails=$((fails+1)); fi
+done
+
+kubectl delete namespace $ACCESS_NS --ignore-not-found --wait=false >/dev/null 2>&1
+for p in platform support; do
+  kubectl delete clusterrolebinding "access-guardrail-$p" --ignore-not-found >/dev/null 2>&1
+done
+echo
+
 WHC=$(kubectl get validatingwebhookconfiguration -l app.kubernetes.io/name=doblura \
   -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [ -z "$WHC" ]; then

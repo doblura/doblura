@@ -46,6 +46,27 @@ func Retain(copies []BackupCopy, policy BackupRetention, now time.Time) (keep, d
 		return nil, nil
 	}
 
+	// A copy with no date is KEPT and never dropped. The caller is expected to
+	// have set these aside already, and this is the second line: every rule below
+	// works by picking the newest of a period, so a copy that cannot be placed in
+	// a period is the newest of nothing and would fall out as a deletion. The
+	// failure mode of getting this wrong is deleting somebody's backup.
+	var undated []BackupCopy
+	{
+		datable := make([]BackupCopy, 0, len(copies))
+		for _, c := range copies {
+			if c.TakenAt.IsZero() {
+				undated = append(undated, c)
+				continue
+			}
+			datable = append(datable, c)
+		}
+		copies = datable
+		if len(copies) == 0 {
+			return undated, nil
+		}
+	}
+
 	// Newest first. Every rule below picks the newest of its period, so the
 	// order is the whole algorithm.
 	sorted := append([]BackupCopy(nil), copies...)
@@ -68,7 +89,7 @@ func Retain(copies []BackupCopy, policy BackupRetention, now time.Time) (keep, d
 			drop = append(drop, c)
 		}
 	}
-	return keep, drop
+	return append(keep, undated...), drop
 }
 
 // markNewestPerPeriod keeps the newest copy of each of the `periods` most recent

@@ -155,3 +155,34 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	s.setSession(w, r, id)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
+
+// usernames is who has a local account.
+//
+// Names only, never the hashes: this feeds a page, and a bcrypt hash on a screen
+// is a hash in a screenshot in a chat. Sorted, because the map is not and a list
+// that reorders on every refresh reads as if it were changing.
+func (l *localAccounts) usernames(ctx context.Context) ([]string, error) {
+	accounts, err := l.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(accounts))
+	for name := range accounts {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// groupsOf is the groups a local account resolves to, for the same page.
+func (l *localAccounts) groupsOf(ctx context.Context, user string) ([]string, error) {
+	accounts, err := l.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	a, ok := accounts[user]
+	if !ok {
+		return nil, fmt.Errorf("no local account named %q", user)
+	}
+	return a.Groups, nil
+}

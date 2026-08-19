@@ -1,0 +1,228 @@
+{{define "access.html"}}{{template "top" .}}
+{{$d := .Data}}{{$l := .Data.Login}}
+<div class="head">
+  <div>
+    <h1>People and access</h1>
+    <p class="sub">Where identities come from, and what each person can reach</p>
+  </div>
+</div>
+
+{{/* Sign-in first. Every question that brings somebody to this page starts with
+     "how does this person get in", and the answer is above the fold. */}}
+{{/* The state words are the same ones an environment uses — down, degraded, up —
+     because they are the ones the stylesheet knows and because they mean the same
+     thing here: nothing can sign in, something can but should not stay that way,
+     or this is how it is meant to look. */}}
+<div class="answer {{if or (eq $l.Mode "none") $l.DevIdentity}}down{{else if eq $l.Mode "local"}}degraded{{else}}up{{end}}">
+  <span class="icon">{{icon "nav-shield"}}</span>
+  <div>
+    <p class="big">{{if $l.DevIdentity}}This console is not authenticating anybody
+      {{else if eq $l.Mode "both"}}Single sign-on, with local accounts alongside
+      {{else if eq $l.Mode "sso"}}Single sign-on
+      {{else if eq $l.Mode "local"}}Local accounts only
+      {{else}}No way in is configured{{end}}</p>
+    {{if $l.DevIdentity}}
+      <p>Everybody who opens this page is treated as <b class="mono">{{$l.DevIdentity}}</b>,
+        because the console was started with a development identity. Nothing here is
+        a real permission check against a real person. Remove that setting before
+        anybody but you can reach this address.</p>
+    {{else if eq $l.Mode "none"}}
+      <p>Neither an identity provider nor a local accounts secret is configured, so
+        nobody can sign in.</p>
+    {{else}}
+      <p>Identities arrive from
+        {{if $l.Issuer}}your identity provider{{if $l.LocalSecret}}, and from a
+        list of local accounts this console keeps{{end}}{{else}}a list of local
+        accounts this console keeps{{end}}.
+        Whichever it is, the result is the same: a username and a list of groups.
+        Kubernetes decides everything after that, from the grants below.</p>
+      {{if and $l.LocalSecret (not $l.Issuer)}}
+      <p>Local accounts are meant for getting started. Whoever can write that
+        secret can put themselves in any group, so it is a credential store with
+        no audit trail and no password policy — connect your identity provider
+        before this is more than a handful of people.</p>
+      {{end}}
+    {{end}}
+  </div>
+</div>
+
+<h2 class="sect">How people sign in</h2>
+<div class="grid two">
+  <div class="card pad">
+    <h3>{{if $l.Issuer}}Identity provider{{else}}Identity provider — not connected{{end}}</h3>
+    {{if $l.Issuer}}
+      <table>
+        <tbody>
+          <tr><td class="muted">Issuer</td><td class="mono">{{$l.Issuer}}</td></tr>
+          <tr><td class="muted">Client</td><td class="mono">{{$l.ClientID}}</td></tr>
+          <tr><td class="muted">Redirect back to</td><td class="mono">{{$l.RedirectURL}}</td></tr>
+          <tr><td class="muted">Groups come from</td><td class="mono">{{$l.GroupsClaim}}</td></tr>
+        </tbody>
+      </table>
+      <p class="hint">This is the configuration the console is <b>running</b> with,
+        not what is written in a values file. The console discovered that issuer at
+        startup; if it had not, it would not be listed here.</p>
+      <p class="hint">Changing it is a redeploy, not an edit on this page. It is the
+        one setting whose own failure locks everybody out, including whoever is
+        changing it — so it goes through the same review as any other deployment.</p>
+    {{else}}
+      <p class="hint">Nothing to show: no issuer is configured, so the sign-in page
+        offers only the local form.</p>
+      <p class="hint">Connecting one takes three values from your provider — the
+        issuer URL, a client ID, and a client secret — plus this console's own
+        callback address. Set them under <span class="mono">console.oidc</span> and
+        redeploy. Nothing about the grants below changes: your provider's group
+        names are what you bind, and they are yours either way.</p>
+    {{end}}
+  </div>
+
+  <div class="card pad">
+    <h3>{{if $l.LocalSecret}}Local accounts{{else}}Local accounts — off{{end}}</h3>
+    {{if $l.LocalSecret}}
+      <p class="hint">Kept in the secret <span class="mono">{{$l.LocalSecret}}</span>.</p>
+      {{if $l.AccountsWithheld}}
+        <p class="hint">You are not allowed to read that secret, so the list of
+          accounts is not shown. That it exists is not a secret; who is in it is.</p>
+      {{else if $l.LocalError}}
+        <p class="hint">The accounts could not be read: {{$l.LocalError}}</p>
+      {{else if $l.LocalUsers}}
+        <p class="mono">{{join $l.LocalUsers " · "}}</p>
+        <p class="hint">Adding or removing one is a change to that secret, and it is
+          deliberately not a form here: this page can grant access, and a page that
+          could also mint the identity being granted would be a way to give
+          yourself anything. Two different tools, on purpose.</p>
+      {{else}}
+        <p class="hint">The secret exists and holds no accounts, so nobody can sign
+          in through the local form.</p>
+      {{end}}
+    {{else}}
+      <p class="hint">Off. Everybody signs in through the identity provider, which
+        is where this should end up.</p>
+    {{end}}
+  </div>
+</div>
+
+<h2 class="sect">Who has access</h2>
+{{template "help" (safe `<p>Doblura has no user list of its own. A person is
+whoever your identity provider says they are, and what they can do comes from
+<b>grants</b>: a person or a group, given a <b>persona</b>, for one customer or
+for the whole cluster.</p>
+<p>Grant to a <b>group</b> wherever you can. A grant to a group keeps working when
+somebody joins the team and stops working when they leave it, which is the whole
+point of having an identity provider. A grant to a person is one more thing to
+remember on their last day.</p>
+<p>A grant with <b>no customer</b> reaches every customer in the cluster. Those are
+shown first, because they are what an audit is looking for.</p>`)}}
+
+{{if $d.Denied}}
+  <div class="card pad"><p class="hint">You are not allowed to read grants, so this
+    is empty: {{$d.Denied}}</p>
+    <p class="hint">Reading who has access is itself a permission. Ask whoever
+      administers the platform — the message above names exactly what to give you.</p></div>
+{{else}}
+
+{{if $d.CanGrant}}
+<details class="panel">
+  <summary class="btn ghost">Grant access…</summary>
+  <div class="body">
+    <form method="post" action="/access/grant" class="stack">
+      <p class="hint">You can only grant what you hold yourself: Kubernetes refuses
+        to let anybody hand out a permission they do not have. If this comes back
+        refused, that is why.</p>
+      <div class="fields">
+        <div><label for="kind">To a</label>
+          <select id="kind" name="kind">
+            <option value="Group">Group (recommended)</option>
+            <option value="User">One person</option>
+          </select></div>
+        <div><label for="subject">Named</label>
+          <input id="subject" name="subject" required
+                 placeholder="odoo-consultants"
+                 pattern="[^\s]+" title="No spaces: this is the name your identity provider uses">
+          <small class="hint">Exactly as your identity provider writes it — the
+            group name in the token, or the username.</small></div>
+      </div>
+      <div class="fields">
+        <div><label for="persona">Persona</label>
+          <select id="persona" name="persona" required>
+            {{range $d.Personas}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+          </select></div>
+        <div><label for="scope">For the customer</label>
+          <input id="scope" name="scope" required placeholder="acme"
+                 pattern="[a-z0-9][a-z0-9-]*" title="The customer's namespace">
+          <small class="hint">Required. A grant with no customer reaches all of
+            them, and this form will not make one.</small></div>
+      </div>
+      <div><button type="submit">Grant this access</button></div>
+    </form>
+  </div>
+</details>
+{{end}}
+
+{{if $d.Grants}}
+<div class="card scroll"><table>
+  <thead><tr><th>Who</th><th>Persona</th><th>For</th>{{if $d.CanRevoke}}<th></th>{{end}}</tr></thead>
+  <tbody>
+  {{range $d.Grants}}
+    <tr>
+      <td>{{.Subject}}
+        <div class="small muted">{{if eq .Kind "Group"}}group{{else if eq .Kind "User"}}person{{else}}service account{{end}}</div></td>
+      <td class="mono">{{.Persona}}</td>
+      <td>{{if .ClusterWide}}<span class="state state-degraded">{{icon "degraded"}} every customer</span>
+          {{else}}<a class="link" href="/customers">{{.Scope}}</a>{{end}}
+        <div class="small muted mono">{{.Binding}}</div></td>
+      {{if $d.CanRevoke}}
+      <td class="num">
+        {{if .ClusterWide}}<span class="muted small">not from here</span>
+        {{else}}
+        <details class="panel inline">
+          <summary class="btn ghost small-btn">Revoke…</summary>
+          <div class="body">
+            <form method="post" action="/access/revoke" class="stack">
+              <input type="hidden" name="binding" value="{{.Binding}}">
+              <input type="hidden" name="scope" value="{{.Scope}}">
+              <p class="hint">Removes <b>{{.Persona}}</b> from <b>{{.Subject}}</b>
+                for <b>{{.Scope}}</b>. Nothing they made is deleted; they stop being
+                able to reach it. It takes effect on their next request.</p>
+              <div><button class="danger" type="submit">Revoke it</button></div>
+            </form>
+          </div>
+        </details>
+        {{end}}
+      </td>
+      {{end}}
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}
+<div class="card pad"><p class="hint">No grant points at any of doblura's personas.
+  Whoever installed the chart can reach everything through their cluster
+  administrator account, and nobody else can reach anything.</p></div>
+{{end}}
+
+<h2 class="sect">Personas</h2>
+{{template "help" (safe `<p>These are the roles the chart installs. They are meant
+to be granted to <b>your</b> group names, so nothing here needs renaming to match
+how your company is organised.</p>
+<p>What each one can do is read from the role itself, so this cannot drift from
+what Kubernetes will actually enforce.</p>`)}}
+<div class="card scroll"><table>
+  <thead><tr><th>Persona</th><th>What it can do</th><th class="num">Granted</th></tr></thead>
+  <tbody>
+  {{range $d.Personas}}
+    <tr>
+      <td class="mono">{{.Name}}{{if .Summary}}<div class="small muted">{{.Summary}}</div>{{end}}</td>
+      <td class="small">{{range .Can}}<div>{{.}}</div>{{end}}</td>
+      <td class="num">{{if .Holders}}{{.Holders}}{{else}}<span class="muted">nobody</span>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{if $d.Unbound}}
+<p class="hint">Nobody holds {{join $d.Unbound ", "}}. That is fine for a persona
+  you do not use, and worth a second look for one you thought you had set up.</p>
+{{end}}
+
+{{end}}
+{{template "bottom" .}}{{end}}

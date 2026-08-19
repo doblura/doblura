@@ -486,7 +486,11 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 44px;
 .empty + h2.sect, .hint + h2.sect, details.panel + h2.sect { margin-top: 34px; }
 
 /* a table-row action, smaller than a page action */
-button.small-btn { height: 30px; padding: 0 12px; font-size: 13px; }
+/* Both, because half the small buttons in this interface are a <summary>: the
+   inline "Restore…", "Upgrade to…" and "Revoke…" openers are all <details>
+   summaries wearing .btn, and a rule that only matches <button> left every one of
+   them full size next to the ones that were not. */
+button.small-btn, .btn.small-btn { height: 30px; padding: 0 12px; font-size: 13px; }
 td form { margin: 0; }
 
 /* ── the collapsing rail ──

@@ -76,6 +76,9 @@ metadata:
   labels:
     {{- include "doblura.labels" . | nindent 4 }}
     doblura.dev/persona: viewer
+  annotations:
+    doblura.dev/summary: >-
+      Sees everything and changes nothing. The starting point for anybody in the company.
 rules:
   - apiGroups: [doblura.dev]
     resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots, odoobackups, odoorestores, reviewsets]
@@ -123,6 +126,9 @@ metadata:
   labels:
     {{- include "doblura.labels" . | nindent 4 }}
     doblura.dev/persona: support
+  annotations:
+    doblura.dev/summary: >-
+      Fields the phone call: reads logs, restarts an environment, cannot touch data.
 rules:
   # The customer list, which is the landing view for everyone.
   - apiGroups: [doblura.dev]
@@ -166,6 +172,9 @@ metadata:
   labels:
     {{- include "doblura.labels" . | nindent 4 }}
     doblura.dev/persona: qa
+  annotations:
+    doblura.dev/summary: >-
+      Opens and throws away environments to test against, on demo or anonymised data.
 rules:
   - apiGroups: [doblura.dev]
     resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots]
@@ -204,6 +213,9 @@ metadata:
   labels:
     {{- include "doblura.labels" . | nindent 4 }}
     doblura.dev/persona: consultancy
+  annotations:
+    doblura.dev/summary: >-
+      Delivers work: environments, backups and review sets for the customers they are on.
 rules:
   - apiGroups: [doblura.dev]
     resources: [odootenants, odoodatabases, odooinstances, odoorehearsals, odoosnapshots]
@@ -254,6 +266,9 @@ metadata:
   labels:
     {{- include "doblura.labels" . | nindent 4 }}
     doblura.dev/persona: platform
+  annotations:
+    doblura.dev/summary: >-
+      Runs doblura itself, and is the only persona that can put a backup back.
 rules:
   - apiGroups: [doblura.dev]
     resources: ["*"]
@@ -276,4 +291,35 @@ rules:
   - apiGroups: [""]
     resources: [secrets]
     verbs: [get, list]
+  # Who has access, and granting it per customer.
+  #
+  # This is what the console's "People and access" page reads, and it is only on
+  # this persona: listing ClusterRoles and bindings shows the shape of every
+  # permission in the cluster, doblura's and everybody else's, so it is not
+  # something to hand out for the sake of a nicer page. The other personas see the
+  # page explain what they would need instead of an empty table.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles, clusterrolebindings, rolebindings]
+    verbs: [get, list, watch]
+  # Granting is namespaced on purpose: a RoleBinding reaches one customer.
+  # Cluster-wide grants are left to kubectl, where they get reviewed.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [create, delete]
+  # bind, on doblura's own personas by name.
+  #
+  # Without this, Kubernetes' escalation check refuses the grant unless the
+  # granter already holds every permission in the persona — which is true for
+  # platform today and would silently stop being true the moment a persona gains
+  # a rule platform lacks. Naming the roles is the supported way to say "you may
+  # hand out exactly these", and it does NOT let anybody hand out anything else.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    verbs: [bind]
+    resourceNames:
+      - {{ include "doblura.fullname" . }}-viewer
+      - {{ include "doblura.fullname" . }}-support
+      - {{ include "doblura.fullname" . }}-qa
+      - {{ include "doblura.fullname" . }}-consultancy
+      - {{ include "doblura.fullname" . }}-platform
 {{- end }}

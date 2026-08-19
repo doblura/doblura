@@ -122,6 +122,17 @@ type OdooBackupStatus struct {
 	// +optional
 	Kept int32 `json:"kept,omitempty"`
 
+	// Foreign lists what is on the volume that doblura did not create — a name
+	// that is not the timestamp doblura writes.
+	//
+	// It exists because the alternative is worse in both directions. Feeding
+	// these to the retention policy would delete them, and an operator that
+	// deletes a file on a backup volume because it does not recognise the name is
+	// not one anybody should run. Saying nothing would leave the volume filling
+	// up with copies no policy will ever prune, discovered when it is full.
+	// +optional
+	Foreign []string `json:"foreign,omitempty"`
+
 	// Pending are the copies the retention policy has decided to remove, which
 	// the next run will delete.
 	//
