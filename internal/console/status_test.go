@@ -25,7 +25,7 @@ func TestTheCustomerPageSpeaksToTheCustomer(t *testing.T) {
 	}
 
 	for _, state := range []string{"up", "degraded", "down", "building", "asleep", "unknown"} {
-		for _, text := range []string{customerWord(state), customerDetail(state)} {
+		for _, text := range []string{say(localeEN, "state-"+state), say(localeEN, "detail-"+state)} {
 			if text == "" {
 				t.Fatalf("state %q has no words at all, so the page would show a "+
 					"blank line where the answer goes", state)
@@ -40,10 +40,10 @@ func TestTheCustomerPageSpeaksToTheCustomer(t *testing.T) {
 	}
 
 	// And the headline has to be a sentence somebody would say, not a status word.
-	if got := customerWord("degraded"); got == "Degraded" {
+	if got := say(localeEN, "state-degraded"); got == "Degraded" {
 		t.Error("the headline is monitoring vocabulary rather than an answer")
 	}
-	if !strings.Contains(customerDetail("down"), "tell them") {
+	if !strings.Contains(say(localeEN, "detail-down"), "tell them") {
 		t.Error("the down message does not tell the reader what to do, which is the " +
 			"only action available to them")
 	}

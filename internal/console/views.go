@@ -744,30 +744,41 @@ func cronSummary(env *doblurav1alpha1.OdooEnvironment, deps *appsv1.DeploymentLi
 // it is absent the section disappears entirely — the alternative is a page that
 // says "load: normal" on the strength of nothing, which is how a status screen
 // stops being believed.
-func (s *Server) load(
+// loadPercent is the measurement, with no words on it.
+//
+// Separated from load because the operator console and the customer's status page
+// say it differently and in different languages. The FIRST version had the
+// customer page scrape the percentage back out of load's English sentence with
+// Sscanf — which works until somebody improves the wording, and then the
+// customer's load line disappears with nothing to say why.
+//
+// One set of thresholds, here. Two copies of "75% is working hard" would drift,
+// and the drift would be two screens disagreeing about whether an environment is
+// busy.
+func (s *Server) loadPercent(
 	ctx context.Context,
 	id Identity,
 	env *doblurav1alpha1.OdooEnvironment,
-) (headline, detail, state string) {
+) (pct int, state string, ok bool) {
 	c, err := s.clientFor(id)
 	if err != nil {
-		return "", "", ""
+		return 0, "", false
 	}
 	var pods corev1.PodList
 	if err := c.List(ctx, &pods, client.InNamespace(env.Namespace),
 		client.MatchingLabels{"doblura.dev/environment": env.Name}); err != nil {
-		return "", "", ""
+		return 0, "", false
 	}
 
 	limit := sizeMemoryLimit(env.Spec.Size)
 	if limit == 0 {
-		return "", "", ""
+		return 0, "", false
 	}
 
 	var metrics metricsv1beta1.PodMetricsList
 	if err := c.List(ctx, &metrics, client.InNamespace(env.Namespace)); err != nil {
 		// No metrics-server. Say nothing rather than something reassuring.
-		return "", "", ""
+		return 0, "", false
 	}
 
 	var used int64
@@ -785,26 +796,46 @@ func (s *Server) load(
 		counted++
 	}
 	if counted == 0 {
-		return "", "", ""
+		return 0, "", false
 	}
 
-	pct := int(used * 100 / (limit * int64(counted)))
+	pct = int(used * 100 / (limit * int64(counted)))
 	switch {
 	case pct >= 90:
+		return pct, "down", true
+	case pct >= 75:
+		return pct, "degraded", true
+	default:
+		return pct, "up", true
+	}
+}
+
+// load is the same measurement, worded for the operator console in English.
+func (s *Server) load(
+	ctx context.Context,
+	id Identity,
+	env *doblurav1alpha1.OdooEnvironment,
+) (headline, detail, state string) {
+	pct, st, ok := s.loadPercent(ctx, id, env)
+	if !ok {
+		return "", "", ""
+	}
+	switch st {
+	case "down":
 		return "Running out of memory",
 			fmt.Sprintf("Using %d%% of what it is allowed. At this level it will be slow, and "+
 				"it may be restarted by the cluster. A bigger size or fewer people at once.", pct),
-			"down"
-	case pct >= 75:
+			st
+	case "degraded":
 		return "Working hard",
 			fmt.Sprintf("Using %d%% of what it is allowed. Complaints about slowness are "+
 				"plausible; below 75%% they usually are not.", pct),
-			"degraded"
+			st
 	default:
 		return "Comfortable",
 			fmt.Sprintf("Using %d%% of the memory it is allowed. If somebody says it is slow, "+
 				"the cause is probably not this environment being short of resources.", pct),
-			"up"
+			st
 	}
 }
 

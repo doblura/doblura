@@ -141,6 +141,37 @@ What is deliberately NOT here: retention and erasure. A right-to-erasure request
 against twelve backups of one database is a real problem doblura can see and
 cannot solve, and pretending otherwise would be the worst thing in this file.
 
+## 10. Language — **English, except the one screen a customer reads**
+
+Decided 2026-08-19, after the interface pass.
+
+The operator console is in English and stays there. The people who run a platform
+share one vocabulary, and doubling several hundred sentences of carefully-worded
+explanation would double what has to be kept true: every new message written
+twice, every correction applied twice, and one of the two quietly drifting until
+the two languages disagree about what a control does.
+
+The status page is different, and it is the only one that is. Its reader is
+somebody at the customer's company who was sent a link, who does not work in
+Kubernetes, and who is trying to find out whether their Odoo is up before phoning
+anybody. That is the one place the language is a barrier rather than a preference.
+
+So the mechanism is general and the translation is not. The language comes from
+the CUSTOMER record rather than from the reader's browser or a picker, because the
+reader is opening a link they were sent, and asking them to choose a language
+before they can find out whether their Odoo is working is one screen too many —
+their integrator already knows what language they speak.
+
+Three tests keep it honest, and the second found a real gap the day it was
+written: every string exists in every language; every state the health check can
+produce has words for a customer (`gone` had none, and fell through to "we cannot
+tell", which is wrong in the one direction that matters — the answer IS known, and
+it is that somebody switched it off); and every id the template asks for exists.
+
+Adding a third language is a catalogue entry per string and nothing else. Adding
+one with real plural classes is the moment to reach for a plural-rule library, and
+the comment on `duration` says so.
+
 ---
 
 ## What this ordering means for the next work

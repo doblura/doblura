@@ -580,6 +580,24 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              language:
+                default: en
+                description: |-
+                  Language is what this customer's own people read, as a two-letter code.
+
+                  It decides the language of the status page — the one screen a customer opens
+                  themselves — and nothing else. The operator console stays in English,
+                  because the people who run the platform share one vocabulary and doubling
+                  its text would double what has to be kept true.
+
+                  On the CUSTOMER and not a preference the reader picks, because the reader is
+                  somebody at that company opening a link they were sent, and asking them to
+                  choose a language before they can find out whether their Odoo is up is one
+                  screen too many.
+                enum:
+                - en
+                - es
+                type: string
               majorUpgrade:
                 description: |-
                   MajorUpgrade authorises a change of major version, and nothing else.

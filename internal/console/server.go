@@ -140,6 +140,10 @@ func New(cfg *rest.Config, scheme *runtime.Scheme, opt Options) (*Server, error)
 		// whole rule, and it is why this is a one-line helper rather than
 		// something that takes a variable.
 		"safe": func(s string) template.HTML { return template.HTML(s) }, //nolint:gosec // literals only
+		// t looks a sentence up for a language. Registered as "t" because that is
+		// what it reads as in a template; the Go function is called say, since a
+		// package-level t collides with every test's *testing.T.
+		"t": say,
 
 		// logTail so the page states the number it actually fetched rather than
 		// a number somebody typed into the prose and then changed in the code.

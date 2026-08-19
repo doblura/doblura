@@ -263,6 +263,11 @@ h2.sect {
   border: 1px solid;
 }
 .state svg { width: 12px; height: 12px; flex: none; }
+/* A pill with only its icon, for where the sentence beside it already says the
+   word — and says it in the reader's language, which the shared state vocabulary
+   does not. */
+.state.bare { padding: 4px 7px; }
+
 .state-up       { color: var(--up);       background: var(--up-bg);       border-color: var(--up-line); }
 .state-degraded { color: var(--degraded); background: var(--degraded-bg); border-color: var(--degraded-line); }
 .state-down     { color: var(--down);     background: var(--down-bg);     border-color: var(--down-line); }

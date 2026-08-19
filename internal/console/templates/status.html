@@ -1,7 +1,7 @@
 {{define "status.html"}}<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Is it working? · Doblura</title><link rel="stylesheet" href="/assets/console.css">
+<title>{{t .Data.Locale "title"}} · Doblura</title><link rel="stylesheet" href="/assets/console.css">
 <link rel="icon" type="image/svg+xml" href="/assets/mark.svg">
 {{/* Refreshes itself, because this is the one page somebody leaves open during an
      outage, and a meta refresh needs no JavaScript. Sixty seconds: short enough
@@ -13,27 +13,24 @@
 <div class="statuspage">
   <header>
     <div class="mark">dob<span>l</span>ura</div>
-    <p class="lede">Looked at {{$d.LookedAt}}. This page checks again every minute
-      on its own — or <a class="link" href="{{if $d.Scope}}/status/{{$d.Scope}}{{else}}/status{{end}}">look now</a>.</p>
+    <p class="lede">{{printf (t $d.Locale "looked-at") $d.LookedAt}}
+      <a class="link" href="{{if $d.Scope}}/status/{{$d.Scope}}{{else}}/status{{end}}">{{t $d.Locale "look-now"}}</a>.</p>
   </header>
 
   {{if $d.Denied}}
     <div class="answer unknown">
       <span class="icon">{{icon "unknown"}}</span>
-      <div><p class="big">We cannot tell you right now</p>
-        <p>This page could not read the status. Send whoever looks after your
-          Odoo exactly this and they will know what it means:</p>
-        {{if not $d.Scope}}<p class="hint">The link you were given may be missing
-          your name at the end — a status link looks like
-          <span class="mono">/status/your-name</span>.</p>{{end}}
+      <div><p class="big">{{t $d.Locale "cannot-tell"}}</p>
+        <p>{{t $d.Locale "cannot-tell-detail"}}</p>
+        {{if not $d.Scope}}<p class="hint">{{t $d.Locale "link-missing-name"}}
+          <span class="mono">/status/…</span>.</p>{{end}}
         <p class="mono small">{{$d.Denied}}</p></div>
     </div>
   {{else if not $d.Rows}}
     <div class="answer unknown">
       <span class="icon">{{icon "unknown"}}</span>
-      <div><p class="big">There is nothing here to show you</p>
-        <p>Your account can sign in but is not attached to any environment yet.
-          Whoever set up your access can attach it.</p></div>
+      <div><p class="big">{{t $d.Locale "nothing-here"}}</p>
+        <p>{{t $d.Locale "nothing-here-detail"}}</p></div>
     </div>
   {{else}}
 
@@ -42,10 +39,8 @@
     {{if $d.Everything}}
       <div class="answer up">
         <span class="icon">{{icon "up"}}</span>
-        <div><p class="big">{{if $d.Multiple}}Everything is working{{else}}It is working{{end}}</p>
-          <p>If something still looks wrong to you, it is worth reporting — this
-            page only knows whether the server is answering, not whether it is
-            answering correctly.</p></div>
+        <div><p class="big">{{if $d.Multiple}}{{t $d.Locale "all-working"}}{{else}}{{t $d.Locale "one-working"}}{{end}}</p>
+          <p>{{t $d.Locale "all-working-detail"}}</p></div>
       </div>
     {{end}}
 
@@ -55,9 +50,13 @@
         <div>
           <p class="big">{{.Headline}}</p>
           <p class="sub">{{if $d.Multiple}}{{.Name}}{{if .Purpose}} · {{.Purpose}}{{end}}
-            {{else}}Your Odoo{{end}}{{if .Since}} · this has been the case for {{.Since}}{{end}}</p>
+            {{else}}{{t $d.Locale "your-odoo"}}{{end}}{{if .Since}} · {{printf (t $d.Locale "since") .Since}}{{end}}</p>
         </div>
-        <span class="state state-{{.State}}">{{icon .State}}{{stateWord .State}}</span>
+        {{/* Colour and icon, no word. The headline beside it already says
+             "It is working" in the reader's language, and the pill repeating "Up"
+             was both redundant and the one thing on this page still in English —
+             it comes from the operator console's vocabulary, which stays there. */}}
+        <span class="state state-{{.State}} bare">{{icon .State}}</span>
       </div>
 
       {{if .Detail}}<p class="hint">{{.Detail}}</p>{{end}}
@@ -70,21 +69,15 @@
         {{if .Load}}
           <p class="hint"><b>{{.Load}}</b>{{if .LoadDetail}} — {{.LoadDetail}}{{end}}</p>
         {{else}}
-          <p class="hint">Nobody is measuring how hard it is working, so this page
-            cannot tell you whether it is under load.</p>
+          <p class="hint">{{t $d.Locale "not-measured"}}</p>
         {{end}}
       {{end}}
 
-      {{if .Address}}<p><a class="btn ghost" href="{{.Address}}" rel="noopener noreferrer">Open it</a></p>{{end}}
+      {{if .Address}}<p><a class="btn ghost" href="{{.Address}}" rel="noopener noreferrer">{{t $d.Locale "open-it"}}</a></p>{{end}}
     </div>
     {{end}}
 
-    <p class="fineprint">What this page can and cannot tell you: it knows whether
-      the server is running and answering, and how much memory it is using against
-      what it was given. It does not know whether a report is wrong, whether an
-      import finished, or whether something you did yesterday saved. For those,
-      tell whoever looks after your Odoo — this page is not a substitute for
-      saying something is wrong.</p>
+    <p class="fineprint">{{t $d.Locale "fineprint"}}</p>
   {{end}}
 </div>
 </body></html>

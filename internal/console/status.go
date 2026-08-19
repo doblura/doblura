@@ -5,6 +5,7 @@ package console
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"time"
@@ -86,6 +87,9 @@ type statusRow struct {
 
 type statusView struct {
 	Rows []statusRow
+	// Locale is the language this customer's own people read, taken from the
+	// customer record. See i18n.go for why it is not the reader's choice.
+	Locale locale
 	// LookedAt is when the page was rendered. Stated because a page with no
 	// JavaScript is never live, and a status screen that implies it is will be
 	// trusted at exactly the wrong moment.
@@ -122,6 +126,21 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id Identit
 		view.Scope = ns
 	}
 
+	// The language this customer's own people read, from the customer record.
+	//
+	// Read before anything is rendered, because every sentence below depends on
+	// it. Failing to read it is not an error: English is the fallback and the page
+	// still answers the question it exists to answer.
+	var tenants doblurav1alpha1.OdooTenantList
+	if err := c.List(ctx, &tenants, opts...); err == nil {
+		for i := range tenants.Items {
+			if lang := tenants.Items[i].Spec.Language; lang != "" {
+				view.Locale = localeOf(lang)
+				break
+			}
+		}
+	}
+
 	var envs doblurav1alpha1.OdooEnvironmentList
 	if err := c.List(ctx, &envs, opts...); err != nil {
 		// The API server's own words. A customer cannot act on them, but whoever
@@ -135,7 +154,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id Identit
 	view.Everything = true
 	for i := range envs.Items {
 		env := &envs.Items[i]
-		row := s.statusOf(ctx, c, id, env)
+		row := s.statusOf(ctx, c, id, env, view.Locale)
 		if row.State != "up" && row.State != "asleep" {
 			view.Everything = false
 		}
@@ -178,6 +197,7 @@ func (s *Server) statusOf(
 	c client.Client,
 	id Identity,
 	env *doblurav1alpha1.OdooEnvironment,
+	l locale,
 ) statusRow {
 	row := statusRow{
 		Name:     env.Name,
@@ -199,8 +219,8 @@ func (s *Server) statusOf(
 	replicas, ready := replicasFor(&deps, env.Name)
 	h := environmentHealth(env, replicas, ready, known)
 	row.State = h.State
-	row.Headline = customerWord(h.State)
-	row.Detail = customerDetail(h.State)
+	row.Headline = say(l, "state-"+h.State)
+	row.Detail = say(l, "detail-"+h.State)
 
 	if env.Status.URL != "" {
 		row.Address = env.Status.URL
@@ -212,68 +232,41 @@ func (s *Server) statusOf(
 	// "load: normal" on the strength of nothing is a page that stops being
 	// believed the first time it says so during an outage.
 	if row.Running {
-		head, detail, state := s.load(ctx, id, env)
-		row.Load, row.LoadDetail, row.LoadState = head, detail, state
+		if pct, state, ok := s.loadPercent(ctx, id, env); ok {
+			row.LoadState = state
+			switch state {
+			case "down":
+				row.Load = say(l, "load-tight")
+				row.LoadDetail = fmt.Sprintf(say(l, "load-tight-detail"), pct)
+			case "degraded":
+				row.Load = say(l, "load-hard")
+				row.LoadDetail = fmt.Sprintf(say(l, "load-hard-detail"), pct)
+			default:
+				row.Load = say(l, "load-comfortable")
+				row.LoadDetail = fmt.Sprintf(say(l, "load-comfortable-detail"), pct)
+			}
+		}
 	}
 
-	if t := lastChange(env); t != "" {
-		row.Since = t
+	if since, ok := lastChange(env); ok {
+		row.Since = duration(l, since)
 	}
 	return row
 }
 
-// customerWord is the state in the words somebody uses on the phone.
+// The words for each state used to live in two switch statements here.
 //
-// Separate from stateWord, which is written for whoever runs the platform.
-// "Degraded" is a word from monitoring; "It is working, but slower than it should
-// be" is what the person on the phone is trying to say.
-func customerWord(state string) string {
-	switch state {
-	case "up":
-		return "It is working"
-	case "degraded":
-		return "It is working, but not fully"
-	case "down":
-		return "It is not working"
-	case "building":
-		return "It is starting up"
-	case "asleep":
-		return "It is asleep, and wakes up when somebody opens it"
-	default:
-		return "We cannot tell right now"
-	}
-}
+// They are in the catalogue now, keyed "state-up" and "detail-up" and so on, so
+// the sentence and its translation sit beside each other and a test can tell when
+// one of them is missing. Nothing about the wording changed: the English in the
+// catalogue is what these functions returned.
 
-// customerDetail is the sentence under the headline.
+// lastChange is how long the current state has held.
 //
-// Fixed per state rather than derived from the object. Everything doblura knows
-// about WHY something is down is phrased for somebody who can open a Job, and
-// there is no version of that sentence which helps the person on the phone. What
-// helps them is knowing whether it has been noticed.
-func customerDetail(state string) string {
-	switch state {
-	case "up":
-		return "It is answering normally."
-	case "degraded":
-		return "Part of it is not running. Whoever looks after your Odoo can see " +
-			"the details, and this is the kind of problem worth telling them about " +
-			"if you have not already."
-	case "down":
-		return "It is not answering. Whoever looks after your Odoo can see why " +
-			"from here — if this is news to you and to them, tell them."
-	case "building":
-		return "It is being set up or restarted. This normally takes a few minutes."
-	case "asleep":
-		return "It was not being used, so it was switched off to save resources. " +
-			"Opening it starts it again, which takes about a minute."
-	default:
-		return "This page could not work out what state it is in, which is itself " +
-			"worth reporting."
-	}
-}
-
-// lastChange is how long the current state has held, from the conditions.
-func lastChange(env *doblurav1alpha1.OdooEnvironment) string {
+// Returns the duration rather than a formatted string, because the customer page
+// has to say it in their language and the operator console in English — and a
+// function that formats before it returns forces one of them to unpick it.
+func lastChange(env *doblurav1alpha1.OdooEnvironment) (time.Duration, bool) {
 	var newest time.Time
 	for _, c := range env.Status.Conditions {
 		if c.LastTransitionTime.Time.After(newest) {
@@ -281,7 +274,7 @@ func lastChange(env *doblurav1alpha1.OdooEnvironment) string {
 		}
 	}
 	if newest.IsZero() {
-		return ""
+		return 0, false
 	}
-	return shortDuration(time.Since(newest))
+	return time.Since(newest), true
 }

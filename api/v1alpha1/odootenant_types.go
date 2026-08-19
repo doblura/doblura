@@ -88,6 +88,22 @@ type OdooTenantSpec struct {
 	// +optional
 	Default *bool `json:"default,omitempty"`
 
+	// Language is what this customer's own people read, as a two-letter code.
+	//
+	// It decides the language of the status page — the one screen a customer opens
+	// themselves — and nothing else. The operator console stays in English,
+	// because the people who run the platform share one vocabulary and doubling
+	// its text would double what has to be kept true.
+	//
+	// On the CUSTOMER and not a preference the reader picks, because the reader is
+	// somebody at that company opening a link they were sent, and asking them to
+	// choose a language before they can find out whether their Odoo is up is one
+	// screen too many.
+	// +kubebuilder:validation:Enum=en;es
+	// +kubebuilder:default=en
+	// +optional
+	Language string `json:"language,omitempty"`
+
 	// Domain is where this customer's environments are published, for example
 	// "acme.doblura.example" or a domain of the customer's own.
 	//
