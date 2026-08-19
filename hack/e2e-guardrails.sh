@@ -347,6 +347,33 @@ check "a new customer on any major"          "$TEN  images:
     - {name: a, image: 'x:1', odooVersion: '19.0', default: true}" ok
 echo
 
+# ── the edge: what stands between the internet and an Odoo ──
+#
+# These exist because spec.exposure was a set of fields nothing applied. The
+# Ingress referenced Traefik middlewares — basicauth, noindex, ratelimit — that no
+# controller created; Traefik logged `middleware "..." does not exist` on every
+# reconcile; and a public environment's authentication was enforced by nobody. The
+# validation below is about the API. Whether the rules actually reach the proxy is
+# checked against a live Traefik, which a guardrail script cannot do.
+echo "-- the edge --"
+
+check "a domain the customer can be published under" "$TEN  domain: acme.example.com" ok
+check "a domain that is a URL, not a domain"         "$TEN  domain: https://acme.example.com" rejected
+check "a domain with no dot at all"                  "$TEN  domain: localhost" rejected
+check "an issuer names its kind"                     "$TEN  certIssuer: ClusterIssuer/letsencrypt" ok
+check "a namespaced issuer too"                      "$TEN  certIssuer: Issuer/internal-ca" ok
+check "an issuer with no kind is refused"            "$TEN  certIssuer: letsencrypt" rejected
+# Naming the kind is not pedantry: cert-manager looks the two up in different
+# places, and a name alone would be resolved by guessing.
+check "an issuer of an invented kind"                "$TEN  certIssuer: Wizard/merlin" rejected
+
+check "an allowlist of networks"  "$ENV  data: {type: Demo}
+  exposure: {allowFrom: ['203.0.113.0/24', '198.51.100.7/32']}" ok
+check "hsts can be turned off"    "$ENV  data: {type: Demo}
+  exposure: {hsts: false}" ok
+
+echo
+
 # ── the copy taken before a restore replaces a database ──
 #
 # A restore is the one action in doblura that destroys data on purpose. The

@@ -241,6 +241,19 @@ func (m *EnvironmentCreator) defaultsFrom(
 	// so once, and the purpose does not undo it.
 	ops = append(ops, purposeOps(env)...)
 
+	// The address, generated once and written into the spec.
+	//
+	// Into the SPEC and not resolved at reconcile time, because a hostname
+	// recomputed on every reconcile is a hostname that moves under a running
+	// certificate and under whatever DNS points at it. Written here it is the
+	// same address for the life of the environment, and it is visible in the
+	// object somebody reads.
+	if hostOp, refusal := hostFor(env, &tenant); refusal != "" {
+		return nil, refusal
+	} else if hostOp != nil {
+		ops = append(ops, *hostOp)
+	}
+
 	d := tenant.Spec.EnvironmentDefaults
 
 	switch {
@@ -592,4 +605,74 @@ func purposeOps(env *doblurav1alpha1.OdooEnvironment) []jsonpatch.Operation {
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/size", string(want.Size)))
 	}
 	return ops
+}
+
+// hostFor decides where an environment answers.
+//
+// Three cases, and the third is the one that matters:
+//
+//   - A host was given: it stands. Somebody naming an address means it.
+//   - No host, and the customer has a domain: generate one under it, with a
+//     random tail. See OdooTenantSpec.Domain for why random.
+//   - Production with no host: REFUSED. Production is the customer's real
+//     address; guessing it is worse than asking, and an environment answering on
+//     a name nobody chose is not a production environment anybody should trust.
+func hostFor(
+	env *doblurav1alpha1.OdooEnvironment,
+	tenant *doblurav1alpha1.OdooTenant,
+) (*jsonpatch.Operation, string) {
+	if env.Spec.Exposure.Host != "" {
+		return nil, ""
+	}
+
+	// Production is never generated, on any path. It is the customer's real
+	// address; guessing it is worse than asking, and an environment answering on
+	// a name nobody chose is not a production environment anybody should trust.
+	//
+	// The refusal only fires when it is public, because a production environment
+	// reached some other way needs no host at all. The CEL rule on exposure
+	// already refuses public-with-no-host; this says the extra thing that rule
+	// cannot, which is that doblura declined to make one up.
+	if env.Spec.Purpose == doblurav1alpha1.PurposeProduction {
+		if env.Spec.Exposure.Public != nil && *env.Spec.Exposure.Public {
+			return nil, fmt.Sprintf(
+				"a Production environment needs its own exposure.host: it is %s's "+
+					"real address, and doblura will not invent one. Every other "+
+					"purpose gets a generated address under the customer's domain",
+				tenant.Name)
+		}
+		return nil, ""
+	}
+
+	if tenant.Spec.Domain == "" {
+		// Nothing to build from. Left empty rather than invented; the CEL rule
+		// refuses a public environment with no host, which is the right place for
+		// that refusal and says so in those words.
+		return nil, ""
+	}
+
+	host, err := doblurav1alpha1.GeneratedHost(env.Name, tenant.Spec.Domain)
+	if err != nil {
+		// Only a failure of crypto/rand reaches here. Refused rather than falling
+		// back to something predictable: a name nobody can type is the point.
+		return nil, "could not generate an address for this environment: " + err.Error()
+	}
+	if host == "" {
+		return nil, ""
+	}
+
+	// Add the whole exposure object when the manifest had none.
+	//
+	// A JSON Patch "add" of /spec/exposure/host fails outright if /spec/exposure
+	// is absent, and it is absent whenever the person did not write it — schema
+	// defaults for the fields INSIDE an object are only applied when the object
+	// itself exists. NoIndex is the tell: it defaults to true, so a nil there
+	// means the API server never saw an exposure to default.
+	if env.Spec.Exposure.NoIndex == nil {
+		op := jsonpatch.NewOperation("add", "/spec/exposure",
+			map[string]any{"host": host})
+		return &op, ""
+	}
+	op := jsonpatch.NewOperation("add", "/spec/exposure/host", host)
+	return &op, ""
 }

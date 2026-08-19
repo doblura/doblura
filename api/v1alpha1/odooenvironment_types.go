@@ -84,6 +84,19 @@ const (
 // AckReidentification is the acknowledgement that anonymizing is not magic.
 const AckReidentification = "i-accept-anonymized-data-can-still-be-reidentified"
 
+// TLSState is whose certificate answers on the address.
+// +kubebuilder:validation:Enum=Issued;DefaultCertificate
+type TLSState string
+
+const (
+	// TLSIssued means a certificate exists for this host, either obtained by
+	// cert-manager or loaded by hand.
+	TLSIssued TLSState = "Issued"
+	// TLSDefaultCertificate means nobody is issuing one and the ingress
+	// controller is answering with its own. Browsers will warn.
+	TLSDefaultCertificate TLSState = "DefaultCertificate"
+)
+
 // EnvExposure describes how the environment is reached.
 //
 // The rules encode "the same security as production". They are not advice: the
@@ -100,6 +113,15 @@ type EnvExposure struct {
 	// +optional
 	Public *bool `json:"public,omitempty"`
 
+	// Host is the address it answers on.
+	//
+	// Left empty, it is generated from the customer's domain — see
+	// OdooTenantSpec.Domain — except for Production, which is never generated.
+	// Written into the spec at admission rather than resolved at reconcile time,
+	// so it is the same address for the life of the environment: a hostname
+	// recomputed on every reconcile is a hostname that changes under a running
+	// certificate.
+	// +kubebuilder:validation:MaxLength=253
 	// +optional
 	Host string `json:"host,omitempty"`
 
@@ -120,6 +142,49 @@ type EnvExposure struct {
 	// +kubebuilder:default=20
 	// +optional
 	RateLimitRPS *int32 `json:"rateLimitRPS,omitempty"`
+
+	// AllowFrom restricts who may reach it at all, as CIDR blocks.
+	//
+	// Before authentication rather than instead of it. A password in front of a
+	// staging environment stops somebody who finds the address; a network
+	// restriction stops them reaching the application at all, which also means
+	// they cannot reach whatever is unpatched in it this week.
+	//
+	// Empty means anywhere, which is the honest default: doblura does not know
+	// the customer's networks, and a made-up range would lock out the people who
+	// need it while reading as a protection.
+	// +optional
+	AllowFrom []string `json:"allowFrom,omitempty"`
+
+	// HSTS tells browsers to refuse http for this host for a year.
+	//
+	// Defaults to on for a public environment and off otherwise. It is worth
+	// knowing that this is remembered by the browser and cannot be taken back
+	// within the year: it is set for the host only, never for subdomains and
+	// never with preload, because environments live on generated names under a
+	// customer's domain and a claim over the whole domain from one of them would
+	// reach names doblura did not create and cannot fix.
+	// +optional
+	HSTS *bool `json:"hsts,omitempty"`
+}
+
+// NoIndexes reports whether the noindex header is sent. Default on.
+func (e *EnvExposure) NoIndexes() bool {
+	return e.NoIndex == nil || *e.NoIndex
+}
+
+// SendsHSTS reports whether the strict-transport header is sent.
+//
+// On by default for a public environment: it is served over https and a browser
+// that remembers to skip the http round trip is one that cannot be stripped on a
+// hostile network. Off by default otherwise, because an environment reached
+// internally may legitimately be plain http, and a year-long browser memory is
+// not something to switch on by accident.
+func (e *EnvExposure) SendsHSTS() bool {
+	if e.HSTS != nil {
+		return *e.HSTS
+	}
+	return e.Public != nil && *e.Public
 }
 
 // EnvAuth is the ingress authentication.
@@ -130,9 +195,22 @@ type EnvAuth struct {
 
 	// SecretRef holds "users" (htpasswd format) for BasicAuth, or "url" of the
 	// authentication service for ForwardAuth.
+	//
+	// Optional for BasicAuth: left empty, doblura generates one. It was optional
+	// before too, and a public environment with BasicAuth and no secret produced
+	// a middleware pointing at a Secret that did not exist — which fails open or
+	// closed depending on the version, and neither belongs in front of a
+	// customer's data.
 	// +optional
 	SecretRef string `json:"secretRef,omitempty"`
+
+	// ForwardURL is the authentication service, for ForwardAuth.
+	// +optional
+	ForwardURL string `json:"forwardURL,omitempty"`
 }
+
+// URL is where ForwardAuth sends the request.
+func (a *EnvAuth) URL() string { return a.ForwardURL }
 
 // EnvSecurity holds the environment's internal controls.
 type EnvSecurity struct {
@@ -751,6 +829,15 @@ type OdooEnvironmentStatus struct {
 	// adminUsers. It is the only way in once passwords are randomized.
 	// +optional
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
+
+	// TLS says whose certificate answers on this address.
+	//
+	// It exists because the alternative is a status that reads https:// while the
+	// ingress controller serves its own self-signed default — every address
+	// works, every browser warns, and people learn to click through certificate
+	// warnings, which is the habit that makes the warning worthless.
+	// +optional
+	TLS TLSState `json:"tls,omitempty"`
 
 	// ExpiresAt is when it gets destroyed.
 	// +optional

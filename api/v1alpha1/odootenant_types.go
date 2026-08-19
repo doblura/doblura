@@ -51,6 +51,41 @@ type OdooTenantSpec struct {
 	// +kubebuilder:validation:Pattern=`^[0-9]+\.[0-9]+$`
 	OdooVersion string `json:"odooVersion,omitempty"`
 
+	// Domain is where this customer's environments are published, for example
+	// "acme.doblura.example" or a domain of the customer's own.
+	//
+	// Environments other than production get a hostname under it, generated once
+	// and kept: <environment>-<six characters>.<domain>. The random part is the
+	// point. A staging or a support environment holds the customer's real data
+	// behind whatever the ingress asks for, and "staging.acme.example" is found by
+	// anybody who tries the obvious name — which is the whole attack. Six random
+	// characters make the address something that has to be given to you.
+	//
+	// Production is never generated. It is the customer's real address, guessing
+	// it is worse than asking, and an environment answering on a name nobody
+	// chose is not a production environment anybody should trust.
+	//
+	// Customers usually share one domain and do not have to: set a different one
+	// per customer and nothing else changes.
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]{2,}$`
+	// +optional
+	Domain string `json:"domain,omitempty"`
+
+	// CertIssuer is the cert-manager Issuer that gets certificates for this
+	// customer's addresses, as "<kind>/<name>" — for example
+	// "ClusterIssuer/letsencrypt" or "Issuer/internal-ca".
+	//
+	// Left empty, doblura does not claim a certificate it cannot obtain. That
+	// distinction is the reason this field exists: the Ingress used to declare a
+	// TLS secret unconditionally, nothing ever created it, and the ingress
+	// controller quietly served its own default certificate instead. Every
+	// address worked, every browser warned, and the environment's status said
+	// https:// with no hint that the padlock was broken.
+	// +kubebuilder:validation:Pattern=`^(ClusterIssuer|Issuer)/[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +optional
+	CertIssuer string `json:"certIssuer,omitempty"`
+
 	// MaxEphemeralEnvironments caps how many throwaway environments may exist
 	// for this customer at once. The validating admission webhook refuses the
 	// create that would exceed it.
@@ -463,4 +498,10 @@ type OdooTenantList struct {
 
 func init() {
 	SchemeBuilder.Register(&OdooTenant{}, &OdooTenantList{})
+}
+
+// IssuerKindAndName splits spec.certIssuer.
+func (s *OdooTenantSpec) IssuerKindAndName() (kind, name string) {
+	kind, name, _ = strings.Cut(s.CertIssuer, "/")
+	return kind, name
 }

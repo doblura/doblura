@@ -24,8 +24,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
 )
@@ -54,6 +56,9 @@ type OdooEnvironmentReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+// The edge rules the Ingress refers to. Without this the Ingress is created and
+// every middleware it names is missing, which is the state edge.go exists to fix.
+// +kubebuilder:rbac:groups=traefik.io,resources=middlewares,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=doblura.dev,resources=odoodatabases;odootenants;odooinstances,verbs=get;list;watch
 // +kubebuilder:rbac:groups=doblura.dev,resources=odooenvironments/finalizers,verbs=update
 
@@ -499,32 +504,37 @@ func (r *OdooEnvironmentReconciler) ensureIngress(
 	env *doblurav1alpha1.OdooEnvironment,
 	st *doblurav1alpha1.OdooEnvironmentStatus,
 ) error {
-	ann := map[string]string{}
-	mw := []string{}
+	// The edge objects FIRST, then the annotation that points at them.
+	//
+	// The comment that used to be here said the middlewares were "declared
+	// elsewhere (the chart)". They were not declared anywhere: no Middleware
+	// existed in any namespace, Traefik logged `middleware "..." does not exist`
+	// on every reconcile, and spec.exposure's authentication, noindex and rate
+	// limit were enforced by nothing. See edge.go.
+	htpasswd, err := r.ensureEdge(ctx, env)
+	if err != nil {
+		return err
+	}
 
-	// Traefik middlewares are referenced as <namespace>-<name>@kubernetescrd. They
-	// are declared elsewhere (the chart) and only linked here.
-	if env.Spec.IsPublic() {
-		switch env.Spec.Exposure.Auth.Type {
-		case doblurav1alpha1.IngressAuthBasic:
-			mw = append(mw, env.Namespace+"-"+env.Name+"-basicauth@kubernetescrd")
-		case doblurav1alpha1.IngressAuthForward:
-			mw = append(mw, env.Namespace+"-"+env.Name+"-forwardauth@kubernetescrd")
-		}
-	}
-	if env.Spec.Exposure.NoIndex == nil || *env.Spec.Exposure.NoIndex {
-		// An environment holding realistic-looking data indexed by Google is a
-		// leak that requires nobody to attack anything.
-		mw = append(mw, env.Namespace+"-"+env.Name+"-noindex@kubernetescrd")
-	}
-	if env.Spec.Exposure.RateLimitRPS != nil && *env.Spec.Exposure.RateLimitRPS > 0 {
-		mw = append(mw, env.Namespace+"-"+env.Name+"-ratelimit@kubernetescrd")
-	}
-	if len(mw) > 0 {
+	ann := map[string]string{}
+	// One list, used for both. The names cannot drift from the objects because
+	// they are generated from the same rules.
+	if mw := edgeMiddlewareNames(env, htpasswd); len(mw) > 0 {
 		ann["traefik.ingress.kubernetes.io/router.middlewares"] = strings.Join(mw, ",")
 	}
 
-	pathType := networkingv1.PathTypePrefix
+	// TLS, and only when something will actually issue it.
+	//
+	// The Ingress used to declare `secretName: <env>-tls` unconditionally.
+	// Nothing created that Secret, so Traefik served its own default certificate
+	// and logged `secret demo/x-tls does not exist` for ever: every address
+	// worked, every browser warned, and status.url said https:// with no hint the
+	// padlock was broken. Now the customer's issuer is what decides — with one,
+	// cert-manager is asked and gets the annotation it needs; with none, no
+	// certificate is claimed and the status says whose certificate is being
+	// served instead.
+	tls, issued := r.tlsFor(ctx, env, ann)
+
 	class := "traefik"
 	ing := &networkingv1.Ingress{
 		TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
@@ -534,18 +544,12 @@ func (r *OdooEnvironmentReconciler) ensureIngress(
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: &class,
-			TLS: []networkingv1.IngressTLS{{
-				Hosts:      []string{env.Spec.Exposure.Host},
-				SecretName: env.Name + "-tls",
-			}},
+			TLS:              tls,
 			Rules: []networkingv1.IngressRule{{
 				Host: env.Spec.Exposure.Host,
 				IngressRuleValue: networkingv1.IngressRuleValue{
 					HTTP: &networkingv1.HTTPIngressRuleValue{
-						Paths: []networkingv1.HTTPIngressPath{
-							{Path: "/websocket", PathType: &pathType, Backend: svcBackend(env.Name, 8072)},
-							{Path: "/", PathType: &pathType, Backend: svcBackend(env.Name, 80)},
-						},
+						Paths: ingressPaths(env),
 					},
 				},
 			}},
@@ -558,7 +562,60 @@ func (r *OdooEnvironmentReconciler) ensureIngress(
 		return err
 	}
 	st.URL = "https://" + env.Spec.Exposure.Host
+	// Said out loud when nobody is issuing a certificate for this address. A
+	// status that reads https:// while the ingress controller serves its own
+	// self-signed default is a status that teaches people to click through
+	// certificate warnings, which is the habit that makes the warning useless.
+	st.TLS = doblurav1alpha1.TLSIssued
+	if !issued {
+		st.TLS = doblurav1alpha1.TLSDefaultCertificate
+	}
 	return nil
+}
+
+// tlsFor decides whether to claim a certificate, and asks for one if so.
+func (r *OdooEnvironmentReconciler) tlsFor(
+	ctx context.Context,
+	env *doblurav1alpha1.OdooEnvironment,
+	ann map[string]string,
+) ([]networkingv1.IngressTLS, bool) {
+	secret := env.Name + "-tls"
+	claim := []networkingv1.IngressTLS{{
+		Hosts:      []string{env.Spec.Exposure.Host},
+		SecretName: secret,
+	}}
+
+	// An issuer on the customer record: cert-manager is asked for it. The
+	// annotation is what makes cert-manager act on an Ingress at all; without it
+	// the TLS block is a reference to a Secret nobody will ever create, which is
+	// the state this replaced.
+	var tenant doblurav1alpha1.OdooTenant
+	if env.Spec.ForTenant != "" {
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: env.Namespace, Name: env.Spec.ForTenant,
+		}, &tenant); err == nil && tenant.Spec.CertIssuer != "" {
+			kind, name := tenant.Spec.IssuerKindAndName()
+			switch kind {
+			case "ClusterIssuer":
+				ann["cert-manager.io/cluster-issuer"] = name
+			default:
+				ann["cert-manager.io/issuer"] = name
+			}
+			return claim, true
+		}
+	}
+
+	// No issuer. If somebody has put the Secret there by hand — a certificate
+	// bought and loaded, which is a perfectly ordinary way to run this — it is
+	// used. Otherwise nothing is claimed.
+	var existing corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: env.Namespace, Name: secret,
+	}, &existing); err == nil {
+		return claim, true
+	}
+
+	return nil, false
 }
 
 // ensureEnvNetworkPolicy fences in the environment's Odoo.
@@ -806,8 +863,45 @@ func (r *OdooEnvironmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&doblurav1alpha1.OdooEnvironment{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&batchv1.Job{}).
 		Owns(&appsv1.Deployment{}).
+		// The customer record, because things on it decide what an environment
+		// gets. Without this, setting spec.certIssuer on a customer changed
+		// nothing at all until somebody happened to edit an environment: the
+		// annotation cert-manager needs was never written, every address went on
+		// being served with the ingress controller's own certificate, and there
+		// was nothing to see. The same is true of the customer's domain and its
+		// image catalogue.
+		Watches(
+			&doblurav1alpha1.OdooTenant{},
+			handler.EnqueueRequestsFromMapFunc(r.environmentsOfTenant),
+		).
 		Named("odooenvironment").
 		Complete(r)
+}
+
+// environmentsOfTenant is every environment belonging to a customer.
+//
+// Namespaced to the customer's own namespace: a tenant named acme in one
+// namespace has nothing to do with an environment naming acme in another, and
+// waking those would be a customer's edit reconciling somebody else's workload.
+func (r *OdooEnvironmentReconciler) environmentsOfTenant(
+	ctx context.Context,
+	obj client.Object,
+) []reconcile.Request {
+	var envs doblurav1alpha1.OdooEnvironmentList
+	if err := r.List(ctx, &envs, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	var out []reconcile.Request
+	for i := range envs.Items {
+		e := &envs.Items[i]
+		if e.Spec.ForTenant != obj.GetName() {
+			continue
+		}
+		out = append(out, reconcile.Request{
+			NamespacedName: client.ObjectKeyFromObject(e),
+		})
+	}
+	return out
 }
 
 // ─────────────────────── helpers ───────────────────────
@@ -988,4 +1082,31 @@ func egressRules(
 		})
 	}
 	return rules
+}
+
+// ingressPaths is where each request goes.
+//
+// A function rather than a literal inside the builder so a test can assert on the
+// real routing instead of on a copy of it. The first version of that test compared
+// a string constant kept beside the builder, which is a test that passes when the
+// two are edited together and says nothing about what Kubernetes receives.
+func ingressPaths(env *doblurav1alpha1.OdooEnvironment) []networkingv1.HTTPIngressPath {
+	prefix := networkingv1.PathTypePrefix
+	return []networkingv1.HTTPIngressPath{
+		// BOTH long-poll paths, to the gevent worker on 8072.
+		//
+		// Odoo renamed it: /longpolling/ up to 15, /websocket from 16. Only
+		// /websocket was routed here, so on a 14 or a 15 every long-poll request
+		// went to the ordinary HTTP workers on 80 and sat there holding one open —
+		// and with workers = 2, two idle chat tabs are the whole environment. The
+		// symptom is an Odoo that works until somebody opens Discuss.
+		//
+		// Both rather than deriving it from the Odoo version, because routing a
+		// path a version does not have costs nothing: there is no handler for it,
+		// and the gevent worker serves the same application anyway. Looking the
+		// version up would add a way to be wrong in exchange for nothing.
+		{Path: "/websocket", PathType: &prefix, Backend: svcBackend(env.Name, 8072)},
+		{Path: "/longpolling/", PathType: &prefix, Backend: svcBackend(env.Name, 8072)},
+		{Path: "/", PathType: &prefix, Backend: svcBackend(env.Name, 80)},
+	}
 }
