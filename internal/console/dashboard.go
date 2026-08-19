@@ -39,7 +39,14 @@ type dashboardView struct {
 	Expiring []attentionRow
 	// All is every environment, so the page has something on it when nothing is
 	// wrong — which is most days, and was the state that made it look broken.
+	//
+	// Shown as cards only while it is short enough to BE a list. At forty
+	// customers it was two hundred and fifteen cards and a 127 KB page: the fix
+	// that stopped the overview looking empty turned it into a wall. Above the
+	// threshold the page counts instead, which is what an overview is for.
 	All []attentionRow
+	// Tally is how many are in each state, for when there are too many to show.
+	Tally []stateCount
 
 	Customers    int
 	Environments int
@@ -76,6 +83,36 @@ type attentionRow struct {
 	Word     string
 	Detail   string
 	severity int
+}
+
+// stateCount is "204 answering", "2 not answering".
+type stateCount struct {
+	State string
+	Word  string
+	N     int
+}
+
+// manyEnvironments is where a list stops being a list.
+//
+// Twelve: three rows of four on a wide screen, and few enough that somebody reads
+// them rather than scanning past them.
+const manyEnvironments = 12
+
+// tally counts the states, most alarming first — which is the order somebody
+// reads them in when they are looking for what is wrong.
+func tally(rows []attentionRow) []stateCount {
+	order := []string{"down", "degraded", "building", "asleep", "unknown", "up"}
+	n := map[string]int{}
+	for _, r := range rows {
+		n[r.State]++
+	}
+	var out []stateCount
+	for _, st := range order {
+		if n[st] > 0 {
+			out = append(out, stateCount{State: st, Word: stateWord(st), N: n[st]})
+		}
+	}
+	return out
 }
 
 type quotaRow struct {
@@ -229,6 +266,7 @@ func (s *Server) dashboardIn(
 		return view.Quotas[i].Customer < view.Quotas[j].Customer
 	})
 
+	view.Tally = tally(view.All)
 	view.Cluster = id.Cluster
 	return view, nil
 }
@@ -265,6 +303,7 @@ func mergeDashboards(results []clusterResult[dashboardView]) dashboardView {
 	sort.SliceStable(out.Attention, func(i, j int) bool {
 		return out.Attention[i].severity < out.Attention[j].severity
 	})
+	out.Tally = tally(out.All)
 	sort.Slice(out.All, func(i, j int) bool {
 		if out.All[i].Customer != out.All[j].Customer {
 			return out.All[i].Customer < out.All[j].Customer

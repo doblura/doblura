@@ -220,6 +220,13 @@ h2.sect {
 
 .grid { display: grid; gap: 14px; }
 .grid.two   { grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+/* Cards that size to their content, rather than all stretching to the tallest.
+   A grid stretches by default, which is right for a row of environment cards —
+   they carry the same fields and a ragged row would read as an accident. It is
+   wrong for two cards of prose: "Local accounts" is four lines beside an
+   "Identity provider" card of twenty, and the empty half reads as something that
+   failed to load. */
+.grid.tops { align-items: start; }
 .grid.three { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 
 /* environment cards: the state is the first thing you see, not a column */
@@ -319,6 +326,14 @@ td.num { text-align: right; }
 .counts a:hover { color: var(--accent); }
 .counts b { font-size: 20px; font-weight: 660; letter-spacing: -0.02em; color: var(--ink); margin-right: 5px; }
 .counts a.warn b { color: var(--warn-line); }
+
+/* The state counts, for when there are too many environments to draw.
+   Numbers big enough to read across the room, because this is the line somebody
+   glances at rather than reads. */
+.tallies { display: flex; flex-wrap: wrap; gap: 34px; }
+.tally { display: flex; flex-direction: column; gap: 6px; text-decoration: none; }
+.tally-n { font-size: 30px; font-weight: 660; letter-spacing: -0.025em; line-height: 1; color: var(--ink); }
+.tally:hover .tally-n { color: var(--accent); }
 
 .tile {
   display: flex; flex-direction: column; gap: 3px;

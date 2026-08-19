@@ -110,10 +110,20 @@ YAML</pre>
 <div class="answer up">
   <span class="icon">{{icon "up"}}</span>
   <div>
-    <p class="big">Nothing needs attention</p>
-    <p>{{if .Data.WorkloadVisible}}Every environment you can see is answering
-       normally.{{else}}No environment reports a problem — though whether they are
-       answering cannot be read with your access.{{end}}</p>
+    {{/* What is TRUE, not what would be nice.
+         This said "every environment you can see is answering normally" beside a
+         count of "0 answering" and two hundred and eleven still being prepared.
+         Nothing FAILING is not the same as everything working, and a page that
+         conflates them is one nobody checks twice. */}}
+    <p class="big">Nothing is failing</p>
+    <p>{{if not .Data.WorkloadVisible}}No environment reports a problem — though
+         whether they are answering cannot be read with your access.
+       {{else if eq .Data.Up .Data.Environments}}Every environment you can see is
+         answering normally.
+       {{else}}No environment reports a problem, and {{.Data.Up}} of
+         {{.Data.Environments}} {{if eq .Data.Up 1}}is{{else}}are{{end}} answering
+         — the rest are still being prepared or asleep.
+       {{end}}</p>
   </div>
 </div>
 {{end}}
@@ -136,7 +146,25 @@ what matters first.</p>`))}}
 {{end}}
 
 
-{{if .Data.All}}
+{{/* Cards while the list is short enough to be a list; counts when it is not.
+     At forty customers this was two hundred and fifteen cards on one page — the
+     fix that stopped the overview looking empty had turned it into a wall. */}}
+{{if gt (len .Data.All) 12}}
+{{template "section" (dict "Title" "Where things stand" "Help" (safe `<p>Too many
+environments to list here. This is what state they are in; the
+<b>Environments</b> page has all of them, and a customer&rsquo;s own page has
+theirs.</p>`))}}
+<div class="card pad">
+  <div class="tallies">
+    {{range .Data.Tally}}
+    <a class="tally" href="/o/environments">
+      <span class="tally-n">{{.N}}</span>
+      <span class="state state-{{.State}}">{{icon .State}}{{.Word}}</span>
+    </a>
+    {{end}}
+  </div>
+</div>
+{{else if .Data.All}}
 <h2 class="sect">Environments</h2>
 <div class="grid three">
 {{range .Data.All}}
