@@ -84,6 +84,118 @@ const (
 // AckReidentification is the acknowledgement that anonymizing is not magic.
 const AckReidentification = "i-accept-anonymized-data-can-still-be-reidentified"
 
+// WAFMode is who inspects requests, if anybody.
+// +kubebuilder:validation:Enum=None;InCluster;Provider
+type WAFMode string
+
+const (
+	// WAFNone is nobody. The default, and stated rather than implied.
+	WAFNone WAFMode = "None"
+	// WAFInCluster is Coraza, running in the ingress proxy.
+	WAFInCluster WAFMode = "InCluster"
+	// WAFProvider is somebody else's — a cloud load balancer's WAF, driven by
+	// annotations doblura copies onto the Ingress and does not interpret.
+	WAFProvider WAFMode = "Provider"
+)
+
+// WAFEnforcement is what happens when a rule matches.
+// +kubebuilder:validation:Enum=Block;Detect
+type WAFEnforcement string
+
+const (
+	// WAFBlock refuses the request.
+	WAFBlock WAFEnforcement = "Block"
+	// WAFDetect logs and lets it through. For finding out what a rule would have
+	// done to a real customer before it does it.
+	WAFDetect WAFEnforcement = "Detect"
+)
+
+// EnvWAF is request inspection at the edge.
+//
+// Two modes, and the honest description of each matters more than the field.
+//
+// **Provider** copies annotations onto the Ingress. A cloud load balancer's WAF is
+// configured by its own controller in its own vocabulary; doblura passes the
+// annotations through and interprets none of them. It cannot tell you whether the
+// thing is on, and says so rather than reporting a state it did not check.
+//
+// **InCluster** is Coraza in the ingress proxy, and comes with a limitation worth
+// stating before anybody relies on it: the Traefik build of Coraza is WebAssembly
+// and has no filesystem, so it CANNOT load the OWASP Core Rule Set. Measured, not
+// assumed — `Include @owasp_crs/*.conf` fails with "file does not exist", and the
+// WAF then fails OPEN: every request passes uninspected with the reason only in
+// the proxy's log.
+//
+// So what doblura writes here is deliberately not a general web application
+// firewall. It is a short list of rules about Odoo's own front door — the database
+// manager, and optionally the RPC endpoints — which are rules anybody can read and
+// judge. Writing a homemade replacement for the CRS would be the classic mistake:
+// worse coverage than the real thing, and a name that implies otherwise. For CRS,
+// put a load balancer that has it in front and use Provider mode.
+//
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Provider' || (has(self.annotations) && size(self.annotations) > 0)",message="Provider mode passes annotations to the load balancer's own controller, so it needs at least one: with none, doblura would report a WAF that nothing was asked to switch on"
+type EnvWAF struct {
+	// +kubebuilder:default=None
+	// +optional
+	Mode WAFMode `json:"mode,omitempty"`
+
+	// Enforcement is Block or Detect. Detect first is the right order on an
+	// environment somebody depends on: a rule that turns out to match a
+	// legitimate request blocks a customer's work, and the way to find that out
+	// is to watch it for a week rather than to reason about it.
+	// +kubebuilder:default=Block
+	// +optional
+	Enforcement WAFEnforcement `json:"enforcement,omitempty"`
+
+	// BlockDatabaseManager refuses /web/database/*, which creates, drops,
+	// backs up and restores databases.
+	//
+	// On by default. Odoo's own list_db = False already hides it and doblura sets
+	// that, so this is the second lock rather than the first — and it is the lock
+	// that still holds if somebody edits the configuration, restores a dump with
+	// its own odoo.conf, or runs an image that ships different defaults.
+	// +kubebuilder:default=true
+	// +optional
+	BlockDatabaseManager *bool `json:"blockDatabaseManager,omitempty"`
+
+	// BlockRPC refuses /jsonrpc and /xmlrpc/*.
+	//
+	// OFF by default, and it must be: the external API is how integrations,
+	// e-commerce fronts and the customer's own scripts talk to Odoo, and turning
+	// it off at the edge breaks them silently and from a place nobody thinks to
+	// look. On for an environment nothing integrates with, which is most staging.
+	// +optional
+	BlockRPC *bool `json:"blockRPC,omitempty"`
+
+	// ExtraDirectives are appended verbatim, for rules doblura does not write.
+	//
+	// The escape hatch, and it is a sharp one: a directive Coraza cannot parse
+	// stops the whole WAF from starting, and it then lets everything through with
+	// the reason only in the proxy's log. Change these on a Detect environment
+	// first.
+	// +optional
+	ExtraDirectives []string `json:"extraDirectives,omitempty"`
+
+	// Annotations go on the Ingress for Provider mode, verbatim.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// Inspects reports whether anything is inspecting requests.
+func (w *EnvWAF) Inspects() bool {
+	return w != nil && w.Mode != "" && w.Mode != WAFNone
+}
+
+// BlocksDatabaseManager defaults to true.
+func (w *EnvWAF) BlocksDatabaseManager() bool {
+	return w != nil && (w.BlockDatabaseManager == nil || *w.BlockDatabaseManager)
+}
+
+// BlocksRPC defaults to false.
+func (w *EnvWAF) BlocksRPC() bool {
+	return w != nil && w.BlockRPC != nil && *w.BlockRPC
+}
+
 // TLSState is whose certificate answers on the address.
 // +kubebuilder:validation:Enum=Issued;DefaultCertificate
 type TLSState string
@@ -155,6 +267,10 @@ type EnvExposure struct {
 	// need it while reading as a protection.
 	// +optional
 	AllowFrom []string `json:"allowFrom,omitempty"`
+
+	// WAF inspects requests before Odoo sees them.
+	// +optional
+	WAF *EnvWAF `json:"waf,omitempty"`
 
 	// HSTS tells browsers to refuse http for this host for a year.
 	//
@@ -838,6 +954,18 @@ type OdooEnvironmentStatus struct {
 	// warnings, which is the habit that makes the warning worthless.
 	// +optional
 	TLS TLSState `json:"tls,omitempty"`
+
+	// WAF is what was configured to inspect requests, and it is worth being
+	// precise about what this does NOT say.
+	//
+	// It reports the mode doblura wrote, not that inspection is happening. Coraza
+	// fails OPEN: a directive it cannot parse stops the WAF from starting and
+	// every request then passes uninspected, with the reason only in the ingress
+	// proxy's log. In Provider mode doblura only copied annotations and never saw
+	// the thing they configure. Neither is something this operator can check, and
+	// a status that implied otherwise would be worse than no status.
+	// +optional
+	WAF WAFMode `json:"waf,omitempty"`
 
 	// ExpiresAt is when it gets destroyed.
 	// +optional

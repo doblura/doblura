@@ -517,6 +517,17 @@ func (r *OdooEnvironmentReconciler) ensureIngress(
 	}
 
 	ann := map[string]string{}
+
+	// Provider mode: the load balancer's own controller reads these, in its own
+	// vocabulary, and doblura interprets none of them. Copied verbatim and
+	// deliberately not validated — a WAF this operator does not run is not a WAF
+	// it can make claims about.
+	if waf := env.Spec.Exposure.WAF; waf.Inspects() && waf.Mode == doblurav1alpha1.WAFProvider {
+		for k, v := range waf.Annotations {
+			ann[k] = v
+		}
+	}
+
 	// One list, used for both. The names cannot drift from the objects because
 	// they are generated from the same rules.
 	if mw := edgeMiddlewareNames(env, htpasswd); len(mw) > 0 {
@@ -569,6 +580,10 @@ func (r *OdooEnvironmentReconciler) ensureIngress(
 	st.TLS = doblurav1alpha1.TLSIssued
 	if !issued {
 		st.TLS = doblurav1alpha1.TLSDefaultCertificate
+	}
+	st.WAF = doblurav1alpha1.WAFNone
+	if w := env.Spec.Exposure.WAF; w.Inspects() {
+		st.WAF = w.Mode
 	}
 	return nil
 }

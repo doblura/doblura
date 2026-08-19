@@ -187,3 +187,83 @@ func keysOf(m map[string]string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Long polling is excluded before any rule can deny it.
+//
+// A websocket connection is an HTTP request that never finishes. Inspecting it
+// holds it until something times out or refuses it outright, and Odoo then loses
+// chat, notifications and every live update while every page still loads — so it
+// reads as "Odoo is broken", not as "the firewall we switched on last Tuesday".
+// The exclusion has to come first, because a rule that runs after a deny never
+// runs at all.
+func TestTheWAFNeverInspectsLongPolling(t *testing.T) {
+	yes := true
+	waf := &doblurav1alpha1.EnvWAF{
+		Mode:            doblurav1alpha1.WAFInCluster,
+		Enforcement:     doblurav1alpha1.WAFBlock,
+		BlockRPC:        &yes,
+		ExtraDirectives: []string{`SecRule REQUEST_URI "@contains x" "id:9999,phase:1,deny"`},
+	}
+	d := corazaDirectives(waf)
+
+	firstDeny, wsExclusion, lpExclusion := -1, -1, -1
+	for i, line := range d {
+		switch {
+		case strings.Contains(line, "/websocket"):
+			wsExclusion = i
+		case strings.Contains(line, "/longpolling/"):
+			lpExclusion = i
+		case strings.Contains(line, "deny") && firstDeny < 0:
+			firstDeny = i
+		}
+	}
+
+	if wsExclusion < 0 || lpExclusion < 0 {
+		t.Fatal("long polling is not excluded from inspection at all; the WAF will " +
+			"hold or refuse websocket connections and Odoo will lose chat and " +
+			"notifications while every page still loads")
+	}
+	if firstDeny >= 0 && (wsExclusion > firstDeny || lpExclusion > firstDeny) {
+		t.Fatalf("a deny rule (line %d) comes before the long-poll exclusions "+
+			"(%d, %d); rules after a deny never run", firstDeny, wsExclusion, lpExclusion)
+	}
+}
+
+// The database manager is closed by default, and it is the second lock.
+func TestTheDatabaseManagerIsClosedByDefault(t *testing.T) {
+	waf := &doblurav1alpha1.EnvWAF{Mode: doblurav1alpha1.WAFInCluster}
+	joined := strings.Join(corazaDirectives(waf), "\n")
+	if !strings.Contains(joined, "/web/database/") {
+		t.Error("the database manager is reachable: /web/database/* creates, drops " +
+			"and restores databases")
+	}
+	// And RPC is NOT closed by default: the external API is how integrations and
+	// the customer's own scripts talk to Odoo.
+	if strings.Contains(joined, "/jsonrpc") {
+		t.Error("RPC is closed by default, which breaks every integration silently")
+	}
+}
+
+// Detect means detect.
+func TestDetectDoesNotBlock(t *testing.T) {
+	waf := &doblurav1alpha1.EnvWAF{
+		Mode: doblurav1alpha1.WAFInCluster, Enforcement: doblurav1alpha1.WAFDetect,
+	}
+	if !strings.Contains(corazaDirectives(waf)[0], "DetectionOnly") {
+		t.Fatalf("Detect enforcement still starts the engine in blocking mode: %q",
+			corazaDirectives(waf)[0])
+	}
+}
+
+// The request body is never buffered.
+//
+// Odoo moves attachments and database dumps through ordinary POSTs, and a WAF that
+// buffers those to inspect them turns a 200 MB restore into the proxy's memory
+// problem.
+func TestTheWAFDoesNotBufferBodies(t *testing.T) {
+	waf := &doblurav1alpha1.EnvWAF{Mode: doblurav1alpha1.WAFInCluster}
+	if !strings.Contains(strings.Join(corazaDirectives(waf), "\n"), "SecRequestBodyAccess Off") {
+		t.Error("request bodies are buffered for inspection; an Odoo restore or a " +
+			"large attachment becomes the proxy's memory problem")
+	}
+}

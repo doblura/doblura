@@ -133,6 +133,19 @@ func edgeRules(env *doblurav1alpha1.OdooEnvironment, htpasswdSecret string) []ed
 		})
 	}
 
+	if waf := env.Spec.Exposure.WAF; waf.Inspects() && waf.Mode == doblurav1alpha1.WAFInCluster {
+		rules = append(rules, edgeRule{
+			Name: "waf",
+			Spec: map[string]any{
+				"plugin": map[string]any{
+					"coraza": map[string]any{
+						"directives": toAny(corazaDirectives(waf)),
+					},
+				},
+			},
+		})
+	}
+
 	if env.Spec.Exposure.SendsHSTS() {
 		rules = append(rules, edgeRule{
 			Name: "hsts",
@@ -342,4 +355,63 @@ func toAny(in []string) []any {
 		out = append(out, strings.TrimSpace(v))
 	}
 	return out
+}
+
+// ─────────────── the rules doblura writes ───────────────
+
+// corazaDirectives is the WAF configuration, in order.
+//
+// Order is the whole thing in a rule engine. The exclusions come FIRST, at the
+// lowest ids, because a rule that runs after a deny never runs at all.
+func corazaDirectives(waf *doblurav1alpha1.EnvWAF) []string {
+	engine := "On"
+	if waf.Enforcement == doblurav1alpha1.WAFDetect {
+		engine = "DetectionOnly"
+	}
+	out := []string{
+		"SecRuleEngine " + engine,
+		// The body is not buffered. Odoo moves attachments and database dumps
+		// through ordinary POSTs, and a WAF that buffers those to inspect them
+		// turns a 200 MB restore into the proxy's memory problem. The rules below
+		// are about paths, and paths are in phase 1.
+		"SecRequestBodyAccess Off",
+	}
+
+	// Long polling is EXCLUDED before anything else, and this is the rule that
+	// stops the WAF from being blamed for a fault nobody can attribute.
+	//
+	// A websocket connection is an HTTP request that never finishes. Inspecting it
+	// either holds it until something times out or refuses it outright, and Odoo
+	// then loses chat, notifications and every live update — while every page still
+	// loads, so it reads as "Odoo is broken" and not as "the firewall we turned on
+	// last Tuesday". Written by doblura rather than left to whoever configures it,
+	// because the person who would remember is the person who already knows.
+	out = append(out,
+		`SecRule REQUEST_URI "@beginsWith /websocket" "id:1000,phase:1,pass,nolog,ctl:ruleEngine=Off"`,
+		`SecRule REQUEST_URI "@beginsWith /longpolling/" "id:1001,phase:1,pass,nolog,ctl:ruleEngine=Off"`,
+	)
+
+	if waf.BlocksDatabaseManager() {
+		// /web/database/* creates, drops, backs up and restores databases. Odoo's
+		// own list_db = False already hides it and doblura sets that, so this is
+		// the second lock — the one that still holds if somebody edits the
+		// configuration, restores a dump carrying its own odoo.conf, or runs an
+		// image with different defaults.
+		out = append(out,
+			`SecRule REQUEST_URI "@beginsWith /web/database/" `+
+				`"id:1100,phase:1,deny,status:404,log,msg:'doblura: the database manager is not reachable from outside'"`)
+	}
+
+	if waf.BlocksRPC() {
+		// Off by default. The external API is how integrations and the customer's
+		// own scripts talk to Odoo, and closing it at the edge breaks them from a
+		// place nobody thinks to look.
+		out = append(out,
+			`SecRule REQUEST_URI "@beginsWith /jsonrpc" `+
+				`"id:1200,phase:1,deny,status:404,log,msg:'doblura: RPC is closed on this environment'"`,
+			`SecRule REQUEST_URI "@beginsWith /xmlrpc/" `+
+				`"id:1201,phase:1,deny,status:404,log,msg:'doblura: RPC is closed on this environment'"`)
+	}
+
+	return append(out, waf.ExtraDirectives...)
 }

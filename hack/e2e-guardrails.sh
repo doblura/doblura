@@ -367,6 +367,19 @@ check "an issuer with no kind is refused"            "$TEN  certIssuer: letsencr
 # places, and a name alone would be resolved by guessing.
 check "an issuer of an invented kind"                "$TEN  certIssuer: Wizard/merlin" rejected
 
+check "the WAF can be off, and says so"    "$ENV  data: {type: Demo}
+  exposure: {waf: {mode: None}}" ok
+check "in-cluster inspection"             "$ENV  data: {type: Demo}
+  exposure: {waf: {mode: InCluster, enforcement: Detect}}" ok
+# Provider mode passes annotations to somebody else's controller. With none,
+# doblura would report a WAF that nothing was asked to switch on.
+check "provider mode needs annotations"   "$ENV  data: {type: Demo}
+  exposure: {waf: {mode: Provider}}" rejected
+check "provider mode with annotations"    "$ENV  data: {type: Demo}
+  exposure: {waf: {mode: Provider, annotations: {'alb.ingress.kubernetes.io/wafv2-acl-arn': 'arn:x'}}}" ok
+check "an enforcement that is not one"    "$ENV  data: {type: Demo}
+  exposure: {waf: {mode: InCluster, enforcement: Maybe}}" rejected
+
 check "an allowlist of networks"  "$ENV  data: {type: Demo}
   exposure: {allowFrom: ['203.0.113.0/24', '198.51.100.7/32']}" ok
 check "hsts can be turned off"    "$ENV  data: {type: Demo}

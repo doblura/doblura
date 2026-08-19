@@ -640,6 +640,72 @@ spec:
                       no limit falls over on its own the moment a rude crawler shows up.
                     format: int32
                     type: integer
+                  waf:
+                    description: WAF inspects requests before Odoo sees them.
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations go on the Ingress for Provider mode,
+                          verbatim.
+                        type: object
+                      blockDatabaseManager:
+                        default: true
+                        description: |-
+                          BlockDatabaseManager refuses /web/database/*, which creates, drops,
+                          backs up and restores databases.
+
+                          On by default. Odoo's own list_db = False already hides it and doblura sets
+                          that, so this is the second lock rather than the first — and it is the lock
+                          that still holds if somebody edits the configuration, restores a dump with
+                          its own odoo.conf, or runs an image that ships different defaults.
+                        type: boolean
+                      blockRPC:
+                        description: |-
+                          BlockRPC refuses /jsonrpc and /xmlrpc/*.
+
+                          OFF by default, and it must be: the external API is how integrations,
+                          e-commerce fronts and the customer's own scripts talk to Odoo, and turning
+                          it off at the edge breaks them silently and from a place nobody thinks to
+                          look. On for an environment nothing integrates with, which is most staging.
+                        type: boolean
+                      enforcement:
+                        default: Block
+                        description: |-
+                          Enforcement is Block or Detect. Detect first is the right order on an
+                          environment somebody depends on: a rule that turns out to match a
+                          legitimate request blocks a customer's work, and the way to find that out
+                          is to watch it for a week rather than to reason about it.
+                        enum:
+                        - Block
+                        - Detect
+                        type: string
+                      extraDirectives:
+                        description: |-
+                          ExtraDirectives are appended verbatim, for rules doblura does not write.
+
+                          The escape hatch, and it is a sharp one: a directive Coraza cannot parse
+                          stops the whole WAF from starting, and it then lets everything through with
+                          the reason only in the proxy's log. Change these on a Detect environment
+                          first.
+                        items:
+                          type: string
+                        type: array
+                      mode:
+                        default: None
+                        description: WAFMode is who inspects requests, if anybody.
+                        enum:
+                        - None
+                        - InCluster
+                        - Provider
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'Provider mode passes annotations to the load balancer''s
+                        own controller, so it needs at least one: with none, doblura
+                        would report a WAF that nothing was asked to switch on'
+                      rule: self.mode != 'Provider' || (has(self.annotations) && size(self.annotations)
+                        > 0)
                 type: object
                 x-kubernetes-validations:
                 - message: 'a public environment cannot be left unauthenticated: set
@@ -1393,6 +1459,22 @@ spec:
                 - DefaultCertificate
                 type: string
               url:
+                type: string
+              waf:
+                description: |-
+                  WAF is what was configured to inspect requests, and it is worth being
+                  precise about what this does NOT say.
+
+                  It reports the mode doblura wrote, not that inspection is happening. Coraza
+                  fails OPEN: a directive it cannot parse stops the WAF from starting and
+                  every request then passes uninspected, with the reason only in the ingress
+                  proxy's log. In Provider mode doblura only copied annotations and never saw
+                  the thing they configure. Neither is something this operator can check, and
+                  a status that implied otherwise would be worse than no status.
+                enum:
+                - None
+                - InCluster
+                - Provider
                 type: string
             type: object
         type: object
