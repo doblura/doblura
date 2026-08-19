@@ -1,0 +1,90 @@
+{{define "status.html"}}<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Is it working? · Doblura</title><link rel="stylesheet" href="/assets/console.css">
+{{/* Refreshes itself, because this is the one page somebody leaves open during an
+     outage, and a meta refresh needs no JavaScript. Sixty seconds: short enough
+     that the screen is not lying, long enough that it is not a load generator on
+     the cluster it is reporting on. */}}
+<meta http-equiv="refresh" content="60">
+</head><body class="plain">
+{{$d := .Data}}
+<div class="statuspage">
+  <header>
+    <div class="mark">dob<span>l</span>ura</div>
+    <p class="lede">Looked at {{$d.LookedAt}}. This page checks again every minute
+      on its own — or <a class="link" href="{{if $d.Scope}}/status/{{$d.Scope}}{{else}}/status{{end}}">look now</a>.</p>
+  </header>
+
+  {{if $d.Denied}}
+    <div class="answer unknown">
+      <span class="icon">{{icon "unknown"}}</span>
+      <div><p class="big">We cannot tell you right now</p>
+        <p>This page could not read the status. Send whoever looks after your
+          Odoo exactly this and they will know what it means:</p>
+        {{if not $d.Scope}}<p class="hint">The link you were given may be missing
+          your name at the end — a status link looks like
+          <span class="mono">/status/your-name</span>.</p>{{end}}
+        <p class="mono small">{{$d.Denied}}</p></div>
+    </div>
+  {{else if not $d.Rows}}
+    <div class="answer unknown">
+      <span class="icon">{{icon "unknown"}}</span>
+      <div><p class="big">There is nothing here to show you</p>
+        <p>Your account can sign in but is not attached to any environment yet.
+          Whoever set up your access can attach it.</p></div>
+    </div>
+  {{else}}
+
+    {{/* One sentence first. Most visits are somebody checking whether it is them
+         or us, and that answer should not require reading a table. */}}
+    {{if $d.Everything}}
+      <div class="answer up">
+        <span class="icon">{{icon "up"}}</span>
+        <div><p class="big">{{if $d.Multiple}}Everything is working{{else}}It is working{{end}}</p>
+          <p>If something still looks wrong to you, it is worth reporting — this
+            page only knows whether the server is answering, not whether it is
+            answering correctly.</p></div>
+      </div>
+    {{end}}
+
+    {{range $d.Rows}}
+    <div class="card pad live">
+      <div class="live-head">
+        <div>
+          <p class="big">{{.Headline}}</p>
+          <p class="sub">{{if $d.Multiple}}{{.Name}}{{if .Purpose}} · {{.Purpose}}{{end}}
+            {{else}}Your Odoo{{end}}{{if .Since}} · this has been the case for {{.Since}}{{end}}</p>
+        </div>
+        <span class="state state-{{.State}}">{{icon .State}}{{stateWord .State}}</span>
+      </div>
+
+      {{if .Detail}}<p class="hint">{{.Detail}}</p>{{end}}
+
+      {{/* Load is only a question while it is running. Saying "nobody is
+           measuring how hard it is working" under "It is not working" reads as a
+           second fault, and the reason there is no figure is that there is
+           nothing to measure. */}}
+      {{if .Running}}
+        {{if .Load}}
+          <p class="hint"><b>{{.Load}}</b>{{if .LoadDetail}} — {{.LoadDetail}}{{end}}</p>
+        {{else}}
+          <p class="hint">Nobody is measuring how hard it is working, so this page
+            cannot tell you whether it is under load.</p>
+        {{end}}
+      {{end}}
+
+      {{if .Address}}<p><a class="btn ghost" href="{{.Address}}" rel="noopener noreferrer">Open it</a></p>{{end}}
+    </div>
+    {{end}}
+
+    <p class="fineprint">What this page can and cannot tell you: it knows whether
+      the server is running and answering, and how much memory it is using against
+      what it was given. It does not know whether a report is wrong, whether an
+      import finished, or whether something you did yesterday saved. For those,
+      tell whoever looks after your Odoo — this page is not a substitute for
+      saying something is wrong.</p>
+  {{end}}
+</div>
+</body></html>
+{{end}}

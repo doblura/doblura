@@ -440,6 +440,29 @@ dl.kv dd { margin: 0; font-size: 14px; }
 
 /* sign-in */
 body.centred { display: grid; place-items: center; min-height: 100vh; padding: 24px; background: var(--app); }
+
+/* ── the customer's status page ──
+   A page with no rail, one column, and larger type than the operator's screens.
+   Its reader is not sitting at a workstation with the console open all day: they
+   have been sent a link, on a phone, because something looks wrong. Everything
+   here is in service of that — one column, a wide measure, and the answer big
+   enough to read at arm's length. */
+body.plain { min-height: 100vh; padding: 32px 20px 56px; background: var(--app); }
+.statuspage { width: 100%; max-width: 640px; margin: 0 auto; display: grid; gap: 14px; }
+.statuspage > header { margin-bottom: 6px; }
+.statuspage .mark { font-size: 20px; font-weight: 660; letter-spacing: -0.02em; color: var(--ink); }
+.statuspage .mark span { color: var(--accent); }
+.statuspage .lede { margin-top: 4px; color: var(--ink-3); font-size: 13.5px; }
+.statuspage .answer .big { font-size: 19px; }
+.statuspage .fineprint { margin-top: 10px; }
+
+.live { display: grid; gap: 10px; }
+/* The headline and the state pill on one line, and the pill pushed to the end so
+   several environments read as a column of states rather than as ragged text. */
+.live-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.live-head .big { font-size: 17.5px; font-weight: 620; letter-spacing: -0.015em; }
+.live-head .sub { margin-top: 2px; color: var(--ink-3); font-size: 13px; }
+.live p:last-child { margin-bottom: 0; }
 .signin {
   width: 100%; max-width: 372px;
   background: var(--surface); border: 1px solid var(--line);

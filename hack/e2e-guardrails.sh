@@ -535,7 +535,7 @@ grant_as "platform may NOT hand out cluster-admin" "access-guardrail-platform" "
 # Every persona carries the label the console lists it by, and a summary. Without
 # the label a persona is invisible on the page; without the summary the page shows
 # a role name and nothing about what it does.
-for p in viewer support qa consultancy platform; do
+for p in customer viewer support qa consultancy platform; do
   name=$(role_for "$p")
   sum=$(kubectl get clusterrole "$name" \
     -o jsonpath='{.metadata.annotations.doblura\.dev/summary}' 2>/dev/null)
@@ -543,6 +543,56 @@ for p in viewer support qa consultancy platform; do
   else printf '  FAIL  %s: label=%s summary=%s\n' "$p" "${name:-missing}" "${sum:-missing}"; fails=$((fails+1)); fi
 done
 
+# ── the customer's own screen ──
+#
+# The status page is the one screen in this console that might be opened by
+# somebody outside the company, so what its persona can reach is a security
+# boundary rather than a convenience. Bound to ONE namespace, deliberately: bound
+# cluster-wide it would show every customer the state of every other customer's
+# environments, and the page scopes by RBAC and nothing else.
+CUST=$(role_for customer)
+CNS=$ACCESS_NS
+OTHER=access-guardrail-other
+kubectl create namespace $OTHER >/dev/null 2>&1
+kubectl -n $CNS create rolebinding cust --clusterrole="$CUST" \
+  --group=access-guardrail-customer >/dev/null 2>&1
+
+# ncan asks about a resource, and takes a subresource SEPARATELY.
+#
+# Because `kubectl auth can-i get pods/log` answers a different question than the
+# one it looks like: it sends resource="pods/log" with an empty subresource, which
+# no RBAC rule is written against, and it came back "yes" for a persona whose real
+# log read is refused. `--subresource=log` is the form that matches how the request
+# is actually authorized. This mattered: the wrong form made a security check pass
+# for the wrong reason, on the one persona that might be a person outside the
+# company.
+ncan() { # label, verb, resource, namespace, yes|no, [subresource]
+  sub=""
+  # ${6:-} and not $6: this script runs under `set -u`, and an unset positional is
+  # a fatal error that killed every check below this one.
+  [ -n "${6:-}" ] && sub="--subresource=${6:-}"
+  # shellcheck disable=SC2086
+  out=$(kubectl auth can-i "$2" "$3" -n "$4" $sub \
+    --as=access-guardrail-probe --as-group=access-guardrail-customer 2>&1 | tr -d '[:space:]')
+  case "$out" in yes*) r=yes ;; *) r=no ;; esac
+  if [ "$5" = "$r" ]; then printf '  ok    %s\n' "$1"
+  else printf '  FAIL  %s: %s (expected %s)\n' "$1" "$r" "$5"; fails=$((fails+1)); fi
+}
+
+ncan "a customer sees their own environments"  list odooenvironments "$CNS"   yes
+ncan "and the deployments behind them"         list deployments      "$CNS"   yes
+ncan "but NOT another customer's"              list odooenvironments "$OTHER" no
+# The three that would make this page a liability.
+ncan "no logs: they carry live data"           get  pods             "$CNS"   no log
+ncan "no secrets"                              get  secrets          "$CNS"   no
+ncan "no backups"                              list odoobackups      "$CNS"   no
+# And nothing that changes anything. An environment restarted by the person
+# reporting the problem, while somebody is looking into it, is worse than one
+# nobody restarted.
+ncan "cannot restart anything"                 patch odooenvironments "$CNS"  no
+ncan "cannot delete anything"                  delete odooenvironments "$CNS" no
+
+kubectl delete namespace $OTHER --ignore-not-found --wait=false >/dev/null 2>&1
 kubectl delete namespace $ACCESS_NS --ignore-not-found --wait=false >/dev/null 2>&1
 for p in platform support; do
   kubectl delete clusterrolebinding "access-guardrail-$p" --ignore-not-found >/dev/null 2>&1

@@ -69,6 +69,71 @@ than an assignment — which turns a mystery into a question somebody can answer
 No pods/log here, deliberately. Logs are the one read that carries live customer
 data, so that starts at support and not before.
 */}}
+{{/*
+customer — the person whose Odoo this is.
+
+Every other persona here is for somebody who runs the platform. This one is for
+the person who phones them, and it exists so the "is it working?" screen can be
+handed to a customer without handing them anything else.
+
+Meant to be bound with a RoleBinding to ONE namespace, never cluster-wide: bound
+cluster-wide it would show every customer the state of every other customer's
+environments, which is the one disclosure this persona must not make. The console
+scopes that page by RBAC and nothing else, so the binding IS the scope.
+
+What it can read, and why each one is needed rather than convenient:
+
+  - odooenvironments, odootenants: the state of their own environments.
+  - deployments: whether requests are actually being served. The environment's own
+    phase says whether doblura finished setting it up, which is a different
+    question — a Ready environment whose pod crashed an hour ago still says Ready.
+  - pods: which pods belong to the environment, so the load figure adds up the
+    right ones.
+  - metrics.k8s.io: how much memory it is using against what it was given. Without
+    this the page says it cannot tell, which is the honest answer, so this one is
+    genuinely optional.
+
+What it deliberately cannot do:
+
+  - No pods/log. Logs carry live customer data and tracebacks, and this is the one
+    persona that might be a person outside your company.
+  - No secrets, no backups, no restores, and no writes of any kind. In particular
+    it cannot restart anything: an environment restarted by the person reporting a
+    problem, while somebody is looking into it, is worse than one nobody restarted.
+
+Worth being clear-eyed about what reading an OdooEnvironment discloses: its spec
+carries the database host and user, the repositories it builds from and the name
+of the secret holding its password — not the password. That is their own
+configuration rather than anybody else's, and it is more than the status page
+shows, because Kubernetes cannot grant "read these four fields". If that matters
+for a particular customer, do not give them an account: the page is not the only
+way to tell somebody their Odoo is up.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "doblura.fullname" . }}-customer
+  labels:
+    {{- include "doblura.labels" . | nindent 4 }}
+    doblura.dev/persona: customer
+  annotations:
+    doblura.dev/summary: >-
+      The customer whose Odoo it is. Sees whether their own environments are up
+      and how hard they are working, and can change nothing.
+rules:
+  - apiGroups: [doblura.dev]
+    resources: [odooenvironments, odootenants]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods]
+    verbs: [get, list]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -317,6 +382,7 @@ rules:
     resources: [clusterroles]
     verbs: [bind]
     resourceNames:
+      - {{ include "doblura.fullname" . }}-customer
       - {{ include "doblura.fullname" . }}-viewer
       - {{ include "doblura.fullname" . }}-support
       - {{ include "doblura.fullname" . }}-qa

@@ -235,6 +235,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /c/{ns}/{name}/images/remove", s.authenticated(s.handleRemoveImage))
 	mux.HandleFunc("POST /c/{ns}/{name}/images/promote", s.authenticated(s.handlePromoteImage))
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
+	// The customer's own screen. One URL for everybody: what appears on it is
+	// whatever the signed-in person is allowed to see, so nothing in the page
+	// decides the scope and nothing in the page can get the scope wrong.
+	mux.HandleFunc("GET /status", s.authenticated(s.handleStatus))
+	mux.HandleFunc("GET /status/{ns}", s.authenticated(s.handleStatus))
 	mux.HandleFunc("GET /access", s.authenticated(s.handleAccess))
 	mux.HandleFunc("POST /access/grant", s.authenticated(s.handleAccessGrant))
 	mux.HandleFunc("POST /access/revoke", s.authenticated(s.handleAccessRevoke))
