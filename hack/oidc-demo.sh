@@ -32,8 +32,13 @@ up() {
   # Two connectors on purpose. mockCallback is the only one that emits GROUPS,
   # which is the claim doblura's whole authorization model rests on; the password
   # connector is there so the ordinary "type a password at your IdP" path exists
-  # too. Testing only the password one would prove the redirect works and prove
-  # nothing about groups.
+  # for a human with a browser. Testing only the password one would prove the
+  # redirect works and prove nothing about groups.
+  #
+  # `check` below drives the mock connector and not the password one, because
+  # dex's sign-in form is a form: posting to it from curl means reproducing its
+  # own endpoints and hidden fields, which tests curl rather than doblura. Sign in
+  # as elena@ejemplo.test / demo-doblura-1234 in a browser to walk that path.
   cat > "$DEXDIR/config.yaml" <<YAML
 issuer: $ISSUER
 storage: {type: memory}
@@ -47,7 +52,11 @@ staticClients:
 enablePasswordDB: true
 staticPasswords:
   - email: "elena@ejemplo.test"
-    hash: "\$2a\$12\$16aYlH.WHgQ0m/9M3lJ0ru5RtEHXQTPHu9OWZE5rgcaEkNJm8Vy6."
+    # bcrypt of "demo-doblura-1234". A real hash and not a placeholder: an
+    # invented value here produces a provider nobody can sign in to, and the
+    # failure shows up as "username and password do not match" rather than as
+    # this file being wrong.
+    hash: "\$2a\$12\$pw.cjrFXyeKX1dbnZQO9.O65BQ8mrA3ZXhu34MXkS4pzAvHzkceky"
     username: "elena"
     userID: "1001"
 connectors:
