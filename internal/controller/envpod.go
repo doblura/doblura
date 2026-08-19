@@ -65,7 +65,15 @@ func envTierLabels(env *doblurav1alpha1.OdooEnvironment, tier string) map[string
 
 func envLabels(env *doblurav1alpha1.OdooEnvironment, component string) map[string]string {
 	l := envSelector(env)
-	l["doblura.dev/tier"] = "web"
+	// The tier label goes on the SERVING pod only. It was set unconditionally,
+	// so every phase Job and every backup pod claimed to be the web tier — which
+	// made the logs page list six pods and describe all of them as "web".
+	//
+	// A phase pod is a step, not a tier, and saying so is the difference between
+	// a list somebody can navigate and one they have to read the names of.
+	if component == "odoo" {
+		l["doblura.dev/tier"] = "web"
+	}
 	l["app.kubernetes.io/component"] = component
 	l["app.kubernetes.io/managed-by"] = "doblura"
 	l["doblura.dev/environment"] = env.Name

@@ -76,6 +76,7 @@ rules:
   - odoobackups
   - odoodatabases
   - odooinstances
+  - odoorestores
   - odootenants
   - reviewsets
   verbs:
@@ -89,6 +90,7 @@ rules:
   - odooenvironments/status
   - odooinstances/status
   - odoorehearsals/status
+  - odoorestores/status
   - odoosnapshots/status
   - odootenants/status
   - reviewsets/status

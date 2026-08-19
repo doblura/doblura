@@ -40,6 +40,20 @@ type Identity struct {
 	Name  string
 }
 
+// impersonatedConfig is the REST config that acts as the person.
+//
+// Separated from clientFor because logs and exec are subresources the generic
+// client does not model, and they need the config rather than the client — with
+// the same impersonation, so the authorisation story does not fork.
+func (s *Server) impersonatedConfig(id Identity) (*rest.Config, error) {
+	cfg := rest.CopyConfig(s.cfg)
+	cfg.Impersonate = rest.ImpersonationConfig{
+		UserName: id.User,
+		Groups:   id.Groups,
+	}
+	return cfg, nil
+}
+
 // clientFor builds a Kubernetes client that acts AS the person, not as the
 // console.
 //
@@ -49,10 +63,9 @@ type Identity struct {
 // The cost is a client build per request; the alternative is a cross-user data
 // leak that no test would catch.
 func (s *Server) clientFor(id Identity) (client.Client, error) {
-	cfg := rest.CopyConfig(s.cfg)
-	cfg.Impersonate = rest.ImpersonationConfig{
-		UserName: id.User,
-		Groups:   id.Groups,
+	cfg, err := s.impersonatedConfig(id)
+	if err != nil {
+		return nil, err
 	}
 	return client.New(cfg, client.Options{Scheme: s.scheme})
 }

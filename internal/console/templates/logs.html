@@ -1,0 +1,77 @@
+{{define "logs.html"}}{{template "top" .}}
+{{$e := .Data.Env}}{{$d := .Data}}
+<p class="crumbs"><a href="/customers">Customers</a> ›
+  <a href="/c/{{$e.Namespace}}/{{$e.Spec.ForTenant}}">{{$e.Spec.ForTenant}}</a> ›
+  <a href="/e/{{$e.Namespace}}/{{$e.Name}}">{{$e.Name}}</a> › logs</p>
+<div class="head">
+  <div>
+    <h1>Logs</h1>
+    <p class="sub">The last {{logTail}} lines. Reload to see more recent ones.</p>
+  </div>
+  <div class="spacer"></div>
+  <a class="btn ghost" href="/e/{{$e.Namespace}}/{{$e.Name}}/logs?pod={{$d.Selected}}&amp;container={{$d.Container}}">Reload</a>
+</div>
+
+{{if not $d.Pods}}
+<div class="empty">
+  <div class="big">Nothing is running</div>
+  <p>This environment has no pods right now, so there is nothing to read.</p>
+</div>
+{{else}}
+
+<div class="card scroll"><table>
+  <thead><tr><th>Pod</th><th>Part</th><th>State</th><th>Restarts</th><th></th></tr></thead>
+  <tbody>
+  {{range $d.Pods}}
+    <tr{{if eq .Name $d.Selected}} class="chosen"{{end}}>
+      <td class="mono">{{.Name}}</td>
+      <td>{{if .Tier}}{{.Tier}}{{else}}<span class="muted">a step</span>{{end}}</td>
+      <td>{{if .Good}}<span class="state state-up">{{icon "up"}}{{.State}}</span>
+          {{else}}<span class="muted">{{.State}}</span>{{end}}</td>
+      <td class="num">{{if gt .Restarts 0}}<span class="state state-degraded">{{icon "degraded"}}{{.Restarts}}</span>{{else}}0{{end}}</td>
+      <td class="num">{{if ne .Name $d.Selected}}
+        <a class="btn ghost small-btn" href="/e/{{$e.Namespace}}/{{$e.Name}}/logs?pod={{.Name}}">Read</a>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+
+{{if gt (len $d.Containers) 1}}
+<div class="tabs">
+  {{range $d.Containers}}
+    <a href="/e/{{$e.Namespace}}/{{$e.Name}}/logs?pod={{$d.Selected}}&amp;container={{.}}"
+       {{if eq . $d.Container}}class="on"{{end}}>{{.}}</a>
+  {{end}}
+</div>
+{{end}}
+
+{{if $d.Err}}
+<div class="problem">
+  <strong>These logs could not be read.</strong>
+  <pre>{{$d.Err}}</pre>
+</div>
+{{else if $d.Text}}
+<pre class="logs">{{$d.Text}}</pre>
+{{else}}
+<div class="empty">
+  <div class="big">This container has said nothing</div>
+  <p>It may not have started yet, or it may simply be quiet.</p>
+</div>
+{{end}}
+
+<details class="more">
+  <summary>Want a shell?</summary>
+  <div class="body">
+    <p class="hint">This page reads logs and does not offer a shell, on purpose.
+    An interactive terminal in a browser needs JavaScript and a WebSocket, and
+    this console loads neither — which is a property worth keeping on a page
+    holding a session that can act on your cluster. If you have the access, your
+    own kubectl is the honest way in:</p>
+    <pre class="logs small">{{$d.ExecCommand}}</pre>
+    <p class="hint">Whether that works is decided by Kubernetes, exactly as
+    everything on this page is: it needs <span class="mono">create pods/exec</span>
+    in this namespace, which the platform persona has and the others do not.</p>
+  </div>
+</details>
+{{end}}
+{{template "bottom" .}}{{end}}

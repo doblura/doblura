@@ -73,6 +73,14 @@ func (r *OdooBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
+	// When runs happened, and whether any of them worked.
+	//
+	// LastSuccess was declared and never written, so every backup reported "no
+	// copy has completed" for ever — including ones with copies on the volume,
+	// which is the one thing this field exists to tell you apart from a schedule
+	// that has been failing silently.
+	r.observeRuns(ctx, &b, st)
+
 	// Read back whatever the last run reported, and decide from it.
 	if listing := r.lastListing(ctx, &b); listing != nil {
 		keep, drop := doblurav1alpha1.Retain(listing, b.Spec.Retention, time.Now())
@@ -398,4 +406,39 @@ echo ">> backup finished"
   printf ']\n'
 } | tee %[5]s
 `, dir, prune.String(), db, envConf, backupListingPath)
+}
+
+// observeRuns records when this backup last ran and last worked.
+//
+// From the Jobs rather than the pods, because a Job carries a completion time
+// that outlives its pod — and the pod is what gets cleaned up first when the
+// history limit is reached.
+func (r *OdooBackupReconciler) observeRuns(
+	ctx context.Context,
+	b *doblurav1alpha1.OdooBackup,
+	st *doblurav1alpha1.OdooBackupStatus,
+) {
+	var jobs batchv1.JobList
+	if err := r.List(ctx, &jobs, client.InNamespace(b.Namespace),
+		client.MatchingLabels{"doblura.dev/backup": b.Name}); err != nil {
+		return
+	}
+
+	for i := range jobs.Items {
+		j := &jobs.Items[i]
+		if t := j.Status.StartTime; t != nil {
+			if st.LastRun == nil || t.After(st.LastRun.Time) {
+				st.LastRun = t.DeepCopy()
+			}
+		}
+		// Only a Job that actually completed. A Job with Succeeded > 0 and no
+		// CompletionTime is one Kubernetes is still finishing with, and taking
+		// its start time as a success would report a backup as having worked
+		// before it had.
+		if j.Status.Succeeded > 0 && j.Status.CompletionTime != nil {
+			if st.LastSuccess == nil || j.Status.CompletionTime.After(st.LastSuccess.Time) {
+				st.LastSuccess = j.Status.CompletionTime.DeepCopy()
+			}
+		}
+	}
 }

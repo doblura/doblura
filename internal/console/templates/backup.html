@@ -1,0 +1,101 @@
+{{define "backup.html"}}{{template "top" .}}
+{{$b := .Data.Backup}}{{$d := .Data}}{{$ns := $b.Namespace}}
+<p class="crumbs"><a href="/o/backups">Backups</a> › {{$b.Name}}</p>
+<div class="head">
+  <div>
+    <h1>{{$b.Name}}</h1>
+    <p class="sub">Copies of <a class="link" href="/e/{{$ns}}/{{$b.Spec.Environment}}">{{$b.Spec.Environment}}</a>,
+      kept {{$b.Spec.Retention.Daily}} daily, {{$b.Spec.Retention.Weekly}} weekly,
+      {{$b.Spec.Retention.Monthly}} monthly</p>
+  </div>
+</div>
+
+<div class="answer {{$d.State}}">
+  <span class="icon">{{icon $d.State}}</span>
+  <div>
+    <p class="big">{{$d.Word}}</p>
+    <p>{{if $b.Status.LastSuccess}}The last one completed {{since $b.Status.LastSuccess}} ago.
+       {{else}}No copy has completed.{{end}}
+       {{if $b.Status.Message}}{{$b.Status.Message}}{{end}}</p>
+    {{if $b.Status.Pending}}<p>{{len $b.Status.Pending}} {{if eq (len $b.Status.Pending) 1}}is{{else}}are{{end}}
+      due to be removed, because newer copies took their place —
+      {{if $b.Spec.Suspend}}but nothing will happen while this is paused.{{else}}on the next run.{{end}}</p>{{end}}
+  </div>
+</div>
+
+<h2 class="sect">Copies</h2>
+{{template "help" (safe `<p>Restoring <b>replaces</b> the database and the
+filestore of the environment you choose. Everything in it now is gone.</p>
+<p>The environment is stopped while it happens and started again afterwards, so
+there is an outage of however long the restore takes.</p>
+<p><b>Neutralise</b> is on by default and should stay on unless you are restoring
+production onto production: a production copy running somewhere else with its
+scheduled actions live will send real invoices to real customers from a machine
+nobody is watching.</p>`)}}
+
+{{if $d.Copies}}
+<div class="card scroll"><table>
+  <thead><tr><th>Taken</th><th>Kept as</th><th>Size</th>{{if $d.CanRestore}}<th></th>{{end}}</tr></thead>
+  <tbody>
+  {{range $d.Copies}}
+    <tr>
+      <td class="mono">{{.Name}}<div class="small muted">{{since .TakenAt}} ago</div></td>
+      <td>{{if .Tier}}{{.Tier}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="muted">{{mib .SizeBytes}}</td>
+      {{if $d.CanRestore}}
+      <td class="num">
+        <details class="panel inline">
+          <summary class="btn ghost small-btn">Restore…</summary>
+          <div class="body">
+            <form method="post" action="/b/{{$ns}}/{{$b.Name}}/restore" class="stack">
+              <input type="hidden" name="copy" value="{{.Name}}">
+              <p class="hint"><b>This replaces the database and filestore</b> of the
+              environment you pick with the copy taken {{since .TakenAt}} ago.
+              Everything in it now is gone, and it is stopped while this happens.</p>
+              <div><label for="into-{{.Name}}">Into</label>
+                <select id="into-{{.Name}}" name="into">
+                  {{range $d.Environments}}
+                    <option value="{{.}}"{{if eq . $b.Spec.Environment}} selected{{end}}>{{.}}</option>
+                  {{end}}
+                </select></div>
+              <label class="check"><input type="checkbox" name="neutralize" checked>
+                Disable scheduled actions and outgoing mail in the restored copy</label>
+              <button class="danger" type="submit">Replace it with this copy</button>
+            </form>
+          </div>
+        </details>
+      </td>
+      {{end}}
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{else}}
+<div class="empty">
+  <div class="big">No copies yet</div>
+  <p>{{if $b.Spec.Suspend}}This schedule is paused.{{else}}The first run is
+  scheduled for <span class="mono">{{$b.Spec.Schedule}}</span>.{{end}}</p>
+</div>
+{{end}}
+
+{{if $d.History}}
+<h2 class="sect">Restores from this backup</h2>
+<div class="card scroll"><table>
+  <thead><tr><th>When</th><th>Copy</th><th>Into</th><th>Asked by</th><th>Result</th></tr></thead>
+  <tbody>
+  {{range $d.History}}
+    <tr>
+      <td class="muted">{{if .Status.StartedAt}}{{since .Status.StartedAt}} ago{{else}}not started{{end}}</td>
+      <td class="mono small">{{.Spec.Copy}}</td>
+      <td>{{.Spec.Into}}</td>
+      <td>{{if .Status.RequestedBy}}{{.Status.RequestedBy}}{{else}}<span class="muted">not recorded</span>{{end}}</td>
+      <td>{{if eq (printf "%s" .Status.Phase) "Succeeded"}}<span class="state state-up">{{icon "up"}}done</span>
+          {{else if eq (printf "%s" .Status.Phase) "Failed"}}<span class="state state-down">{{icon "down"}}failed</span>
+          {{else}}<span class="state state-building">{{icon "building"}}{{.Status.Phase}}</span>{{end}}
+          {{if .Status.Message}}<div class="small muted">{{.Status.Message}}</div>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{end}}
+{{template "bottom" .}}{{end}}

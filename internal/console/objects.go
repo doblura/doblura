@@ -57,6 +57,12 @@ var objectKinds = []objectKind{
 		Columns: []string{"Name", "State", "Image", "Started", "Message"},
 	},
 	{
+		Slug: "backups", Title: "Backups", Resource: "odoobackups",
+		Lede: "Copies kept to put back. Not snapshots — a snapshot is anonymised " +
+			"so a rehearsal can hold realistic data; a backup is the original.",
+		Columns: []string{"Name", "Environment", "State", "Kept", "Last success"},
+	},
+	{
 		Slug: "snapshots", Title: "Snapshots", Resource: "odoosnapshots",
 		Lede: "Anonymised copies of production. Every one of these is customer data " +
 			"with the names changed, which is not the same as customer data removed.",
@@ -208,6 +214,30 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 					muted(rh.Spec.Image),
 					muted(humanSince(rh.Status.StartedAt)),
 					muted(rh.Status.Message),
+				},
+			})
+		}
+	case "backups":
+		var l doblurav1alpha1.OdooBackupList
+		if err := c.List(ctx, &l); err != nil {
+			view.Denied = true
+			break
+		}
+		for i := range l.Items {
+			b := &l.Items[i]
+			state, word := backupState(b)
+			kept := itoa(int(b.Status.Kept))
+			if n := len(b.Status.Pending); n > 0 {
+				kept += " (" + itoa(n) + " going)"
+			}
+			view.Rows = append(view.Rows, objectRow{
+				Name: b.Name, Namespace: b.Namespace,
+				Href: "/b/" + b.Namespace + "/" + b.Name,
+				Cells: []cell{
+					text(b.Spec.Environment),
+					verdict(state, word),
+					text(kept),
+					muted(humanSince(b.Status.LastSuccess)),
 				},
 			})
 		}

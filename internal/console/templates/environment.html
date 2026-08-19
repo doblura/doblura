@@ -8,6 +8,7 @@
     <p class="sub">{{$e.Spec.Data.Type}} data, {{$e.Spec.Lifecycle.Type | lower}}{{if $adv}} · {{$e.Namespace}}{{end}}</p>
   </div>
   <div class="spacer"></div>
+  {{if can $perms "get:pods/log:"}}<a class="btn ghost" href="/e/{{$e.Namespace}}/{{$e.Name}}/logs">Logs</a>{{end}}
   {{if $e.Status.URL}}<a class="btn" href="{{$e.Status.URL}}">Open it</a>{{end}}
 </div>
 

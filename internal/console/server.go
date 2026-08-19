@@ -113,6 +113,25 @@ func New(cfg *rest.Config, scheme *runtime.Scheme, opt Options) (*Server, error)
 		// something that takes a variable.
 		"safe": func(s string) template.HTML { return template.HTML(s) }, //nolint:gosec // literals only
 
+		// logTail so the page states the number it actually fetched rather than
+		// a number somebody typed into the prose and then changed in the code.
+		"logTail": func() int { return logTail },
+
+		// mib, because a size in bytes is a number people have to divide in
+		// their heads before it means anything.
+		"mib": func(n int64) string {
+			switch {
+			case n <= 0:
+				return "—"
+			case n < 1<<20:
+				return fmt.Sprintf("%d KiB", n>>10)
+			case n < 1<<30:
+				return fmt.Sprintf("%d MiB", n>>20)
+			default:
+				return fmt.Sprintf("%.1f GiB", float64(n)/float64(int64(1)<<30))
+			}
+		},
+
 		// docs builds a link into the documentation site.
 		//
 		// A helper rather than literal URLs in templates, so the host is in ONE
@@ -206,6 +225,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /customers", s.authenticated(s.handleCustomers))
 	mux.HandleFunc("GET /c/{ns}/{name}", s.authenticated(s.handleCustomer))
 	mux.HandleFunc("GET /e/{ns}/{name}", s.authenticated(s.handleEnvironment))
+	mux.HandleFunc("GET /e/{ns}/{name}/logs", s.authenticated(s.handleLogs))
 	mux.HandleFunc("POST /e/{ns}/{name}/delete", s.authenticated(s.handleDeleteEnvironment))
 	mux.HandleFunc("POST /e/{ns}/{name}/settings", s.authenticated(s.handleEnvironmentSettings))
 	mux.HandleFunc("POST /c/{ns}/{name}/environments", s.authenticated(s.handleCreateEnvironment))
@@ -217,6 +237,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /me", s.authenticated(s.handleWhoami))
 	mux.HandleFunc("GET /o/{kind}", s.authenticated(s.handleObjects))
 	mux.HandleFunc("GET /rail", s.authenticated(s.handleRail))
+	mux.HandleFunc("GET /b/{ns}/{name}", s.authenticated(s.handleBackup))
+	mux.HandleFunc("POST /b/{ns}/{name}/restore", s.authenticated(s.handleRestore))
 	mux.HandleFunc("GET /rs/{ns}/{name}", s.authenticated(s.handleReviewSet))
 	mux.HandleFunc("POST /rs/{ns}/{name}/pause", s.authenticated(s.handleReviewSetPause))
 	mux.HandleFunc("POST /c/{ns}/{name}/reviewsets", s.authenticated(s.handleCreateReviewSet))

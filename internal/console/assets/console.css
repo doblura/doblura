@@ -611,3 +611,24 @@ details.panel > summary.btn.ghost {
 }
 details.panel > summary.btn::-webkit-details-marker,
 details.panel > summary.btn::marker { display: none; content: ""; }
+
+/* ── logs ── */
+pre.logs {
+  margin: 0; padding: 16px 18px; max-height: 62vh; overflow: auto;
+  background: var(--rail); color: #c8d6d1; border: 1px solid var(--line);
+  border-radius: var(--r);
+  font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre; tab-size: 4;
+}
+pre.logs.small { max-height: none; font-size: 12px; padding: 12px 14px; }
+tr.chosen { background: var(--accent-soft); }
+tr.chosen td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+.tabs { display: flex; gap: 2px; margin: 14px 0 12px; flex-wrap: wrap; }
+.tabs a {
+  font-size: 13px; padding: 6px 13px; border-radius: 100px;
+  color: var(--ink-2); border: 1px solid var(--line); background: var(--surface);
+}
+.tabs a:hover { border-color: var(--accent); color: var(--accent); }
+.tabs a.on { background: var(--accent); border-color: var(--accent);
+             color: var(--accent-ink); font-weight: 580; }

@@ -60,6 +60,23 @@ webhooks:
         apiVersions: [v1alpha1]
         operations: [CREATE]
         resources: [odooenvironments]
+  - name: restorer.odoorestore.doblura.dev
+    clientConfig:
+      service:
+        name: {{ include "doblura.fullname" . }}-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-doblura-dev-v1alpha1-odoorestore
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    sideEffects: None
+    timeoutSeconds: 5
+    admissionReviewVersions: [v1]
+    rules:
+      - apiGroups: [doblura.dev]
+        apiVersions: [v1alpha1]
+        operations: [CREATE]
+        resources: [odoorestores]
   # doblura:webhooks-end mutating
 ---
 apiVersion: admissionregistration.k8s.io/v1
