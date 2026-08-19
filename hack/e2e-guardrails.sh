@@ -347,6 +347,123 @@ check "a new customer on any major"          "$TEN  images:
     - {name: a, image: 'x:1', odooVersion: '19.0', default: true}" ok
 echo
 
+# ── the copy taken before a restore replaces a database ──
+#
+# A restore is the one action in doblura that destroys data on purpose. The
+# acknowledgement naming the target catches a manifest copied from staging to
+# production; it catches nothing at all against the other mistake, which is the
+# right environment and the wrong copy. These check the rules that do.
+#
+# Real objects in a real namespace, because the webhook reads the TARGET to decide
+# — that is the whole point of the field, and a dry-run against nothing would test
+# the code path that refuses a missing environment.
+echo "-- the copy taken before a restore --"
+
+RNS=restore-guardrail
+kubectl delete namespace $RNS --ignore-not-found --wait=false >/dev/null 2>&1
+kubectl wait --for=delete namespace/$RNS --timeout=120s >/dev/null 2>&1
+kubectl create namespace $RNS >/dev/null 2>&1
+
+renv() { # name, purpose, lifecycle, dataType
+  printf 'apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: %s, namespace: '"$RNS"'}
+spec:
+  forTenant: rg
+  purpose: %s
+  image: odoo:19.0
+  size: small
+  data: {type: %s}
+  lifecycle: {type: %s}
+  database: {host: pg, user: odoo, passwordSecret: pg}
+' "$1" "$2" "$4" "$3"
+}
+
+kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: rg, namespace: $RNS}
+spec:
+  displayName: Restore guardrails
+  images:
+    - {name: i, image: 'odoo:19.0', odooVersion: '19.0', default: true}
+YAML
+renv prod-none      Production Persistent Live | kubectl apply -f - >/dev/null 2>&1
+renv prod-backed    Production Persistent Live | kubectl apply -f - >/dev/null 2>&1
+renv stage-backed   Staging    Persistent Live | kubectl apply -f - >/dev/null 2>&1
+renv review-nothing Review     Ephemeral  Demo | kubectl apply -f - >/dev/null 2>&1
+
+for e in prod-backed stage-backed review-nothing; do
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooBackup
+metadata: {name: b-$e, namespace: $RNS}
+spec:
+  environment: $e
+  schedule: "0 2 * * *"
+  suspend: true
+  destination: {type: Volume, volume: {claimName: nothing}}
+YAML
+done
+
+# rst: create a restore for real and report what admission decided, plus the value
+# safetyCopy was resolved to. Dry-run would be enough for the refusals, but the
+# resolved value only exists on an object the server actually wrote.
+rst() { # label, into, extra-spec, ok|rejected, expected-safetyCopy-or-dash
+  name="rg-$(echo "$1" | tr -cd 'a-z0-9')"
+  out=$(kubectl apply -f - 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRestore
+metadata: {name: $name, namespace: $RNS}
+spec:
+  backup: b-$2
+  copy: 2026-01-01T00-00-00Z
+  into: $2
+  acknowledgement: i-accept-this-replaces-the-database-and-filestore-of-$2
+$3
+YAML
+)
+  if printf '%s' "$out" | grep -q 'created'; then r=ok; else r=rejected; fi
+  if [ "$4" != "$r" ]; then
+    printf '  FAIL  %s: %s (expected %s)\n         %s\n' "$1" "$r" "$4" \
+      "$(printf '%s' "$out" | sed 's/.*denied the request: //' | head -c 160)"
+    fails=$((fails+1)); return
+  fi
+  if [ "$5" != "-" ]; then
+    got=$(kubectl -n $RNS get odoorestore "$name" -o jsonpath='{.spec.safetyCopy}' 2>/dev/null)
+    if [ "$got" != "$5" ]; then
+      printf '  FAIL  %s: safetyCopy resolved to %s (expected %s)\n' "$1" "${got:-unset}" "$5"
+      fails=$((fails+1)); return
+    fi
+  fi
+  printf '  ok    %s\n' "$1"
+}
+
+rst "production with nothing backing it up" prod-none  "" rejected -
+rst "production may not turn the copy off"  prod-backed "  safetyCopy: false" rejected -
+rst "production copies first"               prod-backed "" ok true
+rst "staging copies first too"              stage-backed "" ok true
+rst "a review environment does not"         review-nothing "" ok false
+
+# The target has to exist. It is the field that decides whose database is replaced,
+# and a typo in it must not produce an object that looks accepted.
+out=$(kubectl apply -f - 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRestore
+metadata: {name: rg-typo, namespace: $RNS}
+spec:
+  backup: b-prod-backed
+  copy: 2026-01-01T00-00-00Z
+  into: prod-backd
+  acknowledgement: i-accept-this-replaces-the-database-and-filestore-of-prod-backd
+YAML
+)
+if printf '%s' "$out" | grep -q 'no environment called'; then printf '  ok    a typo in the target is refused by name\n'
+else printf '  FAIL  a typo in the target: %s\n' "$(printf '%s' "$out" | head -c 140)"; fails=$((fails+1)); fi
+
+kubectl delete namespace $RNS --ignore-not-found --wait=false >/dev/null 2>&1
+echo
+
 # ── who may hand out access ──
 #
 # This section exists because the console now has a page that grants access, and a

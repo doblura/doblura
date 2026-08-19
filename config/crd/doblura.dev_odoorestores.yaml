@@ -98,6 +98,30 @@ spec:
                   restoring production onto production, which is the rarer case and the one
                   worth having to say out loud.
                 type: boolean
+              safetyCopy:
+                description: |-
+                  SafetyCopy takes a backup of what is in the target NOW, before replacing it.
+
+                  This is the guardrail that matters, and it is worth saying why it is a copy
+                  rather than another acknowledgement to type. The acknowledgement names the
+                  target, which stops a manifest copied from staging to production — but
+                  people paste the acknowledgement out of the error message, and no string
+                  helps at all against the other mistake, which is restoring the RIGHT
+                  environment from the WRONG copy. That one is only survivable if there is a
+                  way back.
+
+                  So the restore Job takes a copy first and the restore only happens if that
+                  copy succeeded. A failed safety copy means no restore, which is the correct
+                  order: refusing to replace a database is recoverable, replacing it with no
+                  way back is not.
+
+                  Deliberately NOT given a schema default. A default here is applied before
+                  admission, which would make the field indistinguishable from one somebody
+                  set, and the whole point is that the answer depends on the target: a
+                  production or staging environment gets one, a review environment nobody
+                  will miss does not. The webhook resolves it, and refuses to turn it off for
+                  Production at all.
+                type: boolean
               timeout:
                 default: 4h
                 description: Timeout bounds the restore.
@@ -204,6 +228,18 @@ spec:
                 description: |-
                   RequestedBy is who asked, taken from the authenticated identity and not
                   from anything the client sent.
+                type: string
+              safetyCopy:
+                description: |-
+                  SafetyCopy is the name of the copy taken of what WAS in the target, and
+                  SafetyCopyIn is the OdooBackup holding it.
+
+                  On this object rather than only on the backup, because this is the record of
+                  what was replaced and the way back belongs beside it. Somebody looking at a
+                  bad afternoon has one object that says what was restored, who asked, and
+                  what to restore to undo it.
+                type: string
+              safetyCopyIn:
                 type: string
               startedAt:
                 description: |-

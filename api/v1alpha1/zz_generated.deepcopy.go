@@ -1522,6 +1522,11 @@ func (in *OdooRestoreSpec) DeepCopyInto(out *OdooRestoreSpec) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.SafetyCopy != nil {
+		in, out := &in.SafetyCopy, &out.SafetyCopy
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Timeout != nil {
 		in, out := &in.Timeout, &out.Timeout
 		*out = new(v1.Duration)

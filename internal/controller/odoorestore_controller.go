@@ -6,9 +6,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -66,10 +68,24 @@ func (r *OdooRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// the volume rather than trusting the name: a typo would otherwise produce a
 	// Job that scales the environment down, finds nothing, and leaves it down.
 	if !backupHasCopy(backup, rs.Spec.Copy) {
-		return r.failRestore(ctx, &rs, st, "NoSuchCopy", fmt.Errorf(
-			"backup %q has no copy called %q. It keeps %d: %s",
-			rs.Spec.Backup, rs.Spec.Copy, len(backup.Status.Copies),
-			copyNames(backup)))
+		// Unless doblura wrote it itself, as the copy taken before an earlier
+		// restore. Those are on the volume the moment the restore finishes, and
+		// they are NOT in status.copies until the backup's next scheduled run
+		// re-lists the volume — which on a nightly schedule is up to a day away.
+		//
+		// That gap made the one thing the safety copy exists for impossible:
+		// undoing a bad restore was refused, with a message saying the copy did
+		// not exist, while the file sat on the volume. Found by trying it.
+		//
+		// This is not a hole in the check. The check exists so a typo does not
+		// take an environment down for nothing, and a name doblura recorded
+		// itself is not a typo. The Job still refuses if the file is not there.
+		if from := r.recordedSafetyCopy(ctx, &rs); from == "" {
+			return r.failRestore(ctx, &rs, st, "NoSuchCopy", fmt.Errorf(
+				"backup %q has no copy called %q. It keeps %d: %s",
+				rs.Spec.Backup, rs.Spec.Copy, len(backup.Status.Copies),
+				copyNames(backup)))
+		}
 	}
 
 	if st.StartedAt == nil {
@@ -89,7 +105,15 @@ func (r *OdooRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.failRestore(ctx, &rs, st, "CannotStop", err)
 	}
 
-	job, err := r.ensureRestoreJob(ctx, &rs, backup, env)
+	// Where the copy of the CURRENT contents goes, if one is being taken. The
+	// webhook already refused the cases where there is nowhere to put it, so an
+	// empty answer here means no copy was asked for.
+	safety, err := r.safetyDestination(ctx, &rs, env, backup)
+	if err != nil {
+		return r.failRestore(ctx, &rs, st, "NoSafetyDestination", err)
+	}
+
+	job, err := r.ensureRestoreJob(ctx, &rs, backup, env, safety)
 	if err != nil {
 		return r.failRestore(ctx, &rs, st, "CannotStart", err)
 	}
@@ -102,6 +126,16 @@ func (r *OdooRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		now := metav1.Now()
 		st.FinishedAt, st.Phase = &now, doblurav1alpha1.RestoreSucceeded
 		st.Message = fmt.Sprintf("%s restored into %s", rs.Spec.Copy, rs.Spec.Into)
+		// The way back, recorded on the object that did the replacing. Read from
+		// what the Job printed rather than computed here: the Job is what chose
+		// the timestamp, and a name computed twice is a name that can differ.
+		if safety != nil {
+			if taken := r.safetyCopyTaken(ctx, &rs); taken != "" {
+				st.SafetyCopy, st.SafetyCopyIn = taken, safety.Backup
+				st.Message += fmt.Sprintf(
+					"; what was in it is copy %s of backup %s", taken, safety.Backup)
+			}
+		}
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
 			Type: restoreDoneCondition, Status: metav1.ConditionTrue,
 			Reason: "Restored", Message: st.Message, ObservedGeneration: rs.Generation,
@@ -196,6 +230,7 @@ func (r *OdooRestoreReconciler) ensureRestoreJob(
 	rs *doblurav1alpha1.OdooRestore,
 	b *doblurav1alpha1.OdooBackup,
 	env *doblurav1alpha1.OdooEnvironment,
+	safety *safetyDestination,
 ) (*batchv1.Job, error) {
 	name := "restore-" + rs.Name
 	var live batchv1.Job
@@ -213,13 +248,50 @@ func (r *OdooRestoreReconciler) ensureRestoreJob(
 	}
 
 	pod := envJobPod(env, envPhaseStep{"restore", "", "", func(*doblurav1alpha1.OdooEnvironment) string {
-		return backupRestoreScript(rs, b, env)
+		return backupRestoreScript(rs, b, env, safety)
 	}})
 	vols, mounts := backupDestination(&b.Spec.Destination)
+
+	// A second mount when the safety copy goes to a different volume, which is
+	// the normal case: the copy of what is in the target belongs on the target's
+	// own backup volume, and the copy being restored came from wherever it came
+	// from. Same claim, one mount — Kubernetes refuses two volumes with one name,
+	// and two mounts of one claim at two paths is pointless.
+	if safety != nil && safety.Separate {
+		vols = append(vols, corev1.Volume{
+			Name: safetyVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: safety.ClaimName,
+				},
+			},
+		})
+		mounts = append(mounts, corev1.VolumeMount{
+			Name: safetyVolumeName, MountPath: safetyMountPath,
+		})
+	}
+
 	pod.Spec.Volumes = append(pod.Spec.Volumes, vols...)
 	for i := range pod.Spec.Containers {
 		pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts, mounts...)
+		// The name of the copy comes back through the termination message, like
+		// every other read-back in this operator. The first version searched the
+		// pod's LOGS for the marker and found nothing twice over: the label it
+		// filtered on was set on the Job and Kubernetes does not copy Job labels
+		// onto pods, and even with the right label a successful container's
+		// message is the file's contents and not its output. So the script writes
+		// the file, and the restore's status stopped being silently empty.
+		pod.Spec.Containers[i].TerminationMessagePath = safetyNamePath
+		pod.Spec.Containers[i].TerminationMessagePolicy =
+			corev1.TerminationMessageFallbackToLogsOnError
 	}
+
+	// And the pods carry the label the read-back filters on, which is a different
+	// field from the Job's own labels.
+	if pod.Labels == nil {
+		pod.Labels = map[string]string{}
+	}
+	pod.Labels["doblura.dev/restore"] = rs.Name
 
 	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
@@ -253,6 +325,7 @@ func backupRestoreScript(
 	rs *doblurav1alpha1.OdooRestore,
 	b *doblurav1alpha1.OdooBackup,
 	env *doblurav1alpha1.OdooEnvironment,
+	safety *safetyDestination,
 ) string {
 	db := envDBName(env)
 	file := fmt.Sprintf("%s/%s/%s.zip", backupMountPath, b.Name, rs.Spec.Copy)
@@ -287,7 +360,7 @@ func backupRestoreScript(
 	// environment has no database at all and the restore has not started.
 	force := " --force"
 
-	return fmt.Sprintf(`
+	return safetyCopyScript(env, safety) + fmt.Sprintf(`
 if ! command -v click-odoo-restoredb >/dev/null 2>&1; then
   echo "!! this image does not ship click-odoo-contrib, and restoring needs it." >&2
   exit 1
@@ -299,7 +372,7 @@ fi
 
 echo ">> restoring %[2]s from %[1]s"
 echo ">> this REPLACES the database and filestore of %[3]s"
-echo ">> restoring as a$(echo "%[6]s" | tr -d ' -')"
+echo ">> restoring as a $(echo "%[6]s" | tr -d ' -')"
 click-odoo-restoredb -c %[4]s%[5]s%[6]s%[7]s "%[2]s" "%[1]s"
 echo ">> restored"
 `, file, db, env.Name, envConf, neutralize, movement, force)
@@ -343,4 +416,214 @@ func (r *OdooRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Named("odoorestore").
 		Complete(r)
+}
+
+// ─────────────── the copy taken before the replacing ───────────────
+//
+// A restore is the one action in doblura that destroys data on purpose, and the
+// acknowledgement naming the target only catches one of the two ways it goes
+// wrong. The other one — the right environment, the wrong copy — is caught by
+// nothing a person types, and is only survivable if what was there is still
+// somewhere.
+//
+// So the safety copy is taken by the SAME Job, before the restore, with `set -e`
+// meaning a failed copy is a Job that never reaches the restore. That ordering is
+// the whole design: refusing to replace a database is recoverable, replacing it
+// with no way back is not.
+
+const (
+	safetyVolumeName = "safety"
+	safetyMountPath  = "/safety"
+	// safetyNamePath is where the Job leaves the name of the copy it took, for
+	// Kubernetes to lift into the container's termination message.
+	safetyNamePath = "/tmp/safety-copy"
+)
+
+// safetyDestination is where the copy of the current contents goes.
+type safetyDestination struct {
+	// Backup is the OdooBackup that owns the volume, and whose retention policy
+	// will eventually prune the copy like any other.
+	Backup string
+	// ClaimName is its volume.
+	ClaimName string
+	// Separate says the copy needs a mount of its own, because it is going to a
+	// different volume from the one the restore reads. Decided once, here, and
+	// read by both the pod builder and the script.
+	Separate bool
+	// Dir is the path the Job writes to, already resolved to whichever mount the
+	// pod ended up with.
+	Dir string
+}
+
+// sourceClaim is the claim the copy being restored comes from.
+func sourceClaim(b *doblurav1alpha1.OdooBackup) string {
+	if b.Spec.Destination.Volume == nil {
+		return ""
+	}
+	return b.Spec.Destination.Volume.ClaimName
+}
+
+// safetyDestination finds where a copy of the target's current contents can go.
+//
+// nil, nil means none is being taken, which the webhook has already decided —
+// including refusing the cases where one was required and there was nowhere to
+// put it. This re-derives the destination rather than reading it off an
+// annotation the webhook wrote, because an annotation is something a client can
+// set and this decides which volume gets written to.
+func (r *OdooRestoreReconciler) safetyDestination(
+	ctx context.Context,
+	rs *doblurav1alpha1.OdooRestore,
+	env *doblurav1alpha1.OdooEnvironment,
+	source *doblurav1alpha1.OdooBackup,
+) (*safetyDestination, error) {
+	if !rs.Spec.TakesSafetyCopy() {
+		return nil, nil
+	}
+
+	var list doblurav1alpha1.OdooBackupList
+	if err := r.List(ctx, &list, client.InNamespace(rs.Namespace)); err != nil {
+		return nil, err
+	}
+	var chosen *doblurav1alpha1.OdooBackup
+	for i := range list.Items {
+		b := &list.Items[i]
+		if b.Spec.Environment != env.Name || b.Spec.Destination.Volume == nil {
+			continue
+		}
+		if chosen == nil || b.Name < chosen.Name {
+			chosen = b
+		}
+	}
+	if chosen == nil {
+		// The webhook refuses this on the way in, so reaching it means the
+		// backup was deleted between the request and now. Refused rather than
+		// quietly restoring without a copy: the person who asked was told there
+		// would be one.
+		return nil, fmt.Errorf(
+			"a copy of %s was to be taken first, but no OdooBackup with a volume "+
+				"is copying it any more — it was deleted after this restore was "+
+				"asked for. Nothing has been changed", env.Name)
+	}
+
+	// One decision, made once. Whether the copy needs its own mount and where the
+	// Job writes it are the same question, and the first version of this answered
+	// it in two places — which writes the copy into the SOURCE volume the moment
+	// the two answers disagree, where the target's retention never sees it and it
+	// sits for ever.
+	claim := chosen.Spec.Destination.Volume.ClaimName
+	separate := claim != sourceClaim(source)
+	root := backupMountPath
+	if separate {
+		root = safetyMountPath
+	}
+
+	return &safetyDestination{
+		Backup:    chosen.Name,
+		ClaimName: claim,
+		Separate:  separate,
+		Dir:       root + "/" + chosen.Name,
+	}, nil
+}
+
+// safetyCopyTaken reads back the name the Job chose.
+//
+// From the termination message, like every other read-back in this operator: the
+// Job picked the timestamp, and a name recomputed here would drift by however long
+// the Job waited to start.
+func (r *OdooRestoreReconciler) safetyCopyTaken(
+	ctx context.Context,
+	rs *doblurav1alpha1.OdooRestore,
+) string {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(rs.Namespace),
+		client.MatchingLabels{"doblura.dev/restore": rs.Name}); err != nil {
+		return ""
+	}
+	for i := range pods.Items {
+		for _, cs := range pods.Items[i].Status.ContainerStatuses {
+			if cs.State.Terminated == nil {
+				continue
+			}
+			for _, line := range strings.Split(cs.State.Terminated.Message, "\n") {
+				line = strings.TrimSpace(line)
+				if rest, ok := strings.CutPrefix(line, safetyMarker); ok {
+					return strings.TrimSpace(rest)
+				}
+				// On a failure the message is the tail of the LOG rather than the
+				// file, so the marker arrives among the ordinary output. Both
+				// shapes are read, because the failure case is the one where
+				// somebody most needs to know whether the copy exists.
+				if i := strings.Index(line, safetyMarker); i >= 0 {
+					return strings.TrimSpace(line[i+len(safetyMarker):])
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// safetyMarker is how the Job names the copy it took. One line, one prefix, so
+// the operator is not parsing prose.
+const safetyMarker = "SAFETY-COPY="
+
+// safetyCopyScript is the part of the restore that runs first.
+func safetyCopyScript(env *doblurav1alpha1.OdooEnvironment, dest *safetyDestination) string {
+	if dest == nil {
+		return `
+echo ">> no copy is being taken of this environment before it is replaced"
+`
+	}
+	db := envDBName(env)
+	return fmt.Sprintf(`
+if ! command -v click-odoo-backupdb >/dev/null 2>&1; then
+  echo "!! this image does not ship click-odoo-contrib, and the copy taken before" >&2
+  echo "!! replacing the database needs it. Nothing has been changed." >&2
+  exit 1
+fi
+
+mkdir -p "%[1]s"
+SAFETY=$(date -u +%%Y-%%m-%%dT%%H-%%M-%%SZ)
+echo ">> copying what is in %[2]s NOW, before replacing it"
+echo ">> into %[1]s/$SAFETY.zip"
+
+# Not "|| true". A failed copy has to stop the restore, because the copy is the
+# only thing that makes the restore undoable — and the whole point is that
+# refusing to replace a database is recoverable and replacing it blind is not.
+click-odoo-backupdb -c %[3]s "%[2]s" "%[1]s/$SAFETY.zip"
+
+# The name, written where the operator reads it back and echoed for whoever is
+# watching the log. It is what somebody restores to undo this.
+printf '%[5]s%%s\n' "$SAFETY" > %[6]s
+echo "%[4]s$SAFETY"
+echo ">> copy taken; the restore follows"
+`, dest.Dir, db, envConf, safetyMarker, safetyMarker, safetyNamePath)
+}
+
+// recordedSafetyCopy reports whether this copy is one doblura took itself, before
+// an earlier restore replaced the same environment.
+//
+// Returns the name of the restore that took it, for the message, or "" if none
+// did. Searched across the namespace rather than tracked in a field on the backup,
+// because the backup's status is rewritten wholesale from whatever the last
+// listing said — anything this controller wrote there would be erased by the next
+// reconcile, which is a worse kind of wrong than a small List.
+func (r *OdooRestoreReconciler) recordedSafetyCopy(
+	ctx context.Context,
+	rs *doblurav1alpha1.OdooRestore,
+) string {
+	var list doblurav1alpha1.OdooRestoreList
+	if err := r.List(ctx, &list, client.InNamespace(rs.Namespace)); err != nil {
+		return ""
+	}
+	for i := range list.Items {
+		other := &list.Items[i]
+		if other.Name == rs.Name {
+			continue
+		}
+		if other.Status.SafetyCopy == rs.Spec.Copy &&
+			other.Status.SafetyCopyIn == rs.Spec.Backup {
+			return other.Name
+		}
+	}
+	return ""
 }

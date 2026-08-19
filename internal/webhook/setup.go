@@ -98,7 +98,14 @@ func Register(mgr ctrl.Manager, o Options, caBundle []byte) error {
 		ExemptUsers:   exemptSet(o.ExemptUsers),
 		MaxPerCreator: int32(o.MaxEnvironmentsPerCreator), //nolint:gosec // a flag, bounded by the schema
 	}})
-	server.Register(RestorerPath, &admission.Webhook{Handler: &RestoreStamp{Decoder: decoder}})
+	server.Register(RestorerPath, &admission.Webhook{Handler: &RestoreStamp{
+		Decoder: decoder,
+		// GetAPIReader, not the cache: this decides whether a database is copied
+		// before being replaced, and the cache being a moment behind on a backup
+		// created in the console was enough to refuse a Production restore and to
+		// silently skip the copy on a Staging one. See RestoreStamp.Reader.
+		Reader: mgr.GetAPIReader(),
+	}})
 	server.Register(TenantPath, &admission.Webhook{Handler: &TenantGuard{
 		Decoder: decoder,
 		Reader:  mgr.GetAPIReader(),

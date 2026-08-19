@@ -81,10 +81,44 @@ type OdooRestoreSpec struct {
 	// +optional
 	Neutralize *bool `json:"neutralize,omitempty"`
 
+	// SafetyCopy takes a backup of what is in the target NOW, before replacing it.
+	//
+	// This is the guardrail that matters, and it is worth saying why it is a copy
+	// rather than another acknowledgement to type. The acknowledgement names the
+	// target, which stops a manifest copied from staging to production — but
+	// people paste the acknowledgement out of the error message, and no string
+	// helps at all against the other mistake, which is restoring the RIGHT
+	// environment from the WRONG copy. That one is only survivable if there is a
+	// way back.
+	//
+	// So the restore Job takes a copy first and the restore only happens if that
+	// copy succeeded. A failed safety copy means no restore, which is the correct
+	// order: refusing to replace a database is recoverable, replacing it with no
+	// way back is not.
+	//
+	// Deliberately NOT given a schema default. A default here is applied before
+	// admission, which would make the field indistinguishable from one somebody
+	// set, and the whole point is that the answer depends on the target: a
+	// production or staging environment gets one, a review environment nobody
+	// will miss does not. The webhook resolves it, and refuses to turn it off for
+	// Production at all.
+	// +optional
+	SafetyCopy *bool `json:"safetyCopy,omitempty"`
+
 	// Timeout bounds the restore.
 	// +kubebuilder:default="4h"
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+}
+
+// TakesSafetyCopy reports whether the current contents are copied first.
+//
+// Unset means NO, and that is only correct because the webhook always sets it:
+// reading an unset field as "no copy" in the controller, with a webhook that
+// cannot be bypassed for Production, keeps the decision in one place. If the
+// webhook is ever made optional this must become the other default.
+func (s *OdooRestoreSpec) TakesSafetyCopy() bool {
+	return s.SafetyCopy != nil && *s.SafetyCopy
 }
 
 // NeutralizesRestore reports whether the restored copy is neutralized.
@@ -116,6 +150,18 @@ type OdooRestoreStatus struct {
 	// from anything the client sent.
 	// +optional
 	RequestedBy string `json:"requestedBy,omitempty"`
+
+	// SafetyCopy is the name of the copy taken of what WAS in the target, and
+	// SafetyCopyIn is the OdooBackup holding it.
+	//
+	// On this object rather than only on the backup, because this is the record of
+	// what was replaced and the way back belongs beside it. Somebody looking at a
+	// bad afternoon has one object that says what was restored, who asked, and
+	// what to restore to undo it.
+	// +optional
+	SafetyCopy string `json:"safetyCopy,omitempty"`
+	// +optional
+	SafetyCopyIn string `json:"safetyCopyIn,omitempty"`
 
 	// Message is what went wrong, in the words of whatever said it.
 	// +optional
