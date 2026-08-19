@@ -114,10 +114,17 @@ remember on their last day.</p>
 shown first, because they are what an audit is looking for.</p>`))}}
 
 {{if $d.Denied}}
-  <div class="card pad"><p class="hint">You are not allowed to read grants, so this
-    is empty: {{$d.Denied}}</p>
-    <p class="hint">Reading who has access is itself a permission. Ask whoever
-      administers the platform — the message above names exactly what to give you.</p></div>
+  {{/* Doblura's words and the API server's, told apart.
+       They used to run together in one paragraph, so a refusal that names the
+       verb, the resource and the person — the thing somebody forwards to whoever
+       administers their groups — read as prose this page had written, and the
+       part worth copying was the part that looked least like something to copy. */}}
+  <div class="card pad">
+    <p class="hint">You are not allowed to read grants, so this is empty. Reading
+      who has access is itself a permission, and the message below names exactly
+      what to ask for.</p>
+    <div class="problem"><pre>{{$d.Denied}}</pre></div>
+  </div>
 {{else}}
 
 {{if $d.CanGrant}}
