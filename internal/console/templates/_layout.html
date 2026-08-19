@@ -45,6 +45,20 @@ every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}
     <div class="group"><span>Administration</span></div>
     {{template "navitem" dict "Href" "/access" "Path" .Path "Icon" "nav-people" "Label" "People and access"}}
   </nav>
+  {{/* The cluster picker, and only when there is more than one. A single-cluster
+       install sees nothing here — no picker, no banner, no hint that federation
+       exists. */}}
+  {{if .Clusters}}
+  <div class="clusters">
+    <div class="group"><span>Cluster</span></div>
+    <nav>
+      {{range .Clusters}}
+      <a href="/cluster?to={{.Name}}&amp;back={{$.Path}}"{{if .On}} class="on" aria-current="true"{{end}}
+         data-label="{{.Name}}">{{icon "nav-cluster"}}<span>{{.Name}}</span></a>
+      {{end}}
+    </nav>
+  </div>
+  {{end}}
   <div class="foot">
     <nav>
       {{template "navitem" dict "Href" "/me" "Path" .Path "Icon" "nav-access" "Label" "Your access"}}

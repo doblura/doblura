@@ -60,6 +60,22 @@ type Options struct {
 	// Namespace is where that Secret lives. Defaults to the pod's namespace.
 	Namespace string
 
+	// LocalClusterName is what the cluster this console runs in is called on
+	// screen. Defaults to "local", which is honest and unhelpful once there are
+	// four of them — name it after the thing people call it.
+	LocalClusterName string
+
+	// ClustersSecret holds one kubeconfig per OTHER cluster, one per key, in the
+	// console's own namespace.
+	//
+	// Each kubeconfig must authenticate as a ServiceAccount whose only permission
+	// in that cluster is `impersonate` on users and groups — the same deployment
+	// as locally. That is not a recommendation: a federation built on a
+	// credential that can read or write would make this console the one place
+	// holding access to every customer's cluster, which is the shape decision 4
+	// exists to avoid.
+	ClustersSecret string
+
 	// DevIdentity is "user:group,group" and bypasses OIDC entirely. Local only:
 	// it is announced in the interface on every page, because a console that
 	// looks real and authenticates nobody is worse than one that will not start.
@@ -74,11 +90,17 @@ type Server struct {
 	tpl    *template.Template
 	oidc   *oidcProvider
 	local  *localAccounts
+	// clusters is every OTHER cluster, by name. Empty on a single-cluster
+	// install, which is the case everything else must keep working for.
+	clusters map[string]*rest.Config
 }
 
 // New builds the console. It does not start listening.
 func New(cfg *rest.Config, scheme *runtime.Scheme, opt Options) (*Server, error) {
-	s := &Server{cfg: cfg, scheme: scheme, opt: opt}
+	if opt.LocalClusterName == "" {
+		opt.LocalClusterName = "local"
+	}
+	s := &Server{cfg: cfg, scheme: scheme, opt: opt, clusters: map[string]*rest.Config{}}
 
 	funcs := template.FuncMap{
 		"since": func(t *metaTime) string { return humanSince(t) },
@@ -156,6 +178,23 @@ func New(cfg *rest.Config, scheme *runtime.Scheme, opt Options) (*Server, error)
 			return nil, err
 		}
 		s.local = &localAccounts{c: c, namespace: opt.Namespace, name: opt.LocalAccountsSecret}
+	}
+
+	// Every other cluster, read once at startup. See clusters.go for why this is
+	// impersonation-only in each of them and not a control plane.
+	if opt.ClustersSecret != "" {
+		c, err := client.New(cfg, client.Options{Scheme: scheme})
+		if err != nil {
+			return nil, err
+		}
+		found, err := loadClusters(context.Background(), c, opt.Namespace, opt.ClustersSecret)
+		if err != nil {
+			// Refused at startup rather than degraded silently: a console that
+			// comes up missing half its clusters looks identical to one whose
+			// clusters have no environments in them.
+			return nil, err
+		}
+		s.clusters = found
 	}
 	if opt.Issuer != "" {
 		p, err := newOIDC(context.Background(), opt)
@@ -247,6 +286,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /rail", s.authenticated(s.handleRail))
 	// GET clears it and POST sets it. A GET that sets a scope is a link somebody
 	// can be sent; clearing is harmless, so that one stays a link.
+	mux.HandleFunc("GET /cluster", s.authenticated(s.handleCluster))
 	mux.HandleFunc("GET /scope", s.authenticated(s.handleScope))
 	mux.HandleFunc("POST /scope", s.authenticated(s.handleScope))
 	mux.HandleFunc("GET /b/{ns}/{name}", s.authenticated(s.handleBackup))
@@ -271,7 +311,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	log.Log.Info("console listening", "addr", s.opt.Addr, "auth", s.authMode())
+	// The clusters are named at startup, because "which clusters can this console
+	// see" is a question somebody asks after a deployment and should not have to
+	// answer by opening the interface and counting.
+	log.Log.Info("console listening", "addr", s.opt.Addr, "auth", s.authMode(),
+		"clusters", strings.Join(s.clusterNames(), ", "))
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}

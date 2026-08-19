@@ -22,6 +22,8 @@ package console
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	authzv1 "k8s.io/api/authorization/v1"
 	"k8s.io/client-go/rest"
@@ -38,6 +40,19 @@ type Identity struct {
 	// Email and Name are for display only. Authorization uses User and Groups.
 	Email string
 	Name  string
+
+	// Cluster is WHERE this request is looking, not who it is for.
+	//
+	// It sits here because the identity is built once per request and every call
+	// already carries it, and threading a second parameter through twenty-eight
+	// call sites would have been twenty-eight chances to pass the wrong one.
+	//
+	// It must never appear in an authorization decision, and there is nothing to
+	// decide: the console holds only impersonation in each cluster, so what a
+	// person may do THERE is answered by that cluster's own RBAC. Picking a
+	// cluster changes which API server is asked, never what the answer is allowed
+	// to be. Empty means the cluster the console runs in.
+	Cluster string
 }
 
 // impersonatedConfig is the REST config that acts as the person.
@@ -46,7 +61,11 @@ type Identity struct {
 // client does not model, and they need the config rather than the client — with
 // the same impersonation, so the authorisation story does not fork.
 func (s *Server) impersonatedConfig(id Identity) (*rest.Config, error) {
-	cfg := rest.CopyConfig(s.cfg)
+	base, err := s.configFor(id.Cluster)
+	if err != nil {
+		return nil, err
+	}
+	cfg := rest.CopyConfig(base)
 	cfg.Impersonate = rest.ImpersonationConfig{
 		UserName: id.User,
 		Groups:   id.Groups,
@@ -139,3 +158,44 @@ func (s *Server) allowed(ctx context.Context, id Identity, verbs ...Verb) (map[s
 
 // key is how a template asks about a verb it was given.
 func (v Verb) key() string { return v.Verb + ":" + v.Resource + ":" + v.Name }
+
+// configFor is how to reach a cluster.
+//
+// The console holds a credential per cluster and that credential can do exactly
+// one thing: impersonate. It is the same arrangement as locally, deployed once per
+// cluster, which is what keeps the property the whole package rests on — the
+// console has no permissions of its own, anywhere. A federation built on a
+// credential that could read or write would have quietly become one place holding
+// access to every customer.
+func (s *Server) configFor(name string) (*rest.Config, error) {
+	if name == "" || name == s.opt.LocalClusterName {
+		return s.cfg, nil
+	}
+	cfg, ok := s.clusters[name]
+	if !ok {
+		// Named and unknown. Refused rather than falling back to the local
+		// cluster: silently answering about a different cluster than the one on
+		// the screen is the worst thing this could do.
+		return nil, fmt.Errorf(
+			"there is no cluster called %q. This console knows: %s",
+			name, strings.Join(s.clusterNames(), ", "))
+	}
+	return cfg, nil
+}
+
+// clusterNames is every cluster this console can reach, local first.
+func (s *Server) clusterNames() []string {
+	out := []string{s.opt.LocalClusterName}
+	for name := range s.clusters {
+		out = append(out, name)
+	}
+	sort.Strings(out[1:])
+	return out
+}
+
+// Federated reports whether there is more than one cluster to look at.
+//
+// Everything about the interface stays exactly as it was when there is not, which
+// is decision 3: the open project has to remain completely usable on one cluster,
+// with no degraded mode and no reminder that a paid thing exists.
+func (s *Server) Federated() bool { return len(s.clusters) > 0 }

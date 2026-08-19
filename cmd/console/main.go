@@ -42,6 +42,12 @@ func main() {
 	flag.StringVar(&opt.GroupsClaim, "oidc-groups-claim", "groups", "claim carrying group membership")
 	flag.StringVar(&opt.LocalAccountsSecret, "local-accounts-secret", "",
 		"Secret holding local accounts (user: bcrypt-hash:group,group)")
+	flag.StringVar(&opt.LocalClusterName, "cluster-name", "local",
+		"what the cluster this console runs in is called on screen")
+	flag.StringVar(&opt.ClustersSecret, "clusters-secret", "",
+		"Secret holding one kubeconfig per OTHER cluster, one per key. Each must "+
+			"authenticate as a ServiceAccount whose only permission there is "+
+			"impersonate: the console holds no other access to any cluster")
 	flag.StringVar(&opt.Namespace, "namespace", "",
 		"namespace of the local accounts Secret; defaults to POD_NAMESPACE")
 	flag.StringVar(&opt.DevIdentity, "dev-identity", "",

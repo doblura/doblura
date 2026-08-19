@@ -156,6 +156,21 @@ console:
     # Secret holding key `clientSecret`. Read from the environment, never a flag.
     clientSecretSecret: ""
 
+  # What this cluster is called on screen. Only shown when there is more than one.
+  clusterName: local
+  # Secret holding one kubeconfig per OTHER cluster, one per key, in the release
+  # namespace. Each must authenticate as a ServiceAccount whose only permission in
+  # that cluster is `impersonate` on users and groups — the same deployment as
+  # locally.
+  #
+  # Not a recommendation: a federation built on a credential that can read or
+  # write makes this console the one place holding access to every customer's
+  # cluster, which is the shape DECISIONS.md rules out.
+  #
+  # Empty means one cluster, and then nothing about the interface changes: no
+  # picker, no banner, no mention.
+  clustersSecret: ""
+
   localAccounts:
     # Secret holding one key per user: "<bcrypt hash>:group,group".
     # Generate a hash with:  kubectl run -it --rm hash --image=<doblura image> \

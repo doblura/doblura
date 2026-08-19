@@ -294,6 +294,14 @@
         },
         "resources": {
           "type": "object"
+        },
+        "clusterName": {
+          "type": "string",
+          "description": "What the cluster this console runs in is called on screen. Only shown when there is more than one."
+        },
+        "clustersSecret": {
+          "type": "string",
+          "description": "Secret holding one kubeconfig per OTHER cluster, one per key, in the release namespace. Each must authenticate as a ServiceAccount whose only permission in that cluster is impersonate. Empty means one cluster, and then nothing about the interface changes."
         }
       }
     }

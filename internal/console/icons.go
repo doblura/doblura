@@ -59,9 +59,11 @@ var icons = map[string]template.HTML{
 
 	// Two people, for the page about who has access — distinct from nav-access,
 	// which is a key and means "what YOU can do".
-	"nav-people": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.4"/><path d="M3.2 19.5a5.8 5.8 0 0 1 11.6 0"/><path d="M16.2 5.2a3.4 3.4 0 0 1 0 5.6"/><path d="M18 14.6a5.8 5.8 0 0 1 2.8 4.9"/></svg>`,
-	"nav-shield": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 20 6v6c0 4.6-3.3 7.9-8 9.2-4.7-1.3-8-4.6-8-9.2V6z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg>`,
-	"nav-access": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="12" r="4.5"/><path d="M12.5 12H22"/><path d="M18 12v3.5"/><path d="M21 12v2.5"/></svg>`,
+	// Stacked layers, for the cluster picker.
+	"nav-cluster": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8.5 4.2L12 11.4 3.5 7.2z"/><path d="m3.5 12 8.5 4.2 8.5-4.2"/><path d="m3.5 16.6 8.5 4.2 8.5-4.2"/></svg>`,
+	"nav-people":  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.4"/><path d="M3.2 19.5a5.8 5.8 0 0 1 11.6 0"/><path d="M16.2 5.2a3.4 3.4 0 0 1 0 5.6"/><path d="M18 14.6a5.8 5.8 0 0 1 2.8 4.9"/></svg>`,
+	"nav-shield":  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.8 20 6v6c0 4.6-3.3 7.9-8 9.2-4.7-1.3-8-4.6-8-9.2V6z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg>`,
+	"nav-access":  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="12" r="4.5"/><path d="M12.5 12H22"/><path d="M18 12v3.5"/><path d="M21 12v2.5"/></svg>`,
 
 	"nav-docs": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H10a3 3 0 0 1 2 5.2V21a3 3 0 0 0-2-.8H5.5A1.5 1.5 0 0 1 4 18.7z"/><path d="M20 4.5A1.5 1.5 0 0 0 18.5 3H14a3 3 0 0 0-2 5.2V21a3 3 0 0 1 2-.8h4.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>`,
 

@@ -153,6 +153,12 @@ h1, h2, h3 { margin: 0; font-weight: 620; letter-spacing: -0.015em; }
 .rail nav a.on { background: var(--rail-hover); color: var(--rail-ink-strong); font-weight: 580; }
 .rail nav a.on svg { opacity: 1; color: var(--accent); }
 
+/* The cluster picker sits above the footer, with a rule of its own: which cluster
+   you are looking at changes what every page means, so it does not belong among
+   the pages. */
+.clusters { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--rail-line); }
+.clusters + .foot { margin-top: 0; }
+
 .rail .foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--rail-line); }
 .rail .who { padding: 12px 10px 2px; margin-top: 8px; border-top: 1px solid var(--rail-line);
              font-size: 13px; color: var(--rail-ink-strong); }
@@ -503,7 +509,13 @@ footer { color: var(--ink-3); font-size: 12px; margin-top: 44px;
           flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
   .rail .mark { padding: 0 12px 0 0; }
   .rail nav { flex-direction: row; flex-wrap: wrap; }
-  .rail .group, .rail .dot, .rail .foot { display: none; }
+  .rail .group, .rail .dot, /* The cluster picker sits above the footer, with a rule of its own: which cluster
+   you are looking at changes what every page means, so it does not belong among
+   the pages. */
+.clusters { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--rail-line); }
+.clusters + .foot { margin-top: 0; }
+
+.rail .foot { display: none; }
   .page > .inner { padding: 22px 18px 56px; }
 }
 
@@ -567,7 +579,13 @@ td form { margin: 0; }
   background: var(--accent); color: var(--accent-ink);
   font-size: 18px; font-weight: 700; letter-spacing: -0.03em; line-height: 1;
 }
-.shell.collapsed .rail .foot { border-top: 1px solid var(--rail-line); }
+.shell.collapsed /* The cluster picker sits above the footer, with a rule of its own: which cluster
+   you are looking at changes what every page means, so it does not belong among
+   the pages. */
+.clusters { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--rail-line); }
+.clusters + .foot { margin-top: 0; }
+
+.rail .foot { border-top: 1px solid var(--rail-line); }
 
 .rail-top { display: flex; align-items: center; gap: 8px; padding: 0 4px 22px; }
 .rail-top .mark { padding: 0 6px; flex: 1; }

@@ -81,12 +81,17 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "doblura.fullname" . }}-console
     namespace: {{ .Release.Namespace }}
-{{- if $local.secretName }}
+{{- if or $local.secretName $c.clustersSecret }}
 ---
 {{/*
-Reading the accounts Secret is scoped to that ONE Secret by name, in this one
-namespace. A Role over all Secrets would have been three fewer lines and would
-have handed a web-facing pod every credential the namespace holds.
+Reading these Secrets is scoped to them BY NAME, in this one namespace. A Role
+over all Secrets would have been three fewer lines and would have handed a
+web-facing pod every credential the namespace holds.
+
+The condition is `or` and not just the accounts secret: gating the whole Role on
+local accounts meant a console using single sign-on with several clusters could
+not read its own kubeconfigs, and would have failed to start with a permissions
+error naming a Secret the operator had definitely created.
 */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -95,10 +100,21 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: {{- include "doblura.labels" . | nindent 4 }}
 rules:
+{{- if $local.secretName }}
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [{{ $local.secretName | quote }}]
     verbs: [get, list, watch]
+{{- end }}
+{{- if $c.clustersSecret }}
+  # The kubeconfigs for the other clusters. By name, like the accounts secret:
+  # the console reads exactly two objects in its own namespace and has no other
+  # access anywhere, which is the property the whole package rests on.
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $c.clustersSecret | quote }}]
+    verbs: [get, list, watch]
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -184,6 +200,12 @@ spec:
             {{- end }}
             {{- with $local.secretName }}
             - --local-accounts-secret={{ . }}
+            {{- end }}
+            {{- with $c.clusterName }}
+            - --cluster-name={{ . }}
+            {{- end }}
+            {{- with $c.clustersSecret }}
+            - --clusters-secret={{ . }}
             {{- end }}
           env:
             - name: POD_NAMESPACE

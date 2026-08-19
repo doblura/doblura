@@ -50,6 +50,12 @@ type page struct {
 	Path string
 	// RailCollapsed is remembered across pages, unlike the checkbox it replaced.
 	RailCollapsed bool
+	// Clusters is the picker, empty on a single-cluster install — where nothing
+	// about this interface changes at all.
+	Clusters []clusterChoice
+	// Cluster is the one being looked at.
+	Cluster string
+
 	// Scope is the one customer this console is asking about, empty for all of
 	// them. Shown on every page while it is set: a console quietly showing one
 	// customer's worth of a cluster is one somebody will use to conclude the other
@@ -69,6 +75,8 @@ func (s *Server) renderFor(w http.ResponseWriter, r *http.Request, name string, 
 	p.Path = r.URL.Path
 	p.RailCollapsed = railCollapsed(r)
 	p.Scope = scopeOf(r)
+	p.Clusters = s.clusterChoices(r)
+	p.Cluster = s.clusterOf(r)
 	s.render(w, name, p)
 }
 

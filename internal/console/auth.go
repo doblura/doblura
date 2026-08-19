@@ -146,6 +146,13 @@ func parseDevIdentity(v string) (Identity, error) {
 func (s *Server) authenticated(h func(http.ResponseWriter, *http.Request, Identity)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := s.identity(r)
+		if err == nil {
+			// WHERE, not who. Set once here so no handler has to remember, and
+			// so it cannot be passed wrongly at one of twenty-eight call sites.
+			// It changes which API server is asked and never what the answer is
+			// allowed to be — see Identity.Cluster.
+			id.Cluster = s.clusterOf(r)
+		}
 		if err != nil {
 			http.Redirect(w, r, "/auth/login?next="+url.QueryEscape(safeNext(r.URL.RequestURI())),
 				http.StatusSeeOther)
