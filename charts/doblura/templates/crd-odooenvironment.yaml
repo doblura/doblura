@@ -681,6 +681,54 @@ spec:
                     - Persistent
                     type: string
                 type: object
+              mail:
+                description: |-
+                  Mail configures outgoing email. Absent means none, which is the right
+                  answer for every environment that is not production.
+                properties:
+                  encryption:
+                    default: StartTLS
+                    description: MailEncryption is how the SMTP session is protected.
+                    enum:
+                    - None
+                    - StartTLS
+                    - SSL
+                    type: string
+                  fromFilter:
+                    description: |-
+                      FromFilter restricts which sender addresses use this server, which is
+                      Odoo's own mechanism for having more than one.
+                    type: string
+                  host:
+                    description: Host is the SMTP server.
+                    minLength: 1
+                    type: string
+                  passwordSecret:
+                    description: PasswordSecret holds the key "password".
+                    type: string
+                  port:
+                    default: 587
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  smtpUser:
+                    type: string
+                  unsafeAcknowledgement:
+                    description: |-
+                      UnsafeAcknowledgement is required unless the purpose is Production.
+
+                      The literal names the consequence and not the reading of a warning,
+                      because the failure this guards against is somebody copying a production
+                      manifest into staging and only the mail block being wrong.
+                    type: string
+                required:
+                - host
+                type: object
+                x-kubernetes-validations:
+                - message: 'an SMTP user needs a password: set passwordSecret to a
+                    Secret holding the key ''password'''
+                  rule: '!has(self.smtpUser) || has(self.passwordSecret)'
               migration:
                 description: |-
                   Migration runs the module update as a STEP, before the environment is
@@ -1080,6 +1128,19 @@ spec:
                 == ''i-accept-anonymized-data-can-still-be-reidentified'''
             - message: data.type Snapshot requires the data.snapshot field
               rule: self.data.type != 'Snapshot' || has(self.data.snapshot)
+            - message: 'configuring outgoing mail on anything but a Production environment
+                requires mail.unsafeAcknowledgement set to its literal value: a working
+                SMTP server on a copy of production sends real invoices and real payment
+                reminders to real people, from a machine nobody is watching, and there
+                is no undo'
+              rule: '!has(self.mail) || (has(self.purpose) && self.purpose == ''Production'')
+                || (has(self.mail.unsafeAcknowledgement) && self.mail.unsafeAcknowledgement
+                == ''i-accept-this-environment-can-send-real-email-to-real-people'')'
+            - message: an environment running demo data has no real addresses to write
+                to, and every message it sends goes to an invented one. If you are
+                testing the mail server itself, use Snapshot data with the acknowledgement,
+                or Live
+              rule: '!has(self.mail) || self.data.type != ''Demo'''
             - message: 'a Production environment runs the customer''s own data: demo
                 data is not production, and an anonymized snapshot called production
                 is a copy people will start trusting. Set data.type to Live, or change

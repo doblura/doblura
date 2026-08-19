@@ -19,6 +19,14 @@ Bind these to your OIDC groups. They are ClusterRoles so you can bind them
 cluster-wide OR per namespace with a RoleBinding, which is how you scope a
 consultant to one customer's namespace.
 
+WHO RESTORES A BACKUP: only platform. Not support, not QA, not consultancy.
+Everybody from viewer up can SEE that backups exist and when the last one worked —
+that is reassurance, and hiding it helps nobody. Creating an OdooRestore is
+different: it puts real customers' names and real invoices onto whichever machine
+was named, and the anonymised path for anybody who needs realistic data is
+OdooSnapshot. The restriction is about the data, not about the risk of breaking
+something.
+
 VIEWER IS THE FLOOR. Bind it to the group your identity provider gives every
 person who should see this platform at all:
 
@@ -70,7 +78,7 @@ metadata:
     doblura.dev/persona: viewer
 rules:
   - apiGroups: [doblura.dev]
-    resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots]
+    resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots, odoobackups, odoorestores, reviewsets]
     verbs: [get, list, watch]
   # Deployments, read-only, and nothing else from apps/.
   #
@@ -213,6 +221,19 @@ rules:
   - apiGroups: [doblura.dev]
     resources: [odootenants]
     verbs: [patch, update]
+  # Backup SCHEDULES, and not restores. Deciding that a customer's staging server
+  # should be copied nightly is consultancy work; putting a copy of production's
+  # real data onto another machine is not.
+  #
+  # The line is about the DATA and not about the risk of breaking something. A
+  # consultant who needs realistic data to reproduce a bug has OdooSnapshot,
+  # which anonymises; restoring a backup puts real customers' names and real
+  # invoices onto a box that was not built to hold them. That is a
+  # data-protection decision, and it belongs with whoever answers for the
+  # platform.
+  - apiGroups: [doblura.dev]
+    resources: [odoobackups, reviewsets]
+    verbs: [create, update, patch, delete]
   - apiGroups: [""]
     resources: [pods, pods/log]
     verbs: [get, list]

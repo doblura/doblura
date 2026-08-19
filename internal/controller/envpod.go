@@ -267,6 +267,12 @@ func envEnv(env *doblurav1alpha1.OdooEnvironment) []corev1.EnvVar {
 		vars = append(vars, corev1.EnvVar{
 			Name: "PGPASSWORD", ValueFrom: secretRef(env.Spec.Database.PasswordSecret, "password")})
 	}
+	// The SMTP password, when there is one. From a Secret reference so it never
+	// appears in the Job manifest, which anybody who can describe the Job reads.
+	if m := env.Spec.Mail; m != nil && m.PasswordSecret != "" {
+		vars = append(vars, corev1.EnvVar{
+			Name: "SMTP_PASSWORD", ValueFrom: secretRef(m.PasswordSecret, "password")})
+	}
 	return vars
 }
 
@@ -635,8 +641,104 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 	b.WriteString("UPDATE ir_mail_server SET active = false;\n")
 	b.WriteString("UPDATE ir_cron SET active = false;\n")
 	b.WriteString("COMMIT;\nSQL\n")
+
+	// Mail goes in AFTER everything above has switched it off.
+	//
+	// The order is the safety. Neutralization disables every mail server it finds,
+	// and only then is the one the person asked for written — so an environment
+	// with no mail block ends up with mail off no matter what the snapshot
+	// contained, and an environment with one ends up with exactly that server and
+	// nothing the source database happened to carry.
+	//
+	// Doing it the other way round would leave a window where production's own
+	// SMTP credentials were live in a copy, which is measured in seconds and
+	// enough.
+	b.WriteString(envMailScript(env))
+
 	b.WriteString(`echo ">> hardened"`)
 	return b.String()
+}
+
+// envMailScript writes the one mail server the environment is allowed.
+//
+// Written by SQL rather than by an Odoo command because there is no Odoo command
+// for it: ir_mail_server is a model, and the alternative is a python -c that
+// loads the whole registry to insert one row.
+//
+// The password is read from a file at run time and never interpolated into the
+// script: the script is in a Job manifest, which is readable by anybody who can
+// describe the Job.
+func envMailScript(env *doblurav1alpha1.OdooEnvironment) string {
+	m := env.Spec.Mail
+	if m == nil {
+		return ""
+	}
+
+	port := int32(587)
+	if m.Port > 0 {
+		port = m.Port
+	}
+	enc := "starttls"
+	switch m.Encryption {
+	case doblurav1alpha1.MailNone:
+		enc = "none"
+	case doblurav1alpha1.MailSSL:
+		enc = "ssl"
+	}
+
+	var b strings.Builder
+	b.WriteString(`echo ">> configuring outgoing mail"` + "\n")
+	// The password comes from the environment, which comes from a Secret.
+	b.WriteString("SMTP_PASS=\"${SMTP_PASSWORD:-}\"\n")
+	b.WriteString("psql -v ON_ERROR_STOP=1 <<SQL\nBEGIN;\n")
+	// smtp_authentication is NOT NULL in Odoo 18, and its three values are
+	// login, certificate and cli — there is no "none". Read from the source
+	// rather than guessed, after guessing twice: the first attempt omitted the
+	// column and failed a not-null constraint, the second used "certificate" for
+	// the unauthenticated case and failed a CHECK, because certificate
+	// authentication requires TLS.
+	//
+	// "login" with an empty smtp_user is how Odoo itself expresses an
+	// unauthenticated relay: it skips authentication when there is no user. So
+	// this is always login, and whether it authenticates is decided by whether
+	// a user was configured.
+	auth := "login"
+	b.WriteString(fmt.Sprintf(`INSERT INTO ir_mail_server
+  (name, smtp_host, smtp_port, smtp_encryption, smtp_authentication,
+   smtp_user, smtp_pass, from_filter,
+   active, sequence, create_uid, write_uid, create_date, write_date)
+VALUES
+  ('doblura', '%s', %d, '%s', '%s', %s, %s, %s,
+   true, 10, 1, 1, now(), now());
+`,
+		m.Host, port, enc, auth,
+		sqlTextOrNull(m.SMTPUser),
+		sqlPassOrNull(m.PasswordSecret),
+		sqlTextOrNull(m.FromFilter)))
+	b.WriteString("COMMIT;\nSQL\n")
+	b.WriteString(`echo ">> outgoing mail points at ` + m.Host + `"` + "\n")
+	return b.String()
+}
+
+// sqlTextOrNull quotes a value, or writes NULL.
+//
+// Single quotes are doubled, which is the only escape SQL string literals have.
+// These values come from a CRD the API server has already validated against a
+// schema, and doubling is still done rather than trusted.
+func sqlTextOrNull(v string) string {
+	if v == "" {
+		return "NULL"
+	}
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+}
+
+// sqlPassOrNull emits a shell expansion, so the password reaches psql from the
+// environment and never appears in the manifest.
+func sqlPassOrNull(secret string) string {
+	if secret == "" {
+		return "NULL"
+	}
+	return "'${SMTP_PASS}'"
 }
 
 // envDropScript removes the database when the environment is destroyed.

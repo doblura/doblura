@@ -233,6 +233,8 @@ type EnvLifecycle struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.exposure) || !has(self.exposure.public) || !self.exposure.public || (has(self.security) && (!has(self.security.denyEgress) || self.security.denyEgress))",message="a public environment requires security.denyEgress: if it is compromised it must not be able to reach the internal network or the production database"
 // +kubebuilder:validation:XValidation:rule="!has(self.exposure) || !has(self.exposure.public) || !self.exposure.public || self.data.type != 'Snapshot' || self.data.acknowledgeReidentificationRisk == 'i-accept-anonymized-data-can-still-be-reidentified'",message="combining anonymized data with public access requires data.acknowledgeReidentificationRisk set to its literal value: deterministic masking preserves relations and dates, and that allows re-identification"
 // +kubebuilder:validation:XValidation:rule="self.data.type != 'Snapshot' || has(self.data.snapshot)",message="data.type Snapshot requires the data.snapshot field"
+// +kubebuilder:validation:XValidation:rule="!has(self.mail) || (has(self.purpose) && self.purpose == 'Production') || (has(self.mail.unsafeAcknowledgement) && self.mail.unsafeAcknowledgement == 'i-accept-this-environment-can-send-real-email-to-real-people')",message="configuring outgoing mail on anything but a Production environment requires mail.unsafeAcknowledgement set to its literal value: a working SMTP server on a copy of production sends real invoices and real payment reminders to real people, from a machine nobody is watching, and there is no undo"
+// +kubebuilder:validation:XValidation:rule="!has(self.mail) || self.data.type != 'Demo'",message="an environment running demo data has no real addresses to write to, and every message it sends goes to an invented one. If you are testing the mail server itself, use Snapshot data with the acknowledgement, or Live"
 // +kubebuilder:validation:XValidation:rule="!has(self.purpose) || self.purpose != 'Production' || self.data.type == 'Live'",message="a Production environment runs the customer's own data: demo data is not production, and an anonymized snapshot called production is a copy people will start trusting. Set data.type to Live, or change the purpose"
 // +kubebuilder:validation:XValidation:rule="!has(self.purpose) || self.purpose != 'Production' || !has(self.lifecycle) || self.lifecycle.type == 'Persistent'",message="a Production environment cannot be Ephemeral or Hibernating: the first deletes the customer's Odoo when its time is up and the second switches it off"
 // +kubebuilder:validation:XValidation:rule="!has(self.purpose) || (self.purpose != 'Staging' && self.purpose != 'Production') || !has(self.storage) || !has(self.storage.filestore) || self.storage.filestore.mode != 'Ephemeral'",message="a Staging or Production environment cannot keep its filestore in an emptyDir: the database outlives the pod and the files do not, so every attachment breaks on the first restart while ir_attachment still points at them"
@@ -261,6 +263,11 @@ type EnvLifecycle struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.web) || self.workload.web.replicas <= 1 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="more than one web replica needs a filestore every pod can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database, which has no filestore to share: each pod would otherwise serve its own filestore, so an attachment uploaded through one is a 404 through the other"
 // +kubebuilder:validation:XValidation:rule="!has(self.workload) || !has(self.workload.cron) || self.workload.cron.replicas == 0 || (has(self.storage) && has(self.storage.filestore) && (self.storage.filestore.mode == 'Database' || (self.storage.filestore.mode == 'PersistentVolumeClaim' && self.storage.filestore.accessModeReadWriteMany)))",message="a cron tier is a second pod writing the same filestore and needs one both tiers can reach: either PersistentVolumeClaim declared ReadWriteMany, or Database: scheduled jobs that generate reports or attachments would otherwise write them where the web tier cannot read them, and a ReadWriteOnce claim only appears to work while both pods happen to land on the same node"
 type OdooEnvironmentSpec struct {
+	// Mail configures outgoing email. Absent means none, which is the right
+	// answer for every environment that is not production.
+	// +optional
+	Mail *MailSpec `json:"mail,omitempty"`
+
 	// Update says when the modules are brought in line with the code.
 	// +optional
 	Update *UpdateSpec `json:"update,omitempty"`
@@ -438,6 +445,82 @@ type AddonRevision struct {
 	// being a moving target for this environment.
 	// +optional
 	ObservedAt *metav1.Time `json:"observedAt,omitempty"`
+}
+
+// ─────────────── Outgoing email ───────────────
+//
+// This is the setting where a mistake reaches the customer's customers.
+//
+// Everything else in this operator can be got wrong and stay inside the cluster.
+// A working SMTP server on a copy of production sends real invoices, real payment
+// reminders and real delivery notices to real people, from a machine nobody is
+// watching, and there is no undo. It is the reason `neutralize` defaults to true
+// everywhere and why the harden phase switches every ir_mail_server off.
+//
+// So mail is not just another field. Configuring it on anything other than a
+// Production environment requires saying out loud that you mean it, and the
+// literal says what will happen rather than that you have read a warning.
+//
+// What this does NOT do is run a mail server, relay anything, or hold a mailbox.
+// It writes an ir_mail_server row pointing at a server you already have. odoo.sh
+// offers "unlimited email gateways, auto configured" because they run the mail
+// infrastructure; doblura runs in your cluster and does not, and pretending
+// otherwise would be the difference between a tool and a service.
+
+// MailEncryption is how the SMTP session is protected.
+// +kubebuilder:validation:Enum=None;StartTLS;SSL
+type MailEncryption string
+
+const (
+	// MailNone is plaintext SMTP. Allowed, because an in-cluster relay on port 25
+	// is a real arrangement, and refusing it would push people to work around
+	// this field entirely.
+	MailNone     MailEncryption = "None"
+	MailStartTLS MailEncryption = "StartTLS"
+	MailSSL      MailEncryption = "SSL"
+)
+
+// MailAck is the literal that authorises real mail from a non-production
+// environment.
+const MailAck = "i-accept-this-environment-can-send-real-email-to-real-people"
+
+// MailSpec is the outgoing mail server Odoo will use.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.smtpUser) || has(self.passwordSecret)",message="an SMTP user needs a password: set passwordSecret to a Secret holding the key 'password'"
+type MailSpec struct {
+	// Host is the SMTP server.
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host"`
+
+	// +kubebuilder:default=587
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// +kubebuilder:default=StartTLS
+	// +optional
+	Encryption MailEncryption `json:"encryption,omitempty"`
+
+	// +optional
+	SMTPUser string `json:"smtpUser,omitempty"`
+
+	// PasswordSecret holds the key "password".
+	// +optional
+	PasswordSecret string `json:"passwordSecret,omitempty"`
+
+	// FromFilter restricts which sender addresses use this server, which is
+	// Odoo's own mechanism for having more than one.
+	// +optional
+	FromFilter string `json:"fromFilter,omitempty"`
+
+	// UnsafeAcknowledgement is required unless the purpose is Production.
+	//
+	// The literal names the consequence and not the reading of a warning,
+	// because the failure this guards against is somebody copying a production
+	// manifest into staging and only the mail block being wrong.
+	// +optional
+	UnsafeAcknowledgement string `json:"unsafeAcknowledgement,omitempty"`
 }
 
 // ─────────────── Keeping the modules level with the code ───────────────

@@ -283,6 +283,35 @@ else printf '  FAIL  an explicit quota of zero came back as %s\n' "${zero:-<noth
 # It SAYS when it is skipping. A quota check that silently does nothing in the
 # cluster where it matters is the failure mode this project keeps rediscovering.
 echo
+echo "-- outgoing mail, the one setting that reaches the customer's customers --"
+# A working SMTP server on a copy of production sends real invoices to real
+# people from a machine nobody is watching, and there is no undo.
+check "mail on a review env, no ack"        "$ENV  purpose: Review
+  data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: d}}}}
+  mail: {host: smtp.example.com}" rejected
+check "mail on a review env, wrong ack"     "$ENV  purpose: Review
+  data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: d}}}}
+  mail: {host: smtp.example.com, unsafeAcknowledgement: yes-i-know}" rejected
+check "mail on a review env, acknowledged"  "$ENV  purpose: Review
+  data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: d}}}}
+  mail: {host: smtp.example.com, unsafeAcknowledgement: i-accept-this-environment-can-send-real-email-to-real-people}" ok
+# Production is where mail belongs, and needs no ceremony to have it.
+check "mail on production needs no ack"     "$ENV  purpose: Production
+  data: {type: Live}
+  lifecycle: {type: Persistent}
+  storage: {filestore: {mode: Database}}
+  mail: {host: smtp.example.com}" ok
+# Demo data has no real addresses; every message goes to an invented one.
+check "mail with demo data"                 "$ENV  purpose: Production
+  data: {type: Demo}
+  mail: {host: smtp.example.com}" rejected
+# An SMTP user with no password is a login that cannot log in.
+check "smtp user with no password"          "$ENV  purpose: Production
+  data: {type: Live}
+  lifecycle: {type: Persistent}
+  storage: {filestore: {mode: Database}}
+  mail: {host: smtp.example.com, smtpUser: odoo}" rejected
+
 echo "-- the image catalogue --"
 check "one default"                          "$TEN  images:
     - {name: a, image: 'x:1', odooVersion: '18.0', default: true}

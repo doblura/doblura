@@ -966,5 +966,26 @@ func egressRules(
 			},
 		})
 	}
+
+	// The mail server's port, when mail is configured.
+	//
+	// The same lesson as the git ports, learned twice: a feature that needs the
+	// network and a policy that denies it are not two settings, they are one
+	// contradiction, and the policy always wins silently. Odoo reported
+	// "Connection refused" to a server that was up and reachable, and nothing
+	// anywhere said a NetworkPolicy had dropped the packet.
+	//
+	// Only the port that was asked for, not a range: a relay on 1025 gets 1025,
+	// and an environment with no mail block gets nothing.
+	if m := env.Spec.Mail; m != nil {
+		port := m.Port
+		if port == 0 {
+			port = 587
+		}
+		p := intstrFromInt(port)
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			Ports: []networkingv1.NetworkPolicyPort{{Protocol: tcp, Port: &p}},
+		})
+	}
 	return rules
 }
