@@ -3,6 +3,10 @@
 Full plan with diagrams:
 <https://claude.ai/code/artifact/e6e27759-324c-4dea-841c-b308c993f2be>
 
+The decisions that shape the product — who it is for, where the paid line falls,
+what multi-cluster means — are in [DECISIONS.md](DECISIONS.md). This file is what
+gets built; that one is why.
+
 ## What this is
 
 A personal project, meant to be published. Three goals, turned into verifiable

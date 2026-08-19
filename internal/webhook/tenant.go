@@ -57,6 +57,25 @@ func (t *TenantGuard) Handle(ctx context.Context, req admission.Request) admissi
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	// Only one customer record can be the default one.
+	//
+	// Refused HERE, when the second one is marked, rather than later when somebody
+	// creates an environment: the person marking it is the person who can fix it,
+	// and they are looking at the object right now. Refusing at environment time
+	// would surface it to whoever happened to create the next environment, about a
+	// record they may not have touched.
+	if tenant.Spec.IsDefault() {
+		if other, err := t.otherDefault(ctx, &tenant); err != nil {
+			return admission.Errored(http.StatusInternalServerError, err)
+		} else if other != "" {
+			return admission.Denied(fmt.Sprintf(
+				"%s is already the default customer in %s, and there can only be "+
+					"one: with two, which defaults an environment inherits would "+
+					"depend on the order they came back in. Unmark %s first",
+				other, tenant.Namespace, other))
+		}
+	}
+
 	next := tenant.Spec.DefaultImage()
 	if next == nil {
 		// No catalogue, or no entry marked default in a catalogue of several.
@@ -132,4 +151,26 @@ func phaseOrPending(p doblurav1alpha1.RehearsalPhase) string {
 		return "Pending (it has not started)"
 	}
 	return string(p)
+}
+
+// otherDefault is another customer record already marked as the default one.
+//
+// Uncached, like everything else this webhook reads: a record marked a second ago
+// is exactly the one being duplicated.
+func (t *TenantGuard) otherDefault(
+	ctx context.Context,
+	tenant *doblurav1alpha1.OdooTenant,
+) (string, error) {
+	var list doblurav1alpha1.OdooTenantList
+	if err := t.Reader.List(ctx, &list, client.InNamespace(tenant.Namespace)); err != nil {
+		return "", fmt.Errorf("looking for an existing default customer: %w", err)
+	}
+	for i := range list.Items {
+		other := &list.Items[i]
+		if other.Name == tenant.Name || !other.Spec.IsDefault() {
+			continue
+		}
+		return other.Name, nil
+	}
+	return "", nil
 }

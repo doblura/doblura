@@ -51,6 +51,30 @@ type OdooTenantSpec struct {
 	// +kubebuilder:validation:Pattern=`^[0-9]+\.[0-9]+$`
 	OdooVersion string `json:"odooVersion,omitempty"`
 
+	// Default marks this as the customer record used when an environment does not
+	// name one.
+	//
+	// It exists for the company that runs its own Odoo rather than forty of
+	// somebody else's. Doblura's model is the integrator's — a customer record, a
+	// namespace per customer, quotas per customer — and without this that company
+	// pays for a model built for a problem it does not have: no image catalogue,
+	// no generated address, no certificate issuer and no defaults, unless it
+	// writes forTenant on every environment it ever creates.
+	//
+	// One record, marked once, and the word is never typed again. That is the
+	// whole tax, and it is meant to stay that size: anything more and "doblura
+	// serves both" quietly becomes "doblura serves integrators, and is worse for
+	// everybody else".
+	//
+	// At most one per namespace — see the webhook. Two would make which defaults
+	// apply depend on iteration order, which is the kind of thing that is right
+	// for months and then is not.
+	//
+	// Note it makes environments STRICTER, not looser: an environment with a
+	// customer attached is a handover, and the handover guardrail applies to it.
+	// +optional
+	Default *bool `json:"default,omitempty"`
+
 	// Domain is where this customer's environments are published, for example
 	// "acme.doblura.example" or a domain of the customer's own.
 	//
@@ -504,4 +528,9 @@ func init() {
 func (s *OdooTenantSpec) IssuerKindAndName() (kind, name string) {
 	kind, name, _ = strings.Cut(s.CertIssuer, "/")
 	return kind, name
+}
+
+// IsDefault reports whether this is the customer record used when none is named.
+func (s *OdooTenantSpec) IsDefault() bool {
+	return s.Default != nil && *s.Default
 }

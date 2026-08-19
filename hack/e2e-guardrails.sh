@@ -4,6 +4,25 @@
 set -uo pipefail
 fails=0
 
+# The manager has to be up before anything below means anything.
+#
+# Its webhooks are failurePolicy: Fail, so while it is rolling out EVERY create is
+# rejected — and this script reports that as a page of guardrails failing, which
+# reads like the rules broke rather than like the pod is thirty seconds old. That
+# happened, and it cost a real investigation before the pod finished starting.
+for _ in $(seq 1 60); do
+  ready=$(kubectl get deploy -A -l app.kubernetes.io/name=doblura \
+    -o jsonpath='{.items[0].status.readyReplicas}' 2>/dev/null)
+  [ "${ready:-0}" -ge 1 ] 2>/dev/null && break
+  sleep 2
+done
+if [ "${ready:-0}" -lt 1 ] 2>/dev/null; then
+  printf '  the manager has no ready replica, so every check below would fail on a\n'
+  printf '  webhook that is not answering rather than on the rule it is testing:\n'
+  kubectl get pods -A -l app.kubernetes.io/name=doblura 2>&1 | sed 's/^/    /'
+  exit 1
+fi
+
 check() { # name, yaml, ok|rejected
   if printf '%s' "$2" | kubectl apply --dry-run=server -f - >/dev/null 2>&1; then r=ok; else r=rejected; fi
   if [ "$3" = "$r" ]; then printf '  ok    %s\n' "$1"; else printf '  FAIL  %s: %s (expected %s)\n' "$1" "$r" "$3"; fails=$((fails+1)); fi
@@ -345,6 +364,94 @@ check "majorUpgrade without the literal"     "$TEN  images:
 # not happening.
 check "a new customer on any major"          "$TEN  images:
     - {name: a, image: 'x:1', odooVersion: '19.0', default: true}" ok
+echo
+
+# ── the default customer ──
+#
+# For the company that runs its own Odoo rather than forty of somebody else's.
+# Without it that company gets none of the platform — no image catalogue, no
+# generated address, no defaults — unless it writes forTenant on every environment
+# for ever. One record, marked once.
+echo "-- the default customer --"
+
+DNS=default-tenant-guardrail
+kubectl delete namespace $DNS --ignore-not-found --wait=false >/dev/null 2>&1
+kubectl wait --for=delete namespace/$DNS --timeout=120s >/dev/null 2>&1
+kubectl create namespace $DNS >/dev/null 2>&1
+
+mkten() { # name, default(true|false)
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: $1, namespace: $DNS}
+spec:
+  displayName: $1
+  default: $2
+  domain: $1.example.com
+  images:
+    - {name: v18, image: 'odoo:18.0', odooVersion: '18.0', default: true}
+  environmentDefaults:
+    database: {host: pg, user: odoo, passwordSecret: pg}
+    storage: {filestore: {mode: Database}}
+    size: small
+YAML
+}
+
+mkten uno true
+if kubectl -n $DNS get odootenant uno >/dev/null 2>&1; then
+  printf '  ok    one customer can be the default\n'
+else
+  printf '  FAIL  a customer could not be marked as the default\n'; fails=$((fails+1))
+fi
+
+# The second one is refused HERE, when it is marked — not later, at somebody
+# else's environment, about a record they never touched.
+out=$(kubectl apply -f - 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: dos, namespace: $DNS}
+spec:
+  displayName: dos
+  default: true
+YAML
+)
+if printf '%s' "$out" | grep -q 'already the default customer'; then
+  printf '  ok    a second default is refused when it is marked\n'
+else
+  printf '  FAIL  a second default customer: %s\n' "$(printf '%s' "$out" | head -c 120)"
+  fails=$((fails+1))
+fi
+
+# And the point of the whole thing: an environment that declares almost nothing.
+kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: nada-declarado, namespace: $DNS}
+spec:
+  purpose: Staging
+  data: {type: Demo}
+YAML
+got=$(kubectl -n $DNS get odooenvironment nada-declarado \
+  -o jsonpath='{.spec.forTenant}|{.spec.image}|{.spec.database.host}|{.spec.size}' 2>/dev/null)
+case "$got" in
+  "uno|odoo:18.0|pg|small") printf '  ok    an environment declaring nothing inherits everything\n' ;;
+  *) printf '  FAIL  an environment inherited %s (expected uno|odoo:18.0|pg|small)\n' "${got:-nothing}"
+     fails=$((fails+1)) ;;
+esac
+
+# It gets an address under the customer's domain, and the random tail is what
+# stops it being found by typing the obvious name.
+host=$(kubectl -n $DNS get odooenvironment nada-declarado \
+  -o jsonpath='{.spec.exposure.host}' 2>/dev/null)
+case "$host" in
+  nada-declarado-*.uno.example.com)
+    [ "$host" != "nada-declarado.uno.example.com" ] &&
+      printf '  ok    and an address that cannot be guessed\n' ||
+      { printf '  FAIL  the address is the predictable one: %s\n' "$host"; fails=$((fails+1)); } ;;
+  *) printf '  FAIL  the address is %s\n' "${host:-empty}"; fails=$((fails+1)) ;;
+esac
+
+kubectl delete namespace $DNS --ignore-not-found --wait=false >/dev/null 2>&1
 echo
 
 # ── the edge: what stands between the internet and an Odoo ──

@@ -195,20 +195,44 @@ func (m *EnvironmentCreator) defaultsFrom(
 	ctx context.Context,
 	env *doblurav1alpha1.OdooEnvironment,
 ) ([]jsonpatch.Operation, string) {
-	if m.Client == nil || env.Spec.ForTenant == "" {
+	if m.Client == nil {
 		return nil, ""
 	}
+
+	// An environment that names no customer takes the default one, if there is a
+	// default one. It exists for the company that runs its own Odoo rather than
+	// forty of somebody else's: without it, that company gets none of the
+	// platform — no image catalogue, no generated address, no certificate issuer,
+	// no defaults — unless it writes forTenant on every environment for ever.
+	//
+	// The patch is written to the SPEC, so what the object says is what happened.
+	// Resolving it invisibly at reconcile time would leave an environment whose
+	// yaml names no customer and whose behaviour comes from one.
+	var ops []jsonpatch.Operation
+	name := env.Spec.ForTenant
+	if name == "" {
+		def, err := m.defaultTenant(ctx, env.Namespace)
+		switch {
+		case err != nil:
+			return nil, err.Error()
+		case def == "":
+			// No default and none named: an internal environment, as before. The
+			// handover guardrail deliberately does not apply to it.
+			return nil, ""
+		}
+		name = def
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/forTenant", name))
+	}
+
 	var tenant doblurav1alpha1.OdooTenant
 	if err := m.Client.Get(ctx, client.ObjectKey{
-		Namespace: env.Namespace, Name: env.Spec.ForTenant,
+		Namespace: env.Namespace, Name: name,
 	}, &tenant); err != nil {
 		// Deliberately not an error. A missing customer record is caught by the
 		// validating half with a message about the tenant; failing here would
 		// report it as a defaulting failure, which names the wrong thing.
 		return nil, ""
 	}
-
-	var ops []jsonpatch.Operation
 
 	// An imageRef that does not resolve is REFUSED, never quietly replaced by the
 	// customer's default. Falling back was the first implementation and it was
@@ -675,4 +699,34 @@ func hostFor(
 	}
 	op := jsonpatch.NewOperation("add", "/spec/exposure/host", host)
 	return &op, ""
+}
+
+// defaultTenant is the customer record marked as the default in this namespace.
+//
+// At most one. Two would make which defaults apply depend on iteration order,
+// which is the kind of thing that is right for months and then is not — so this
+// refuses rather than picking, and the message names both so somebody can fix it
+// without going looking.
+func (m *EnvironmentCreator) defaultTenant(ctx context.Context, ns string) (string, error) {
+	var list doblurav1alpha1.OdooTenantList
+	if err := m.Client.List(ctx, &list, client.InNamespace(ns)); err != nil {
+		// Not fatal: an environment that names its own customer does not reach
+		// here, and one that does not simply stays without one, as before.
+		return "", nil //nolint:nilerr // absence of a default is not an error
+	}
+	found := ""
+	for i := range list.Items {
+		t := &list.Items[i]
+		if !t.Spec.IsDefault() {
+			continue
+		}
+		if found != "" {
+			return "", fmt.Errorf(
+				"%s and %s are both marked as the default customer in %s, so which "+
+					"one an environment inherits would depend on the order they came "+
+					"back in. Mark one", found, t.Name, ns)
+		}
+		found = t.Name
+	}
+	return found, nil
 }
