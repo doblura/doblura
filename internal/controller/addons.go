@@ -72,7 +72,7 @@ func cloneContainer(r doblurav1alpha1.AddonRepo) corev1.Container {
 
 	return corev1.Container{
 		Name:    "clone-" + r.Name,
-		Image:   "alpine/git:latest",
+		Image:   gitImage(),
 		Command: []string{"/bin/sh", "-euc"},
 		Args:    []string{cloneScript(r)},
 		Env:     env,

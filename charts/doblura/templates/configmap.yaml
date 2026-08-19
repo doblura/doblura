@@ -6,9 +6,11 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels: {{- include "doblura.labels" . | nindent 4 }}
 data:
-  # Images of the auxiliary containers. Here rather than compiled in so you can
-  # pin them to a digest, or point them at an internal mirror in air-gapped
-  # clusters.
+  # Images of the auxiliary containers, mirrored here for somebody looking at the
+  # cluster. What the manager actually READS is the environment on its Deployment,
+  # set from the same values — see the comment there. This ConfigMap on its own
+  # changed nothing for as long as it existed, which is why the two are now
+  # written from one place and why this comment says which is which.
   {{- range $k, $v := .Values.defaults }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}

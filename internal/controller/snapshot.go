@@ -94,14 +94,14 @@ func fetchContainer(p *doblurav1alpha1.SnapshotProvider) corev1.Container {
 		o := p.ObjectStore
 		// rclone rather than a vendor CLI: one binary, every S3-compatible
 		// store. The alternative was one image per cloud.
-		c.Image = "rclone/rclone:latest"
+		c.Image = objectStoreImage()
 		c.Command = []string{"/bin/sh", "-euc"}
 		c.Args = []string{objectStoreScript(o)}
 		c.Env = objectStoreEnv(o)
 
 	case doblurav1alpha1.ProviderHTTP:
 		h := p.HTTP
-		c.Image = "curlimages/curl:latest"
+		c.Image = httpImage()
 		c.Command = []string{"/bin/sh", "-euc"}
 		c.Args = []string{httpScript(h)}
 		if h.AuthSecret != "" {

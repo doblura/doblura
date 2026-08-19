@@ -86,6 +86,32 @@ spec:
             - name: WATCH_NAMESPACES
               value: {{ join "," . | quote }}
             {{- end }}
+            {{/*
+            The auxiliary images, as environment rather than by making the manager
+            read the ConfigMap. They arrive before the first reconcile, and a
+            manager that cannot reach the API server still knows which image to
+            use.
+
+            The ConfigMap that carried these was read by NOBODY: an operator
+            pinning them to an internal registry — the whole point of the setting,
+            and the only way to install this with no route to Docker Hub — got a
+            ConfigMap and no effect, and pods that went on pulling from the
+            internet.
+            */}}
+            {{- with .Values.defaults }}
+            {{- with .gitImage }}
+            - name: DOBLURA_GIT_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .httpImage }}
+            - name: DOBLURA_HTTP_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .objectStoreImage }}
+            - name: DOBLURA_OBJECT_STORE_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             {{- range $k, $v := .Values.defaults }}
             - name: DOBLURA_{{ $k | snakecase | upper }}
               value: {{ $v | quote }}
