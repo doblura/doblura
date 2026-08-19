@@ -378,6 +378,44 @@ Deliberately long and awkward: nobody types it by accident.
 
 ---
 
+## The console
+
+One interface for every profile, with no permissions of its own: every request is
+performed as the person who signed in, so Kubernetes RBAC is the only
+authorization in the system and a bug in the interface cannot grant what the
+person did not already have. It asks the API server which buttons to show, so the
+screen and the enforcement come from the same place and cannot disagree.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/console-overview-dark.png">
+    <img src="docs/screenshots/console-overview-light.png" alt="The overview: what needs attention, every environment and its state" width="900">
+  </picture>
+</p>
+
+A customer, with their environments, the modules those environments load, and how
+the pieces connect:
+
+<p align="center">
+  <img src="docs/screenshots/console-customer-light.png" alt="A customer page: environments as cards, the repositories they load, and a diagram of how they connect" width="900">
+</p>
+
+One environment. The answer first — is it up — then what it is, then the technical
+detail folded away for whoever wants it:
+
+<p align="center">
+  <img src="docs/screenshots/console-environment-light.png" alt="An environment page: its state, what it is, its address, and the technical detail" width="900">
+</p>
+
+Backups, what each copy is being kept for, and every restore that has been made
+from them — who asked, and what it replaced:
+
+<p align="center">
+  <img src="docs/screenshots/console-backup-light.png" alt="A backup page: the copies kept, why each is kept, and the history of restores" width="900">
+</p>
+
+---
+
 ## One list of customers, five profiles
 
 The hard problem at scale is not technical. Support wants a throwaway copy of a
