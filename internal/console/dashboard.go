@@ -5,9 +5,11 @@ package console
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -35,6 +37,9 @@ type dashboardView struct {
 	// Expiring are throwaway environments close to removing themselves. People
 	// lose work to this, and a day's warning costs nothing.
 	Expiring []attentionRow
+	// All is every environment, so the page has something on it when nothing is
+	// wrong — which is most days, and was the state that made it look broken.
+	All []attentionRow
 
 	Customers    int
 	Environments int
@@ -60,6 +65,13 @@ type attentionRow struct {
 	Customer string
 	Cluster  string
 	Href     string
+	// What it is — "Demo data, persistent" — as opposed to how it is doing.
+	//
+	// On a list where every card already carries a green Up pill, repeating
+	// "Answering normally" under each one is noise. What somebody scanning the
+	// page cannot see from the colour is which of these is staging with real
+	// data and which is a throwaway.
+	What     string
 	State    string
 	Word     string
 	Detail   string
@@ -144,6 +156,11 @@ func (s *Server) dashboardIn(
 		t := &tenants.Items[i]
 		displayName[t.Namespace+"/"+t.Name] = t.Spec.DisplayName
 		quota := t.Spec.EphemeralQuota()
+		if t.Status.EphemeralEnvironments < quota {
+			// Only customers with no room left. A bar for everybody made the most
+			// dominant thing on the overview a table about a normal state.
+			continue
+		}
 		view.Quotas = append(view.Quotas, quotaRow{
 			Customer: t.Spec.DisplayName,
 			Href:     "/c/" + t.Namespace + "/" + t.Name,
@@ -168,8 +185,17 @@ func (s *Server) dashboardIn(
 		row := attentionRow{
 			Name: e.Name, Customer: customer, State: h.State,
 			Word: stateWord(h.State), Detail: h.Detail,
+			What: fmt.Sprintf("%s data, %s", e.Spec.Data.Type,
+				strings.ToLower(string(e.Spec.Lifecycle.Type))),
 			Href: "/e/" + e.Namespace + "/" + e.Name,
 		}
+		// Every environment, whatever state it is in.
+		//
+		// The overview used to show three enormous numbers and, when nothing was
+		// wrong, nothing else: two thirds of the screen was white, which reads as
+		// a page that failed to load rather than as a calm morning. The thing
+		// somebody came to see is the environments, so they are on it.
+		view.All = append(view.All, row)
 
 		switch h.State {
 		case "down":
@@ -226,6 +252,7 @@ func mergeDashboards(results []clusterResult[dashboardView]) dashboardView {
 			out.WorkloadVisible = false
 		}
 		out.Attention = append(out.Attention, stamped(v.Attention, res.Cluster)...)
+		out.All = append(out.All, stamped(v.All, res.Cluster)...)
 		out.Expiring = append(out.Expiring, stamped(v.Expiring, res.Cluster)...)
 		for _, q := range v.Quotas {
 			q.Cluster = res.Cluster
@@ -237,6 +264,12 @@ func mergeDashboards(results []clusterResult[dashboardView]) dashboardView {
 	// looking for what is broken, and interleaving by cluster would bury it.
 	sort.SliceStable(out.Attention, func(i, j int) bool {
 		return out.Attention[i].severity < out.Attention[j].severity
+	})
+	sort.Slice(out.All, func(i, j int) bool {
+		if out.All[i].Customer != out.All[j].Customer {
+			return out.All[i].Customer < out.All[j].Customer
+		}
+		return out.All[i].Name < out.All[j].Name
 	})
 	sort.Slice(out.Quotas, func(i, j int) bool {
 		if out.Quotas[i].Cluster != out.Quotas[j].Cluster {

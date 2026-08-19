@@ -187,7 +187,13 @@ h2.sect {
   font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--ink-3); font-weight: 660; margin: 34px 0 12px;
 }
-h2.sect:first-of-type { margin-top: 0; }
+/* A section heading loses its top margin when it follows the page title, and
+   only then.
+   :first-of-type fired inside every container, so "Conditions" inside the
+   technical-detail panel sat flush against the list above it and read as another
+   row of that list. Ordinal position was the wrong thing to key on: what decides
+   the gap is what comes BEFORE the heading. */
+.head + h2.sect { margin-top: 0; }
 
 /* ─────────────────────────── surfaces ─────────────────────────── */
 
@@ -290,6 +296,15 @@ td.num { text-align: right; }
 
 /* ─────────────────────────── numbers ─────────────────────────── */
 
+/* The counts, as a strip beside the page title.
+   Three numbers in card-sized tiles took a fifth of the screen to say what fits
+   on one line, and when everything was up two of them said the same thing. */
+.counts { display: flex; align-items: baseline; gap: 20px; font-size: 13px; color: var(--ink-3); }
+.counts a, .counts span { color: var(--ink-3); text-decoration: none; white-space: nowrap; }
+.counts a:hover { color: var(--accent); }
+.counts b { font-size: 20px; font-weight: 660; letter-spacing: -0.02em; color: var(--ink); margin-right: 5px; }
+.counts a.warn b { color: var(--warn-line); }
+
 .tile {
   display: flex; flex-direction: column; gap: 3px;
   background: var(--surface); border: 1px solid var(--line);
@@ -308,8 +323,11 @@ progress.meter-bar {
 progress.meter-bar::-webkit-progress-bar { background: var(--line); border-radius: 4px; }
 progress.meter-bar::-webkit-progress-value { background: var(--accent); border-radius: 4px; }
 progress.meter-bar::-moz-progress-bar { background: var(--accent); border-radius: 4px; }
-progress.meter-bar.full::-webkit-progress-value { background: var(--down); }
-progress.meter-bar.full::-moz-progress-bar { background: var(--down); }
+/* Amber, not red. A customer at their quota is a limit reached, not a fault, and
+   painting it the same colour as a production environment that is down teaches
+   people to ignore the colour that matters. */
+progress.meter-bar.full::-webkit-progress-value { background: var(--warn-line); }
+progress.meter-bar.full::-moz-progress-bar { background: var(--warn-line); }
 .meter { display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--ink-2); }
 
 /* ─────────────────────────── controls ─────────────────────────── */

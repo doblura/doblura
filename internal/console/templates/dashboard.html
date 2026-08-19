@@ -4,6 +4,21 @@
     <h1>Overview</h1>
     <p class="sub">Anything wrong, anything about to disappear, and where things stand.</p>
   </div>
+  {{/* The counts, as a strip beside the title rather than three tiles the size of
+       cards. They are context for everything below, not the subject of the page —
+       and "4 environments, 4 answering" in two enormous boxes said one thing
+       twice. */}}
+  <div class="counts spacer">
+    <a href="/customers"><b>{{.Data.Customers}}</b> customer{{if ne .Data.Customers 1}}s{{end}}</a>
+    <a href="/o/environments"><b>{{.Data.Environments}}</b> environment{{if ne .Data.Environments 1}}s{{end}}</a>
+    {{if .Data.WorkloadVisible}}
+      {{if ne .Data.Up .Data.Environments}}
+      <a href="/o/environments" class="warn"><b>{{.Data.Up}}</b> answering</a>
+      {{end}}
+    {{else}}
+      <span class="muted">answering: not readable by you</span>
+    {{end}}
+  </div>
 </div>
 
 {{/* Clusters that did not answer, before anything else on the page. Every number
@@ -67,24 +82,31 @@ what matters first.</p>`)}}
 </table></div>
 {{end}}
 
-<h2 class="sect">Where things stand</h2>
-<div class="grid three">
-  <a class="tile" href="/customers">
-    <span class="tile-n">{{.Data.Customers}}</span>
-    <span class="tile-l">customer{{if ne .Data.Customers 1}}s{{end}}</span>
-  </a>
-  <a class="tile" href="/o/environments">
-    <span class="tile-n">{{.Data.Environments}}</span>
-    <span class="tile-l">environment{{if ne .Data.Environments 1}}s{{end}}</span>
-  </a>
-  <a class="tile" href="/o/environments">
-    <span class="tile-n">{{if .Data.WorkloadVisible}}{{.Data.Up}}{{else}}—{{end}}</span>
-    <span class="tile-l">{{if .Data.WorkloadVisible}}answering{{else}}not readable by you{{end}}</span>
-  </a>
-</div>
 
+{{if .Data.All}}
+<h2 class="sect">Environments</h2>
+<div class="grid three">
+{{range .Data.All}}
+  <a class="env s-{{.State}}" href="{{.Href}}">
+    <div class="top">
+      <span class="name">{{.Name}}</span>
+      <span class="state state-{{.State}} push">{{icon .State}}{{.Word}}</span>
+    </div>
+    {{/* What it IS, not how it is doing: the pill already says that, and
+         "Answering normally" under every green pill is noise. What cannot be seen
+         from the colour is which of these holds real data. */}}
+    <p class="meta">{{.What}}</p>
+    <div class="foot"><span>{{.Customer}}</span>{{if $.Data.Everywhere}}<span class="push mono small">{{.Cluster}}</span>{{end}}</div>
+  </a>
+{{end}}
+</div>
+{{end}}
+
+{{/* Quotas last, and only for customers who are actually at theirs. A table of
+     bars for customers with room was the most visually dominant thing on this
+     page, in red, about a state that is entirely normal. */}}
 {{if .Data.Quotas}}
-<h2 class="sect">Throwaway environments in use</h2>
+<h2 class="sect">Customers with no room for another throwaway environment</h2>
 <div class="card scroll"><table>
   <thead><tr><th>Customer</th><th>In use</th><th></th></tr></thead>
   <tbody>

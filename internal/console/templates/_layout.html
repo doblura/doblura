@@ -32,7 +32,10 @@ every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}
   <nav>
     {{template "navitem" dict "Href" "/" "Path" .Path "Icon" "nav-overview" "Label" "Overview"}}
     {{template "navitem" dict "Href" "/customers" "Path" .Path "Icon" "nav-customers" "Label" "Customers"}}
-    <div class="group"><span>Objects</span></div>
+    {{/* "Objects" was the object model showing through. What actually
+         distinguishes these pages from the customer list is that they are not
+         filtered to one customer, so the heading says that instead. */}}
+    <div class="group"><span>Across all customers</span></div>
     {{template "navitem" dict "Href" "/o/environments" "Path" .Path "Icon" "nav-environments" "Label" "Environments"}}
     {{template "navitem" dict "Href" "/o/rehearsals" "Path" .Path "Icon" "nav-rehearsals" "Label" "Rehearsals"}}
     {{template "navitem" dict "Href" "/o/backups" "Path" .Path "Icon" "nav-backups" "Label" "Backups"}}
