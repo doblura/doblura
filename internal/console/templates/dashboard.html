@@ -6,6 +6,23 @@
   </div>
 </div>
 
+{{/* Clusters that did not answer, before anything else on the page. Every number
+     below is a total, and a total that quietly omits a cluster is a total
+     somebody trusts. */}}
+{{if .Data.Troubles}}
+<div class="answer degraded">
+  <span class="icon">{{icon "degraded"}}</span>
+  <div>
+    <p class="big">{{len .Data.Troubles}} of your clusters did not answer</p>
+    <p>Everything below counts only the ones that did. Treat the numbers as a
+      lower bound, not as the situation.</p>
+    {{range .Data.Troubles}}
+    <p class="hint"><b>{{.Cluster}}</b> — {{.Why}}</p>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{if .Data.Attention}}
 <h2 class="sect">Needs attention</h2>
 <div class="grid two">
@@ -16,7 +33,7 @@
       <span class="state state-{{.State}} push">{{icon .State}}{{.Word}}</span>
     </div>
     <p class="meta">{{.Detail}}</p>
-    <div class="foot"><span>{{.Customer}}</span></div>
+    <div class="foot"><span>{{.Customer}}</span>{{if $.Data.Everywhere}}<span class="push mono small">{{.Cluster}}</span>{{end}}</div>
   </a>
 {{end}}
 </div>

@@ -4,11 +4,15 @@
 package console
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"sort"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
 )
@@ -40,11 +44,21 @@ type dashboardView struct {
 	WorkloadVisible bool
 
 	Quotas []quotaRow
+
+	// Cluster is which one these came from, when they came from one.
+	Cluster string
+	// Everywhere means these numbers are the sum across every cluster, and each
+	// row carries where it is.
+	Everywhere bool
+	// Troubles are the clusters that could not be asked. Named, never dropped:
+	// a total that silently omits a cluster is a total somebody trusts.
+	Troubles []clusterTrouble
 }
 
 type attentionRow struct {
 	Name     string
 	Customer string
+	Cluster  string
 	Href     string
 	State    string
 	Word     string
@@ -54,6 +68,7 @@ type attentionRow struct {
 
 type quotaRow struct {
 	Customer string
+	Cluster  string
 	Href     string
 	Open     int32
 	Quota    int32
@@ -61,26 +76,57 @@ type quotaRow struct {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, id Identity) {
-	c, err := s.clientFor(id)
-	if err != nil {
-		s.fail(w, id, err)
+	// Every cluster at once, when that is what was chosen. The counts add up and
+	// the rows say where they are; a cluster that could not be asked is named
+	// above them rather than quietly left out of the total.
+	if s.Everywhere(r) {
+		results := fanOut(r.Context(), s, id,
+			func(ctx context.Context, who Identity) (dashboardView, error) {
+				return s.dashboardIn(ctx, who, scopeOption(r))
+			})
+		s.renderFor(w, r, "dashboard.html", page{
+			Title: "Overview", Identity: id, Data: mergeDashboards(results),
+		})
 		return
 	}
-	ctx := r.Context()
 
-	scope := scopeOption(r)
-
-	var tenants doblurav1alpha1.OdooTenantList
-	if err := c.List(ctx, &tenants, scope); err != nil {
+	view, err := s.dashboardIn(r.Context(), id, scopeOption(r))
+	if err != nil {
 		// A namespace-scoped person cannot make a cluster-wide list at all, and
 		// their permissions are not the problem. Ask which customer instead of
 		// showing them a refusal they cannot act on.
+		//
+		// Lost once already: extracting dashboardIn moved the List out of the
+		// handler and took this with it, which turned the fix into a 403 page for
+		// exactly the people it was written for.
 		if clusterWideRefusal(r, err) {
 			s.askForScope(w, r, id, err)
 			return
 		}
 		s.fail(w, id, err)
 		return
+	}
+	s.renderFor(w, r, "dashboard.html", page{Title: "Overview", Identity: id, Data: view})
+}
+
+// dashboardIn is one cluster's overview.
+//
+// Split out so the same code answers one cluster and all of them: a second
+// implementation for the aggregated view would drift, and the drift shows as two
+// pages disagreeing about the same environment.
+func (s *Server) dashboardIn(
+	ctx context.Context,
+	id Identity,
+	scope client.ListOption,
+) (dashboardView, error) {
+	c, err := s.clientFor(id)
+	if err != nil {
+		return dashboardView{}, err
+	}
+
+	var tenants doblurav1alpha1.OdooTenantList
+	if err := c.List(ctx, &tenants, scope); err != nil {
+		return dashboardView{}, err
 	}
 	var envs doblurav1alpha1.OdooEnvironmentList
 	_ = c.List(ctx, &envs, scope)
@@ -157,9 +203,71 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, id Iden
 		return view.Quotas[i].Customer < view.Quotas[j].Customer
 	})
 
-	s.renderFor(w, r, "dashboard.html", page{
-		Title: "Overview", Identity: id, Data: view,
+	view.Cluster = id.Cluster
+	return view, nil
+}
+
+// mergeDashboards adds up what every cluster answered.
+func mergeDashboards(results []clusterResult[dashboardView]) dashboardView {
+	out := dashboardView{Everywhere: true, Troubles: troubles(results), WorkloadVisible: true}
+	for _, res := range results {
+		if res.Err != nil {
+			continue
+		}
+		v := res.Value
+		out.Customers += v.Customers
+		out.Environments += v.Environments
+		out.Up += v.Up
+		// One cluster whose workloads cannot be read makes the "up" count
+		// meaningless everywhere, not partly meaningless: a total that counts
+		// four clusters and guesses the fifth is worse than one that says it
+		// cannot tell.
+		if !v.WorkloadVisible {
+			out.WorkloadVisible = false
+		}
+		out.Attention = append(out.Attention, stamped(v.Attention, res.Cluster)...)
+		out.Expiring = append(out.Expiring, stamped(v.Expiring, res.Cluster)...)
+		for _, q := range v.Quotas {
+			q.Cluster = res.Cluster
+			q.Href = crossCluster(res.Cluster, q.Href)
+			out.Quotas = append(out.Quotas, q)
+		}
+	}
+	// Most severe first, as within one cluster: somebody scanning this list is
+	// looking for what is broken, and interleaving by cluster would bury it.
+	sort.SliceStable(out.Attention, func(i, j int) bool {
+		return out.Attention[i].severity < out.Attention[j].severity
 	})
+	sort.Slice(out.Quotas, func(i, j int) bool {
+		if out.Quotas[i].Cluster != out.Quotas[j].Cluster {
+			return out.Quotas[i].Cluster < out.Quotas[j].Cluster
+		}
+		return out.Quotas[i].Customer < out.Quotas[j].Customer
+	})
+	return out
+}
+
+// stamped records which cluster each row came from and points its link there.
+func stamped(rows []attentionRow, cluster string) []attentionRow {
+	out := make([]attentionRow, 0, len(rows))
+	for _, row := range rows {
+		row.Cluster = cluster
+		row.Href = crossCluster(cluster, row.Href)
+		out = append(out, row)
+	}
+	return out
+}
+
+// crossCluster makes a link that switches cluster on the way.
+//
+// Through /cluster rather than a cluster in the path, so the choice is remembered
+// and the back button behaves — and so every page about one object goes on being
+// about one cluster, which is the only thing they can be.
+func crossCluster(cluster, href string) string {
+	if href == "" {
+		return ""
+	}
+	return "/cluster?to=" + url.QueryEscape(cluster) + "&back=" + url.QueryEscape(href)
 }
 
 // expiryWarning is how far ahead the landing page warns.
