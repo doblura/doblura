@@ -151,7 +151,11 @@ func (s *Server) authenticated(h func(http.ResponseWriter, *http.Request, Identi
 			// so it cannot be passed wrongly at one of twenty-eight call sites.
 			// It changes which API server is asked and never what the answer is
 			// allowed to be — see Identity.Cluster.
-			id.Cluster = s.clusterOf(r)
+			// The cluster a single-cluster page should ask. "Everywhere" is a
+			// property of the REQUEST, read by the pages that can aggregate;
+			// leaving it in the identity would make every ordinary Get try to
+			// reach a cluster called "*".
+			id.Cluster = s.askedCluster(r)
 		}
 		if err != nil {
 			http.Redirect(w, r, "/auth/login?next="+url.QueryEscape(safeNext(r.URL.RequestURI())),

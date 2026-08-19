@@ -6,10 +6,12 @@ package console
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
@@ -99,6 +101,8 @@ type objectRow struct {
 	Name      string
 	Namespace string
 	Href      string
+	// Cluster is where it is, shown only in the aggregated view.
+	Cluster string
 	// Cells are the columns after the name, in order. A cell is either text or a
 	// state pill — resolved here so the template is a loop and nothing else. A
 	// template that has to decide what a value IS ends up full of type switches,
@@ -123,12 +127,27 @@ func pill(s string) cell  { return cell{State: s} }
 // verdict is a pill whose word belongs to its own kind.
 func verdict(state, word string) cell { return cell{State: state, Word: word} }
 
+// Denied means REFUSED, and nothing else.
+//
+// It was set on any list error at all, so a cluster that could not be reached was
+// reported to the person as "your groups do not permit reading these" — which
+// sends them to ask for permissions they already have, about a cluster that is
+// simply down. Only a Forbidden is a permissions answer; everything else is the
+// cluster not answering, and says so in the API server's own words.
 type objectsView struct {
 	Kind *objectKind
 	Rows []objectRow
 	// Denied is set when the person may not list this kind at all, which is a
 	// different page from an empty one.
 	Denied bool
+
+	// Cluster is which one these rows came from, when they came from one.
+	Cluster string
+	// Everywhere means the rows are from every cluster and carry their own.
+	Everywhere bool
+	// Troubles are the clusters that could not be asked. Shown, never dropped: a
+	// federated list that quietly returns fewer rows reports an outage as calm.
+	Troubles []clusterTrouble
 }
 
 func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identity) {
@@ -137,22 +156,56 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		http.NotFound(w, r)
 		return
 	}
-	c, err := s.clientFor(id)
-	if err != nil {
-		s.fail(w, id, err)
-		return
-	}
-
-	view := objectsView{Kind: kind}
 	ctx := r.Context()
 	// One scope for every kind on this page. These lists are cluster-wide, which a
 	// RoleBinding to a single namespace does not permit — see scope.go.
 	scope := scopeOption(r)
 
+	// Every cluster at once, when that is what was chosen. Each row then carries
+	// where it is, and a cluster that could not be asked is shown as itself
+	// rather than as fewer rows — see fanout.go.
+	if s.Everywhere(r) {
+		results := fanOut(ctx, s, id, func(ctx context.Context, who Identity) (objectsView, error) {
+			return s.objectsIn(ctx, who, scope, kind)
+		})
+		s.renderFor(w, r, "objects.html", page{
+			Title: kind.Title, Identity: id, Data: mergeObjects(kind, results),
+		})
+		return
+	}
+
+	view, err := s.objectsIn(ctx, id, scope, kind)
+	if err != nil {
+		s.fail(w, id, err)
+		return
+	}
+	s.renderFor(w, r, "objects.html", page{Title: kind.Title, Identity: id, Data: view})
+}
+
+// objectsIn is one cluster's worth of rows.
+//
+// Split out of the handler so the same code answers one cluster and all of them:
+// a second implementation for the aggregated view would drift, and the drift
+// would show as one list disagreeing with another about the same object.
+func (s *Server) objectsIn(
+	ctx context.Context,
+	id Identity,
+	scope client.ListOption,
+	kind *objectKind,
+) (objectsView, error) {
+	c, err := s.clientFor(id)
+	if err != nil {
+		return objectsView{Kind: kind}, err
+	}
+	view := objectsView{Kind: kind, Cluster: id.Cluster}
+
 	switch kind.Slug {
 	case "environments":
 		var l doblurav1alpha1.OdooEnvironmentList
 		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
 			view.Denied = true
 			break
 		}
@@ -179,6 +232,9 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 	case "reviewsets":
 		var l doblurav1alpha1.ReviewSetList
 		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
 			view.Denied = true
 			break
 		}
@@ -205,6 +261,9 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 	case "rehearsals":
 		var l doblurav1alpha1.OdooRehearsalList
 		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
 			view.Denied = true
 			break
 		}
@@ -223,6 +282,9 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 	case "backups":
 		var l doblurav1alpha1.OdooBackupList
 		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
 			view.Denied = true
 			break
 		}
@@ -247,6 +309,9 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 	case "snapshots":
 		var l doblurav1alpha1.OdooSnapshotList
 		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
 			view.Denied = true
 			break
 		}
@@ -265,6 +330,9 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 	case "databases":
 		var l doblurav1alpha1.OdooDatabaseList
 		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
 			view.Denied = true
 			break
 		}
@@ -282,6 +350,9 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 	case "servers":
 		var l doblurav1alpha1.OdooInstanceList
 		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
 			view.Denied = true
 			break
 		}
@@ -305,7 +376,41 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		}
 		return view.Rows[i].Name < view.Rows[j].Name
 	})
-	s.renderFor(w, r, "objects.html", page{Title: kind.Title, Identity: id, Data: view})
+	return view, nil
+}
+
+// mergeObjects joins what every cluster answered.
+//
+// Denied is a property of a cluster and not of the page: a person may read
+// environments in one and not in another, and collapsing that into one flag would
+// either hide the rows they can see or claim they can see none.
+func mergeObjects(kind *objectKind, results []clusterResult[objectsView]) objectsView {
+	out := objectsView{Kind: kind, Everywhere: true, Troubles: troubles(results)}
+	for _, res := range results {
+		if res.Err != nil {
+			continue
+		}
+		if res.Value.Denied {
+			out.Troubles = append(out.Troubles, clusterTrouble{
+				Cluster: res.Cluster,
+				Why:     "your groups do not permit reading these in this cluster",
+			})
+			continue
+		}
+		for _, row := range res.Value.Rows {
+			row.Cluster = res.Cluster
+			// The link carries its cluster, because following it lands on a page
+			// about ONE object and that page has to ask the right API server.
+			// Through /cluster so the choice is remembered, which is what makes
+			// the back button behave.
+			if row.Href != "" {
+				row.Href = "/cluster?to=" + url.QueryEscape(res.Cluster) +
+					"&back=" + url.QueryEscape(row.Href)
+			}
+			out.Rows = append(out.Rows, row)
+		}
+	}
+	return out
 }
 
 // listDeployments returns nil when the person cannot see them, which the health

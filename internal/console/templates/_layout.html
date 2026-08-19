@@ -54,7 +54,7 @@ every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}
     <nav>
       {{range .Clusters}}
       <a href="/cluster?to={{.Name}}&amp;back={{$.Path}}"{{if .On}} class="on" aria-current="true"{{end}}
-         data-label="{{.Name}}">{{icon "nav-cluster"}}<span>{{.Name}}</span></a>
+         data-label="{{.Label}}">{{icon "nav-cluster"}}<span>{{.Label}}</span></a>
       {{end}}
     </nav>
   </div>

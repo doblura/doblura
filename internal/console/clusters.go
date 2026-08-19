@@ -35,6 +35,14 @@ import (
 
 const clusterCookie = "doblura_cluster"
 
+// allClusters is the picker's "everywhere" entry.
+//
+// A sentinel and not the empty string, which already means "the local one". The
+// lists that can answer it do; the pages that cannot — anything about one object
+// — carry a cluster in their link instead, so following one from an aggregated
+// list lands in the right place.
+const allClusters = "*"
+
 // loadClusters reads a kubeconfig per key from the Secret.
 //
 // Read once at startup rather than per request. A console that re-read them would
@@ -76,7 +84,7 @@ func (s *Server) clusterOf(r *http.Request) string {
 	}
 	// Validated against what exists, so a stale cookie from a cluster that has
 	// been removed lands on the local one rather than on an error page.
-	if c.Value == s.opt.LocalClusterName {
+	if c.Value == s.opt.LocalClusterName || (c.Value == allClusters && s.Federated()) {
 		return c.Value
 	}
 	if _, ok := s.clusters[c.Value]; ok {
@@ -98,7 +106,7 @@ func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request, _ Identit
 		to = r.FormValue("to")
 	}
 
-	known := to == s.opt.LocalClusterName
+	known := to == s.opt.LocalClusterName || (to == allClusters && s.Federated())
 	if _, ok := s.clusters[to]; ok {
 		known = true
 	}
@@ -125,7 +133,10 @@ func (s *Server) handleCluster(w http.ResponseWriter, r *http.Request, _ Identit
 // clusterChoice is one entry in the picker.
 type clusterChoice struct {
 	Name string
-	On   bool
+	// Label is what it is called on screen, which for the everywhere entry is not
+	// its value.
+	Label string
+	On    bool
 }
 
 // clusterChoices is what the picker offers, local first.
@@ -134,14 +145,37 @@ func (s *Server) clusterChoices(r *http.Request) []clusterChoice {
 		return nil
 	}
 	current := s.clusterOf(r)
-	out := []clusterChoice{{Name: s.opt.LocalClusterName, On: current == s.opt.LocalClusterName}}
+	out := []clusterChoice{
+		// Everywhere first: it is the view somebody wants when they do not
+		// already know which cluster the problem is in, which is most mornings.
+		{Name: allClusters, Label: "Everywhere", On: current == allClusters},
+		{Name: s.opt.LocalClusterName, Label: s.opt.LocalClusterName,
+			On: current == s.opt.LocalClusterName},
+	}
 	rest := make([]string, 0, len(s.clusters))
 	for name := range s.clusters {
 		rest = append(rest, name)
 	}
 	sort.Strings(rest)
 	for _, name := range rest {
-		out = append(out, clusterChoice{Name: name, On: current == name})
+		out = append(out, clusterChoice{Name: name, Label: name, On: current == name})
 	}
 	return out
+}
+
+// Everywhere reports whether this request is about every cluster at once.
+func (s *Server) Everywhere(r *http.Request) bool {
+	return s.Federated() && s.clusterOf(r) == allClusters
+}
+
+// askedCluster is the cluster a page should use when it can only use one.
+//
+// "Everywhere" collapses to the local cluster for pages about a single object,
+// which never see it: a link out of an aggregated list carries its own cluster,
+// so this is the fallback for somebody typing a URL by hand.
+func (s *Server) askedCluster(r *http.Request) string {
+	if c := s.clusterOf(r); c != allClusters {
+		return c
+	}
+	return s.opt.LocalClusterName
 }

@@ -6,12 +6,29 @@
   </div>
 </div>
 
+{{/* Clusters that could not be asked, ABOVE the table. A federated list that
+     quietly returns fewer rows reports an outage as calm — so the missing ones
+     are named before anybody reads the rows as complete. */}}
+{{if .Data.Troubles}}
+<div class="answer degraded">
+  <span class="icon">{{icon "degraded"}}</span>
+  <div>
+    <p class="big">{{len .Data.Troubles}} of your clusters did not answer</p>
+    <p>What is below is everything the rest of them have. It is not everything.</p>
+    {{range .Data.Troubles}}
+    <p class="hint"><b>{{.Cluster}}</b> — {{.Why}}</p>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{if .Data.Denied}}
 <div class="denied">{{icon "locked"}} Your groups do not permit reading these.
 The API server was asked; this page holds no list of its own.</div>
 {{else if .Data.Rows}}
 <div class="card scroll"><table>
   <thead><tr>{{range .Data.Kind.Columns}}<th>{{.}}</th>{{end}}
+    {{if .Data.Everywhere}}<th>Cluster</th>{{end}}
     {{if $.Advanced}}<th>Namespace</th>{{end}}</tr></thead>
   <tbody>
   {{range .Data.Rows}}
@@ -21,11 +38,17 @@ The API server was asked; this page holds no list of its own.</div>
         {{if .State}}<td><span class="state state-{{.State}}">{{icon .State}}{{if .Word}}{{.Word}}{{else}}{{stateWord .State}}{{end}}</span></td>
         {{else}}<td{{if .Muted}} class="muted small"{{end}}>{{.Text}}</td>{{end}}
       {{end}}
+      {{if $.Data.Everywhere}}<td class="mono small">{{.Cluster}}</td>{{end}}
       {{if $.Advanced}}<td class="muted small">{{.Namespace}}</td>{{end}}
     </tr>
   {{end}}
   </tbody>
 </table></div>
+{{else if and .Data.Everywhere .Data.Troubles}}
+<div class="empty">
+  <p class="big">Nothing from the clusters that answered</p>
+  <p>The ones above did not, so this is not the same as there being nothing.</p>
+</div>
 {{else}}
 <div class="empty">
   <div class="big">Nothing here that you can see</div>
