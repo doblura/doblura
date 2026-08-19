@@ -1,0 +1,48 @@
+{{define "scope.html"}}{{template "top" .}}
+{{$d := .Data}}
+<div class="head">
+  <div>
+    <h1>Which customer?</h1>
+    <p class="sub">Your access is for one customer rather than the whole cluster</p>
+  </div>
+</div>
+
+<div class="answer degraded">
+  <span class="icon">{{icon "degraded"}}</span>
+  <div>
+    <p class="big">This page asked about every customer, and you are allowed one</p>
+    <p>Nothing is wrong with your access. Listing across the whole cluster is a
+      separate permission from reading one customer, and you have the second and
+      not the first — which is the normal way to grant it.</p>
+    <p>Tell the console which customer you are looking at and every page will ask
+      about that one instead. It is remembered as you move around, and you can
+      clear it whenever you like.</p>
+  </div>
+</div>
+
+<div class="card pad">
+  <form method="post" action="/scope" class="stack">
+    <input type="hidden" name="back" value="{{$d.Back}}">
+    <div><label for="to">Customer</label>
+      <input id="to" name="to" required autofocus
+             pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
+             placeholder="acme"
+             title="The customer's namespace: lower-case letters, digits and dashes">
+      <small class="hint">The name of the Kubernetes namespace your environments
+        are in. If you do not know it, whoever gave you access does — it is the
+        same name that appears in the link they sent you.</small></div>
+    <div><button type="submit">Look at this customer</button></div>
+  </form>
+</div>
+
+{{template "help" (safe `<p>Setting this changes what the console <b>asks for</b>,
+and nothing else. What you are allowed to see is decided by Kubernetes on every
+request, so naming a customer you cannot read gets you that customer's refusal —
+which is also how you find out.</p>`)}}
+
+<h2 class="sect">What the server said</h2>
+<div class="problem"><pre>{{$d.Refusal}}</pre></div>
+<p class="hint">Worth keeping if the scope turns out not to be the problem: it
+  names the exact permission, the resource and you, which is what whoever
+  administers your access needs.</p>
+{{template "bottom" .}}{{end}}

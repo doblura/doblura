@@ -60,7 +60,9 @@ func (s *Server) handleReviewSet(w http.ResponseWriter, r *http.Request, id Iden
 	var envs doblurav1alpha1.OdooEnvironmentList
 	_ = c.List(r.Context(), &envs, client.InNamespace(ns),
 		client.MatchingLabels{"doblura.dev/review-set": rs.Name})
-	deps := listDeployments(r.Context(), c)
+	// Already inside one namespace: this page is a single review set, so the
+	// deployments it needs are the ones next to it and not the whole cluster.
+	deps := listDeployments(r.Context(), c, client.InNamespace(ns))
 
 	byName := map[string]*doblurav1alpha1.OdooEnvironment{}
 	for i := range envs.Items {

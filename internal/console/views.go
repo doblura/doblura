@@ -50,6 +50,11 @@ type page struct {
 	Path string
 	// RailCollapsed is remembered across pages, unlike the checkbox it replaced.
 	RailCollapsed bool
+	// Scope is the one customer this console is asking about, empty for all of
+	// them. Shown on every page while it is set: a console quietly showing one
+	// customer's worth of a cluster is one somebody will use to conclude the other
+	// customers have disappeared.
+	Scope string
 	// SSO says whether the sign-in page should offer the identity provider as
 	// well as the local form.
 	SSO  bool
@@ -63,6 +68,7 @@ func (s *Server) renderFor(w http.ResponseWriter, r *http.Request, name string, 
 	p.Advanced = p.Level == levelAdvanced
 	p.Path = r.URL.Path
 	p.RailCollapsed = railCollapsed(r)
+	p.Scope = scopeOf(r)
 	s.render(w, name, p)
 }
 
@@ -131,15 +137,21 @@ func (s *Server) handleCustomers(w http.ResponseWriter, r *http.Request, id Iden
 		s.fail(w, id, err)
 		return
 	}
+	scope := scopeOption(r)
+
 	var tenants doblurav1alpha1.OdooTenantList
-	if err := c.List(r.Context(), &tenants); err != nil {
+	if err := c.List(r.Context(), &tenants, scope); err != nil {
+		if clusterWideRefusal(r, err) {
+			s.askForScope(w, r, id, err)
+			return
+		}
 		s.fail(w, id, err)
 		return
 	}
 	var envs doblurav1alpha1.OdooEnvironmentList
 	// A viewer can read these; if they somehow cannot, the list still renders
 	// with zero counts rather than failing the whole page over a column.
-	_ = c.List(r.Context(), &envs)
+	_ = c.List(r.Context(), &envs, scope)
 
 	rows := make([]customerRow, 0, len(tenants.Items))
 	for i := range tenants.Items {
@@ -472,7 +484,7 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request, id Identit
 		return
 	}
 	var tenants doblurav1alpha1.OdooTenantList
-	_ = c.List(r.Context(), &tenants)
+	_ = c.List(r.Context(), &tenants, scopeOption(r))
 
 	type scope struct {
 		Namespace string

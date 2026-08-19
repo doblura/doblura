@@ -9,7 +9,6 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
 )
@@ -69,15 +68,24 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, id Iden
 	}
 	ctx := r.Context()
 
+	scope := scopeOption(r)
+
 	var tenants doblurav1alpha1.OdooTenantList
-	if err := c.List(ctx, &tenants); err != nil {
+	if err := c.List(ctx, &tenants, scope); err != nil {
+		// A namespace-scoped person cannot make a cluster-wide list at all, and
+		// their permissions are not the problem. Ask which customer instead of
+		// showing them a refusal they cannot act on.
+		if clusterWideRefusal(r, err) {
+			s.askForScope(w, r, id, err)
+			return
+		}
 		s.fail(w, id, err)
 		return
 	}
 	var envs doblurav1alpha1.OdooEnvironmentList
-	_ = c.List(ctx, &envs)
+	_ = c.List(ctx, &envs, scope)
 	var deps appsv1.DeploymentList
-	visible := c.List(ctx, &deps, client.InNamespace("")) == nil
+	visible := c.List(ctx, &deps, scope) == nil
 
 	view := dashboardView{
 		Customers:       len(tenants.Items),

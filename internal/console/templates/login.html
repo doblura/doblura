@@ -7,13 +7,16 @@
   <div class="mark">dob<span>l</span>ura</div>
   <p class="lede">Sign in to continue.</p>
   {{if .Error}}<div class="problem"><pre>{{.Error}}</pre></div>{{end}}
+  {{if and .Back (ne .Back "/")}}<p class="lede">You will be taken back to
+    <span class="mono">{{.Back}}</span> once you are in.</p>{{end}}
   <form method="post" action="/auth/login" class="stack">
+    <input type="hidden" name="next" value="{{.Back}}">
     <div><label for="user">Username</label><input id="user" name="user" autocomplete="username" autofocus required></div>
     <div><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
     <button type="submit">Sign in</button>
   </form>
   {{if .SSO}}<p class="or">or</p>
-  <a class="btn ghost wide" href="/auth/sso">Continue with single sign-on</a>{{end}}
+  <a class="btn ghost wide" href="/auth/sso?next={{.Back}}">Continue with single sign-on</a>{{end}}
   <p class="fineprint">Your username and groups are what Doblura impersonates.
   Everything you are allowed to do is decided by Kubernetes, not by this page.</p>
 </div>

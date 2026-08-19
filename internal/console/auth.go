@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -136,15 +137,38 @@ func parseDevIdentity(v string) (Identity, error) {
 }
 
 // authenticated wraps a handler that needs a person.
+//
+// A bounce carries where they were going. Without it, a session that ends —
+// because it expired, or because somebody redeployed the console underneath
+// them — turns every link into a trip to the sign-in page and then to the
+// overview, and the person ends up hunting for the page they had open. It reads
+// as the console losing their place, which is exactly what it was doing.
 func (s *Server) authenticated(h func(http.ResponseWriter, *http.Request, Identity)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := s.identity(r)
 		if err != nil {
-			http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
+			http.Redirect(w, r, "/auth/login?next="+url.QueryEscape(safeNext(r.URL.RequestURI())),
+				http.StatusSeeOther)
 			return
 		}
 		h(w, r, id)
 	}
+}
+
+// safeNext keeps a return path that cannot leave this site.
+//
+// Same rule as the rail's back parameter, and for the same reason: a path taken
+// from a URL and used in a redirect is an open redirector, and this one appears on
+// the sign-in page, which is the single best place to put one.
+func safeNext(p string) string {
+	if p == "" || p[0] != '/' || (len(p) > 1 && p[1] == '/') {
+		return "/"
+	}
+	// Never bounce back to the sign-in flow itself: it would loop.
+	if strings.HasPrefix(p, "/auth/") {
+		return "/"
+	}
+	return p
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

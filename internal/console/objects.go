@@ -145,15 +145,18 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 
 	view := objectsView{Kind: kind}
 	ctx := r.Context()
+	// One scope for every kind on this page. These lists are cluster-wide, which a
+	// RoleBinding to a single namespace does not permit — see scope.go.
+	scope := scopeOption(r)
 
 	switch kind.Slug {
 	case "environments":
 		var l doblurav1alpha1.OdooEnvironmentList
-		if err := c.List(ctx, &l); err != nil {
+		if err := c.List(ctx, &l, scope); err != nil {
 			view.Denied = true
 			break
 		}
-		deps := listDeployments(ctx, c)
+		deps := listDeployments(ctx, c, scope)
 		for i := range l.Items {
 			e := &l.Items[i]
 			replicas, ready := replicasFor(deps, e.Name)
@@ -175,7 +178,7 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		}
 	case "reviewsets":
 		var l doblurav1alpha1.ReviewSetList
-		if err := c.List(ctx, &l); err != nil {
+		if err := c.List(ctx, &l, scope); err != nil {
 			view.Denied = true
 			break
 		}
@@ -201,7 +204,7 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		}
 	case "rehearsals":
 		var l doblurav1alpha1.OdooRehearsalList
-		if err := c.List(ctx, &l); err != nil {
+		if err := c.List(ctx, &l, scope); err != nil {
 			view.Denied = true
 			break
 		}
@@ -219,7 +222,7 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		}
 	case "backups":
 		var l doblurav1alpha1.OdooBackupList
-		if err := c.List(ctx, &l); err != nil {
+		if err := c.List(ctx, &l, scope); err != nil {
 			view.Denied = true
 			break
 		}
@@ -243,7 +246,7 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		}
 	case "snapshots":
 		var l doblurav1alpha1.OdooSnapshotList
-		if err := c.List(ctx, &l); err != nil {
+		if err := c.List(ctx, &l, scope); err != nil {
 			view.Denied = true
 			break
 		}
@@ -261,7 +264,7 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		}
 	case "databases":
 		var l doblurav1alpha1.OdooDatabaseList
-		if err := c.List(ctx, &l); err != nil {
+		if err := c.List(ctx, &l, scope); err != nil {
 			view.Denied = true
 			break
 		}
@@ -278,7 +281,7 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		}
 	case "servers":
 		var l doblurav1alpha1.OdooInstanceList
-		if err := c.List(ctx, &l); err != nil {
+		if err := c.List(ctx, &l, scope); err != nil {
 			view.Denied = true
 			break
 		}
@@ -307,9 +310,9 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 
 // listDeployments returns nil when the person cannot see them, which the health
 // function reads as "cannot tell" rather than as "down".
-func listDeployments(ctx context.Context, c client.Client) *appsv1.DeploymentList {
+func listDeployments(ctx context.Context, c client.Client, scope client.ListOption) *appsv1.DeploymentList {
 	var deps appsv1.DeploymentList
-	if err := c.List(ctx, &deps); err != nil {
+	if err := c.List(ctx, &deps, scope); err != nil {
 		return nil
 	}
 	return &deps

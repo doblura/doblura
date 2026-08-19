@@ -57,6 +57,14 @@ every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}
   </div>
 </aside>
 <main class="page"><div class="inner">
+{{/* The scope, stated on every page while it is set. A console silently showing
+     one customer's worth of a cluster is a console somebody will use to conclude
+     that the other customers are gone. */}}
+{{if .Scope}}<div class="scoped">
+  <span>Showing only <b>{{.Scope}}</b>. Other customers you can see are not on
+    these pages while this is set.</span>
+  <a class="btn ghost small-btn" href="/scope?to=&amp;back={{.Path}}">Show everything</a>
+</div>{{end}}
 {{end}}
 
 {{define "navitem"}}

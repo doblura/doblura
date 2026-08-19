@@ -245,6 +245,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /access/revoke", s.authenticated(s.handleAccessRevoke))
 	mux.HandleFunc("GET /o/{kind}", s.authenticated(s.handleObjects))
 	mux.HandleFunc("GET /rail", s.authenticated(s.handleRail))
+	// GET clears it and POST sets it. A GET that sets a scope is a link somebody
+	// can be sent; clearing is harmless, so that one stays a link.
+	mux.HandleFunc("GET /scope", s.authenticated(s.handleScope))
+	mux.HandleFunc("POST /scope", s.authenticated(s.handleScope))
 	mux.HandleFunc("GET /b/{ns}/{name}", s.authenticated(s.handleBackup))
 	mux.HandleFunc("POST /b/{ns}/{name}/restore", s.authenticated(s.handleRestore))
 	mux.HandleFunc("GET /rs/{ns}/{name}", s.authenticated(s.handleReviewSet))

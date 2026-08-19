@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -136,7 +137,12 @@ var dummyHash = []byte("$2a$12$C6UzMDM.H6dfI/f/IKcEe.6IQV6TPZbmZQZfnH8CS1UO.OQfo
 // ── the login form ──
 
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "login.html", page{Title: "Sign in", Error: r.URL.Query().Get("e")})
+	s.render(w, "login.html", page{
+		Title: "Sign in", Error: r.URL.Query().Get("e"),
+		// Where they were going before the session ended, carried through the form
+		// so signing in returns them there instead of to the overview.
+		Back: safeNext(r.URL.Query().Get("next")),
+	})
 }
 
 func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
@@ -149,11 +155,12 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		// The same message for a missing user and a wrong password, matching the
 		// same-time comparison above: telling them which one they got right is
 		// half the work of an attack.
-		http.Redirect(w, r, "/auth/login?e="+errBadCredentials.Error(), http.StatusSeeOther)
+		http.Redirect(w, r, "/auth/login?e="+url.QueryEscape(errBadCredentials.Error())+
+			"&next="+url.QueryEscape(safeNext(r.FormValue("next"))), http.StatusSeeOther)
 		return
 	}
 	s.setSession(w, r, id)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, safeNext(r.FormValue("next")), http.StatusSeeOther)
 }
 
 // usernames is who has a local account.

@@ -456,6 +456,19 @@ body.plain { min-height: 100vh; padding: 32px 20px 56px; background: var(--app);
 .statuspage .answer .big { font-size: 19px; }
 .statuspage .fineprint { margin-top: 10px; }
 
+/* The band that says the console is only asking about one customer. Ahead of the
+   page's own heading, because it changes what everything below it means. */
+.scoped {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap; margin-bottom: 18px; padding: 10px 14px;
+  border: 1px solid var(--warn-line); border-radius: var(--r);
+  background: var(--warn-bg); font-size: 13.5px; color: var(--warn-ink);
+  /* The warn tokens and not a fallback chain: --warn-soft and --surface-2 do not
+     exist, and var() falling through to an undefined name is how a band ends up
+     transparent in one theme and unreadable in the other. These three are defined
+     for both. */
+}
+
 .live { display: grid; gap: 10px; }
 /* The headline and the state pill on one line, and the pill pushed to the end so
    several environments read as a column of states rather than as ragged text. */
