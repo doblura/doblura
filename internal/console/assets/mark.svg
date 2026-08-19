@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Doblura">
+  <!-- The wordmark's own shape: the fold, and the rule it folds against.
+       Two fills rather than currentColor, because a favicon inherits nothing —
+       and a media query inside the file is what lets it hold on a dark tab
+       strip as well as a light one. -->
+  <style>
+    .fold { fill: #0E6E7D }
+    .rule { fill: #0E6E7D; opacity: .45 }
+    @media (prefers-color-scheme: dark) {
+      .fold { fill: #35b7a4 }
+      .rule { fill: #35b7a4; opacity: .5 }
+    }
+  </style>
+  <rect class="fold" x="2" y="9" width="12.5" height="6" rx="3"/>
+  <rect class="rule" x="18" y="3.5" width="2.6" height="17" rx="1.3"/>
+</svg>

@@ -118,11 +118,29 @@ type cell struct {
 	// means the same thing everywhere — but sharing the nouns is not.
 	Word  string
 	Muted bool
+	// Link makes the cell's text a link to somewhere else.
+	//
+	// An address in a list is the thing somebody wants to click, and it was plain
+	// grey text — while the same address on the environment's own page was a link.
+	// Two pages disagreeing about whether a URL is clickable is the kind of small
+	// inconsistency that makes an interface feel unfinished.
+	Link string
 }
 
 func text(s string) cell  { return cell{Text: s} }
 func muted(s string) cell { return cell{Text: s, Muted: true} }
-func pill(s string) cell  { return cell{State: s} }
+
+// address is a URL somebody can open, or grey text when there is none.
+//
+// External, so it opens in its own tab and carries noopener: an environment is
+// somebody's Odoo, and losing the console to it is a small annoyance every time.
+func address(url string) cell {
+	if url == "" {
+		return muted("internal only")
+	}
+	return cell{Text: url, Link: url}
+}
+func pill(s string) cell { return cell{State: s} }
 
 // verdict is a pill whose word belongs to its own kind.
 func verdict(state, word string) cell { return cell{State: state, Word: word} }
@@ -214,10 +232,7 @@ func (s *Server) objectsIn(
 			e := &l.Items[i]
 			replicas, ready := replicasFor(deps, e.Name)
 			h := environmentHealth(e, replicas, ready, deps != nil)
-			addr := "internal only"
-			if e.Status.URL != "" {
-				addr = e.Status.URL
-			}
+
 			view.Rows = append(view.Rows, objectRow{
 				Name: e.Name, Namespace: e.Namespace,
 				Href: "/e/" + e.Namespace + "/" + e.Name,
@@ -225,7 +240,7 @@ func (s *Server) objectsIn(
 					text(e.Spec.ForTenant),
 					pill(h.State),
 					text(string(e.Spec.Data.Type) + " data, " + lowerFirst(string(e.Spec.Lifecycle.Type))),
-					muted(addr),
+					address(e.Status.URL),
 				},
 			})
 		}

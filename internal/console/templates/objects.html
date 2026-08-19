@@ -36,6 +36,7 @@ The API server was asked; this page holds no list of its own.</div>
       <td>{{if .Href}}<a href="{{.Href}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</td>
       {{range .Cells}}
         {{if .State}}<td><span class="state state-{{.State}}">{{icon .State}}{{if .Word}}{{.Word}}{{else}}{{stateWord .State}}{{end}}</span></td>
+        {{else if .Link}}<td><a class="link" href="{{.Link}}" target="_blank" rel="noopener noreferrer">{{.Text}}</a></td>
         {{else}}<td{{if .Muted}} class="muted small"{{end}}>{{.Text}}</td>{{end}}
       {{end}}
       {{if $.Data.Everywhere}}<td class="mono small">{{.Cluster}}</td>{{end}}

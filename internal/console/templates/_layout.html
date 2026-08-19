@@ -4,6 +4,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · Doblura</title>
 <link rel="stylesheet" href="/assets/console.css">
+{{/* An SVG favicon, because the browser asked for /favicon.ico on every single
+     page load and got a 404 — so every tab showed the browser's blank default,
+     which is the most visible "unfinished" signal a product has, and every
+     request log carried a 404 nobody had caused. */}}
+<link rel="icon" type="image/svg+xml" href="/assets/mark.svg">
 </head><body>
 {{if .DevMode}}<div class="dev"><b>Development mode.</b> Nobody is being authenticated —
 every request acts as <b>{{.Identity.User}}</b>. Do not expose this.</div>{{end}}
