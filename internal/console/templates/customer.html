@@ -4,10 +4,19 @@
 <div class="head">
   <div>
     <h1>{{$t.Spec.DisplayName}}</h1>
-    <p class="sub">{{if $adv}}{{$ns}}/{{$t.Name}} · {{end}}{{.Data.Open}} of {{.Data.Quota}} throwaway environments in use</p>
+    <p class="sub">{{if $adv}}{{$ns}}/{{$t.Name}} · {{end}}{{.Data.Open}} throwaway environment{{if ne .Data.Open 1}}s{{end}} in use, {{.Data.Quota}} allowed{{if ge .Data.Open .Data.Quota}} — no room for another{{end}}</p>
   </div>
   <div class="spacer"></div>
 </div>
+
+{{/* The heading first, so the action reads as belonging to this section. It used
+     to sit between the page title and the first heading, where the only primary
+     action on the page looked like a stray button. */}}
+{{template "section" (dict "Title" "Environments" "Help" (safe `<p>An <b>environment</b> is one running copy of this
+customer&rsquo;s Odoo: a review copy for a pull request, a staging server, or a
+rehearsal of a version change. Each has its own database.</p>
+<p><b>Ephemeral</b> ones remove themselves when their time is up and nothing in
+them is kept.</p>`))}}
 
 {{if can $perms "create:odooenvironments:"}}
 <details class="panel">
@@ -41,13 +50,6 @@
 </details>
 {{end}}
 
-<h2 class="sect">Environments</h2>
-{{template "help" (safe `<p>An <b>environment</b> is one running copy of this
-customer's Odoo: a review copy for a pull request, a staging server, or a
-rehearsal of a version change. Each has its own database.</p>
-<p><b>Ephemeral</b> ones remove themselves when their time is up and nothing is
-kept. <b>Persistent</b> ones stay until somebody deletes them.</p>
-<p><a href="https://doblura.dev/guides/environments" target="_blank" rel="noopener noreferrer">Environments in the documentation</a></p>`)}}
 {{if .Data.Environments}}
 <div class="grid two">
 {{range .Data.Environments}}
@@ -80,8 +82,7 @@ environments for this customer. The API server was asked; this page holds no
 list of its own.</div>
 {{end}}
 
-<h2 class="sect">Modules these environments load</h2>
-{{template "help" (safe `<p>Odoo images usually ship Odoo and nothing else. The
+{{template "section" (dict "Title" "Modules these environments load" "Help" (safe `<p>Odoo images usually ship Odoo and nothing else. The
 modules — OCA repositories, or your own private ones — are cloned into each
 environment when it starts.</p>
 <p>Pin to a <b>branch</b> while you are trying things out; pin to a <b>commit</b>
@@ -89,7 +90,7 @@ when the result has to mean the same thing tomorrow. Either way, the commit that
 was actually cloned is recorded on every environment.</p>
 <p>The clone happens inside that environment's own pod, using its own
 credentials. The operator never sees the code.</p>
-<p><a href="https://doblura.dev/guides/addons" target="_blank" rel="noopener noreferrer">Modules in the documentation</a></p>`)}}
+<p><a href="https://doblura.dev/guides/addons" target="_blank" rel="noopener noreferrer">Modules in the documentation</a></p>`))}}
 {{if .Data.Repos}}
 <div class="card scroll"><table>
   <thead><tr><th>Repository</th><th>Pinned to</th><th>Access</th>
@@ -174,12 +175,11 @@ credentials. The operator never sees the code.</p>
 is never a local decision.</p>
 {{end}}
 
-<h2 class="sect">Environments that follow a repository</h2>
-{{template "help" (safe `<p>A <b>review set</b> watches a repository and opens one
+{{template "section" (dict "Title" "Environments that follow a repository" "Help" (safe `<p>A <b>review set</b> watches a repository and opens one
 environment per pull request, or per branch matching a pattern, and removes them
 when the pull request closes.</p>
 <p>The decision was already made when the pull request was opened. Mirroring it by
-hand means the environment exists for the pull requests somebody remembered.</p>`)}}
+hand means the environment exists for the pull requests somebody remembered.</p>`))}}
 {{if .Data.CanEditRepos}}
 <details class="panel">
   <summary class="btn ghost">Follow a repository</summary>
@@ -230,14 +230,13 @@ hand means the environment exists for the pull requests somebody remembered.</p>
 </details>
 {{end}}
 
-<h2 class="sect">Versions this customer may run</h2>
-{{template "help" (safe `<p>The images available to this customer, by a name a
+{{template "section" (dict "Title" "Versions this customer may run" "Help" (safe `<p>The images available to this customer, by a name a
 person recognises rather than a registry path. One is the <b>default</b>: what a
 new environment gets when nobody says otherwise.</p>
 <p>Moving the default between builds of the <b>same</b> Odoo version is an
 ordinary change. Moving it <b>across</b> versions rewrites the database in place
 and cannot be undone by redeploying — so it is refused unless a rehearsal
-succeeded against exactly that image first.</p>`)}}
+succeeded against exactly that image first.</p>`))}}
 
 {{if .Data.Images}}
 <div class="card scroll"><table>

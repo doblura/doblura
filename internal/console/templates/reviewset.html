@@ -27,13 +27,12 @@
   </div>
 </div>
 
-<h2 class="sect">What it is following</h2>
-{{template "help" (safe `<p>One environment per open pull request, and per branch
+{{template "section" (dict "Title" "What it is following" "Help" (safe `<p>One environment per open pull request, and per branch
 matching the patterns. When a pull request closes, its environment goes with
 it.</p>
 <p>An environment that already exists is never repointed: pushing again to the
 same branch does not restore over a database somebody may be looking at. The new
-code is picked up when the pod restarts.</p>`)}}
+code is picked up when the pod restarts.</p>`))}}
 
 {{if .Data.Rows}}
 <div class="card scroll"><table>

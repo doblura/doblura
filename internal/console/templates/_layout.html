@@ -103,8 +103,29 @@ and Kubernetes decides what that allows.
 {{/* Inline help: a question mark that opens a paragraph in place. Sections that
      need explaining get one, rather than every page carrying a wall of prose
      that the people who already know it have to scroll past. */}}
+{{/* A section heading, with its explanation attached.
+     The heading and the "What is this?" pill were two separate things written one
+     after the other in eight templates, so the pill took a line of its own under
+     every heading and broke the rhythm of the page. One template decides how a
+     section looks now, which is also the only way the decision stays in one
+     place. */}}
+{{define "section"}}
+<div class="sect-row">
+  <h2 class="sect">{{.Title}}</h2>
+  {{if .Help}}
+  <details class="helpbox">
+    <summary aria-label="What is this?">{{icon "help"}}<span>What is this?</span></summary>
+    <div class="body">{{.Help}}</div>
+  </details>
+  {{end}}
+</div>
+{{end}}
+
+{{/* The old shape, kept for the places that explain something which is not a
+     section — a form, a panel. It still renders on its own line, which is right
+     there. */}}
 {{define "help"}}
-<details class="helpbox">
+<details class="helpbox standalone">
   <summary aria-label="What is this?">{{icon "help"}}<span>What is this?</span></summary>
   <div class="body">{{.}}</div>
 </details>

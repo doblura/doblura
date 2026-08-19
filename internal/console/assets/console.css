@@ -193,7 +193,9 @@ h2.sect {
    technical-detail panel sat flush against the list above it and read as another
    row of that list. Ordinal position was the wrong thing to key on: what decides
    the gap is what comes BEFORE the heading. */
-.head + h2.sect { margin-top: 0; }
+.head + h2.sect, .head + .sect-row h2.sect { margin-top: 0; }
+.answer + .sect-row h2.sect, .grid + .sect-row h2.sect, .card + .sect-row h2.sect,
+.empty + .sect-row h2.sect, details.panel + .sect-row h2.sect { margin-top: 34px; }
 
 /* ─────────────────────────── surfaces ─────────────────────────── */
 
@@ -622,7 +624,22 @@ td form { margin: 0; }
    A question mark that opens a paragraph in place. Sections that need explaining
    get one; the alternative is every page carrying prose that the people who
    already know it have to scroll past. */
+/* The heading and its explanation on one line. The pill used to sit under the
+   heading on a line of its own, so every explained section cost two lines of
+   vertical rhythm to say one thing. */
+.sect-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.sect-row h2.sect { margin-bottom: 12px; }
+.sect-row details.helpbox { margin: 0 0 12px; }
+/* Open, the explanation still needs the full width, so it breaks to its own row. */
+.sect-row details.helpbox[open] { flex-basis: 100%; }
+/* An action in a section row goes to the far end, and its form drops below the
+   whole row rather than squeezing into it. */
+.sect-row > .push { margin-left: auto; margin-bottom: 12px; }
+.sect-row:has(> .push details.panel[open]) { flex-wrap: wrap; }
+.sect-row > .push:has(details.panel[open]) { flex-basis: 100%; margin-left: 0; }
+
 details.helpbox { display: inline-block; margin: -2px 0 12px; }
+details.helpbox.standalone { margin: -2px 0 12px; }
 details.helpbox > summary {
   list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
   font-size: 12.5px; color: var(--ink-3); padding: 3px 9px 3px 7px;

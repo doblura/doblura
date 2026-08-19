@@ -83,10 +83,9 @@
 </details>
 
 {{if $e.Spec.Addons.Repos}}
-<h2 class="sect">Modules it loads</h2>
-{{template "help" (safe `<p>The middle column is what was <b>asked for</b>; the
+{{template "section" (dict "Title" "Modules it loads" "Help" (safe `<p>The middle column is what was <b>asked for</b>; the
 right one is the commit that was actually cloned. A branch moves, so only the
-right one answers "what code is this running".</p>`)}}
+right one answers "what code is this running".</p>`))}}
 <div class="card scroll"><table>
   <thead><tr><th>Repository</th><th>Asked for</th><th>Actually running</th>
     {{if $adv}}<th>Where from</th>{{end}}</tr></thead>
@@ -109,14 +108,13 @@ credentials — the operator never sees the code.</p>
 {{end}}
 
 {{$f := .Data.Form}}
-<h2 class="sect">Settings</h2>
-{{template "help" (safe `<p><b>Web copies</b> is how many run at once. More than
+{{template "section" (dict "Title" "Settings" "Help" (safe `<p><b>Web copies</b> is how many run at once. More than
 one needs file storage every copy can reach, and the API refuses the combination
 that would otherwise lose attachments.</p>
 <p><b>Scheduled jobs</b> is a switch, not two settings: on means they run on their
 own worker and the web pages stop running them entirely.</p>
 <p>Nothing here is checked by this page. What you ask for is sent, and if a rule
-refuses it you are shown the rule's own words.</p>`)}}
+refuses it you are shown the rule's own words.</p>`))}}
 {{if can $perms (printf "patch:odooenvironments:%s" $e.Name)}}
 <form method="post" action="/e/{{$e.Namespace}}/{{$e.Name}}/settings" class="settings">
   <fieldset>

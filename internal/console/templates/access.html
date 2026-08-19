@@ -102,8 +102,7 @@
   </div>
 </div>
 
-<h2 class="sect">Who has access</h2>
-{{template "help" (safe `<p>Doblura has no user list of its own. A person is
+{{template "section" (dict "Title" "Who has access" "Help" (safe `<p>Doblura has no user list of its own. A person is
 whoever your identity provider says they are, and what they can do comes from
 <b>grants</b>: a person or a group, given a <b>persona</b>, for one customer or
 for the whole cluster.</p>
@@ -112,7 +111,7 @@ somebody joins the team and stops working when they leave it, which is the whole
 point of having an identity provider. A grant to a person is one more thing to
 remember on their last day.</p>
 <p>A grant with <b>no customer</b> reaches every customer in the cluster. Those are
-shown first, because they are what an audit is looking for.</p>`)}}
+shown first, because they are what an audit is looking for.</p>`))}}
 
 {{if $d.Denied}}
   <div class="card pad"><p class="hint">You are not allowed to read grants, so this
@@ -201,12 +200,11 @@ shown first, because they are what an audit is looking for.</p>`)}}
   administrator account, and nobody else can reach anything.</p></div>
 {{end}}
 
-<h2 class="sect">Personas</h2>
-{{template "help" (safe `<p>These are the roles the chart installs. They are meant
+{{template "section" (dict "Title" "Personas" "Help" (safe `<p>These are the roles the chart installs. They are meant
 to be granted to <b>your</b> group names, so nothing here needs renaming to match
 how your company is organised.</p>
 <p>What each one can do is read from the role itself, so this cannot drift from
-what Kubernetes will actually enforce.</p>`)}}
+what Kubernetes will actually enforce.</p>`))}}
 <div class="card scroll"><table>
   <thead><tr><th>Persona</th><th>What it can do</th><th class="num">Granted</th></tr></thead>
   <tbody>

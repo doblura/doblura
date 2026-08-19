@@ -23,15 +23,14 @@
   </div>
 </div>
 
-<h2 class="sect">Copies</h2>
-{{template "help" (safe `<p>Restoring <b>replaces</b> the database and the
+{{template "section" (dict "Title" "Copies" "Help" (safe `<p>Restoring <b>replaces</b> the database and the
 filestore of the environment you choose. Everything in it now is gone.</p>
 <p>The environment is stopped while it happens and started again afterwards, so
 there is an outage of however long the restore takes.</p>
 <p><b>Neutralise</b> is on by default and should stay on unless you are restoring
 production onto production: a production copy running somewhere else with its
 scheduled actions live will send real invoices to real customers from a machine
-nobody is watching.</p>`)}}
+nobody is watching.</p>`))}}
 
 {{if $d.Copies}}
 <div class="card scroll"><table>
