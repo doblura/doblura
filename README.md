@@ -587,16 +587,23 @@ what `make e2e-real` does. What is in place:
 - [x] `OdooTenant` accounted: open ephemeral environments, and a **monotonic**
       total of sized environment-hours with a persisted watermark — the counter an
       invoice could be built from, rather than a gauge that resets on redeploy
-- [ ] **An `OdooDatabase` controller.** `Place()` — the placement logic, with its
-      tests — is still never called, so `spec.instanceRef` has to be set by hand and
-      `status.placedOn` is never written. Listed rather than left to be discovered
-- [ ] **The chart's `defaults` ConfigMap is read by nothing.** It renders
-      `objectStoreImage`, `httpImage` and `gitImage`, and the Go code hardcodes
-      those; pinning a digest or an air-gapped mirror through those values silently
-      does nothing. Same defect as the two above, found while fixing them
+- [x] `OdooDatabase` placed automatically: `Place()` chooses the instance, an
+      instance appearing wakes the databases still waiting for one, and the
+      handover condition says who a copy may be given to — naming the other
+      customers when the answer is nobody
+- [x] The auxiliary images are pinnable: `gitImage`, `httpImage` and
+      `objectStoreImage` reach the pods, so an air-gapped mirror works
 - [x] **A real end-to-end rehearsal against Odoo 19**
-- [x] 22 CEL rules and 49 guardrail checks, verified against a real API server
-- [ ] The web console (designed, not written — the operator is the product today)
+- [x] 25 CEL rules and 148 guardrail checks, verified against a real API server
+- [x] The web console, holding no permissions of its own: five profiles on one
+      set of pages, a status page a customer can be given in their own language,
+      single sign-on verified against a real provider, and more than one cluster
+      read at once
+- [x] The edge: authentication, rate limit, IP allowlist, HSTS and noindex applied
+      by objects this operator creates — and a WAF, in the cluster or somebody
+      else's
+- [x] A restore takes a copy of what it is about to replace, and Production cannot
+      turn that off
 - [ ] Prometheus metrics: migration duration per release
 - [ ] `OdooRelease`: staged rollout of one release across many customers
 
