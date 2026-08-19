@@ -559,9 +559,20 @@ operator generates the `odoo.conf`.
 
 ## Status
 
-**v0.1, alpha. The API can still change.** The pipeline does run end to end: a
-full rehearsal reaches `Succeeded` against Odoo 19 on a kind cluster, which is
-what `make e2e-real` does. What is in place:
+**v0.1, alpha. The API can still change** — and
+[what would make it beta](DECISIONS.md#14-what-beta-means--four-things-all-checkable)
+is written down rather than left to a feeling: the API frozen for `v1alpha1`, an
+upgrade path tested in CI on every release, one installation this project did not
+perform surviving a month, and the destructive paths — a restore, a major upgrade,
+a rehearsal — exercised by somebody who did not write them, on data they cared
+about.
+
+Two of the four are not code, deliberately. Alpha is not a statement about code
+quality; it is a statement about how much is known, and nothing here is known
+until somebody who is not the author has done it.
+
+The pipeline does run end to end: a full rehearsal reaches `Succeeded` against
+Odoo 19 on a kind cluster, which is what `make e2e-real` does. What is in place:
 
 - [x] `OdooRehearsal`: restore → migrate → time → assert
 - [x] Duration budget as a first-class assertion

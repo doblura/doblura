@@ -454,6 +454,51 @@ esac
 kubectl delete namespace $DNS --ignore-not-found --wait=false >/dev/null 2>&1
 echo
 
+# ── the Odoo versions this release supports ──
+#
+# DECISIONS.md 15: the three majors Odoo supports, plus the one that just fell out,
+# for a year. The grace year is the whole point — doblura exists to rehearse the
+# migration OFF an old version, and dropping 17 the week Odoo does would remove the
+# tool from exactly the people who need it.
+#
+# Checked here rather than written in a document, because a support policy nothing
+# enforces is a support policy that drifts one accepted image at a time.
+echo "-- the Odoo versions this release supports --"
+
+VNS=version-guardrail
+kubectl delete namespace $VNS --ignore-not-found --wait=false >/dev/null 2>&1
+kubectl wait --for=delete namespace/$VNS --timeout=120s >/dev/null 2>&1
+kubectl create namespace $VNS >/dev/null 2>&1
+
+ver() { # label, version, ok|rejected
+  out=$(kubectl apply -f - 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: v$(echo "$2" | tr -d '.'), namespace: $VNS}
+spec:
+  displayName: "Odoo $2"
+  images:
+    - {name: only, image: 'odoo:$2', odooVersion: '$2', default: true}
+YAML
+)
+  if printf '%s' "$out" | grep -q 'created\|configured'; then r=ok; else r=rejected; fi
+  if [ "$3" = "$r" ]; then printf '  ok    %s\n' "$1"
+  else printf '  FAIL  %s: %s (expected %s)\n' "$1" "$r" "$3"; fails=$((fails+1)); fi
+}
+
+# Supported by Odoo today, and the one in its grace year.
+ver "19.0, current"                19.0 ok
+ver "18.0, supported"              18.0 ok
+ver "17.0, supported"              17.0 ok
+ver "16.0, in its grace year"      16.0 ok
+# A version that is not a version at all. The catalogue takes an Odoo major, and
+# "latest" in a field somebody reads to decide what is running is how two people
+# end up disagreeing about which product a customer is on.
+ver "a version that is not one"    latest rejected
+
+kubectl delete namespace $VNS --ignore-not-found --wait=false >/dev/null 2>&1
+echo
+
 # ── what the data is, and what follows from it ──
 #
 # Doblura cannot make anybody compliant with anything. What it can do is refuse the

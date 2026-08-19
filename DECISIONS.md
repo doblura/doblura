@@ -172,13 +172,156 @@ Adding a third language is a catalogue entry per string and nothing else. Adding
 one with real plural classes is the moment to reach for a plural-rule library, and
 the comment on `duration` says so.
 
+## 11. A base image — **yes, and it ships tools and defaults, never opinions**
+
+Doblura consumes images and studies what is in them, and the study exists because
+this went wrong repeatedly: the official image runs as uid 100 and Doodba's uid 100
+is `messagebus`; Doodba's published base ships the scaffolding and not Odoo;
+Doodba's command is `python3`, so `-c odoo.conf` hands the config to the
+interpreter; and an image without `click-odoo-contrib` cannot restore, update or
+back anything up — which is discovered on the day somebody needs a restore.
+
+So doblura publishes a base image per Odoo major. It contains:
+
+- Odoo, at a pinned version, running as a user doblura knows,
+- `click-odoo-contrib`, because restore, update and backup all need it,
+- the wkhtmltopdf build Odoo actually wants, which is the oldest unpatched
+  paper-cut in this ecosystem,
+- an entrypoint and a config that behave the way this operator expects.
+
+**And no functional modules.** Not a "performance pack", not a curated OCA
+selection, not queue_job. The line is that the image supplies the RUNTIME and
+doblura supplies the CONFIGURATION — workers, cron threads, the split between web
+and scheduled jobs, the connection proxy — all of which it already sets from
+`size` and `workload` and can change without anybody rebuilding anything.
+
+The reason is not purity. A module baked into a base image changes what the ERP
+does, in a layer the customer did not choose and cannot see, and it is one that
+somebody's auditor will eventually ask about. It is also a maintenance trap: every
+bundled module is a version to track against three Odoo majors, and the day one of
+them breaks on 19 the base image is stuck. Modules belong in
+`spec.addons.repos`, where they are named, pinned to a commit, and visible in the
+interface.
+
+What this unblocks is decision 6: building from a repository needs a base to layer
+onto, and "whatever image you already have" is not one.
+
+Two things to be deliberate about before publishing anything:
+
+- **Trademark.** "Odoo" is theirs. The image is named for doblura and describes
+  what it contains; it does not present itself as an official Odoo build.
+- **Enterprise.** Community only, per decision 8. An image that could be mistaken
+  for carrying Enterprise code is worse than no image.
+
+## 12. When the hosted control plane happens — **on evidence, not on a date**
+
+Decision 2 left a managed service open and decision 3 makes the hub the paid thing.
+The question left is when, and the honest answer is: not until people are running
+the self-hosted thing.
+
+The gate is **five installations doblura did not install**, each with a real
+customer's environments in it, running for a month without the author touching
+them. Not five downloads and not five stars: five clusters where somebody else
+chose this, and where the operator survived a month of their reality.
+
+Building the hub before that is building the paid half of a product nobody has
+finished evaluating the free half of — and the hub is the piece that cannot be
+tested by its author, because its whole value is being run by somebody who does not
+want to run it themselves.
+
+## 13. What the paid tier includes — **the hub, and never a safety control**
+
+Concretely, and so it can be argued with:
+
+| Free, for ever | Paid |
+| --- | --- |
+| The operator, every kind, every guardrail | A hosted hub somebody else runs |
+| The console, against as many clusters as you like | Cross-cluster **writes**, via agents |
+| Every safety control: reversible restores, WAF, allowlists, anonymisation, the data rules | Inventory and history across clusters, kept for you |
+| Single sign-on, every persona | Support with an answer time attached |
+
+The rule that decides anything not on the list: **if a feature makes a failure less
+likely or less expensive, it is free.** The moment somebody can say "the paid
+version is the safe one", the free project has become the unsafe one, and that is
+said out loud once and remembered for ever.
+
+Cross-cluster writes are paid not because they are safer — they are not, they are
+the riskier shape — but because they are the thing that only makes sense when
+somebody else is operating the hub.
+
+## 14. What "beta" means — **four things, all checkable**
+
+`v0.1, alpha. The API can still change` is the sentence that stops anybody
+evaluating this seriously, and it stays true until these are true:
+
+1. **The API is frozen for v1alpha1**, meaning: no field removed or renamed
+   without a conversion. Adding is fine; a rename is not.
+2. **An upgrade path that is tested**, not asserted: a cluster installed at the
+   previous release, upgraded, with its environments still running afterwards —
+   in CI, on every release.
+3. **Somebody else's cluster.** At least one installation this project did not
+   perform, that survived a month. Same evidence as decision 12 asks for, at a
+   lower bar.
+4. **The destructive paths have been exercised by somebody else.** A restore, a
+   major upgrade and a rehearsal, run by a person who did not write them, on data
+   they cared about.
+
+Three and four are not code, and that is the point: alpha is not a code quality
+statement, it is a statement about how much is known — and nothing here is known
+until somebody who is not the author has done it.
+
+## 15. Odoo versions — **the three Odoo supports, and one year of grace**
+
+Doblura supports the three majors Odoo itself supports, plus the one that just
+fell out, for a year.
+
+The grace year exists because doblura's whole reason to exist is rehearsing the
+migration OFF an old version. Dropping support for 17 the week Odoo does would
+remove the tool from exactly the people who most need it — the ones still on 17,
+who are the ones with a migration to rehearse. A migration tool that only supports
+supported versions has misunderstood its job.
+
+What "support" means here, so it is not a feeling: the guardrails run against it,
+a base image exists for it, and a rehearsal from it to the next major is part of
+the release check.
+
+## 16. Governance — **one maintainer, said plainly, with the exits marked**
+
+There is one maintainer. Pretending otherwise in a GOVERNANCE.md would be the kind
+of thing somebody discovers at the worst moment, so it says one, and it says what
+follows:
+
+- **Contributions**: bug fixes and guardrails, gladly. A new CRD or a change to
+  the personas is a design conversation before it is a pull request — not
+  gatekeeping, but because those two are the API and the security model.
+- **The bus factor is one**, written down rather than implied. What protects
+  somebody depending on this is not a promise about the maintainer: it is AGPL,
+  a repository they can fork, an operator whose state lives entirely in their own
+  cluster's objects, and no hosted dependency in the free tier. That is the honest
+  answer, and it is a better one than a second name on a file.
+- **Anything security-related** gets a fix before it gets a discussion.
+
 ---
 
 ## What this ordering means for the next work
 
-1. A default customer, so decision 1's cost is paid once (small).
-2. Read-federation in the console (decision 4, first half).
-3. The hub's cache, only when federation needs one (decision 5).
+Done: the default customer (1), read-federation in the console (4, first half),
+and the data rules (9). The hub's cache (5) was **measured** rather than argued —
+forty customers and 211 environments, every page under a second, including the
+view that asks two clusters. It is not needed, and that is now a fact rather than
+a guess.
 
-Agents, builds and the hosted control plane come after, and each is a separate
-decision about *when*, not about *what* — those are settled above.
+Next, in order:
+
+1. **A base image** (11). It is the piece decision 6 needs, and the one that
+   removes the whole class of problem the image study exists to report.
+2. **Building from a repository** (6), on top of it, with builds in the
+   customer's own cluster.
+3. **`OdooRelease`**: rolling one release across many customers. The customer type
+   already refers to it in a comment, and the type does not exist — which is the
+   shape of defect this project has spent a day removing everywhere else.
+4. **Prometheus metrics**: migration duration per release.
+
+Agents (4, second half) come when writes to remote clusters are needed, and the
+hosted hub (12) when five other people are running this. Neither is a design
+question any more.

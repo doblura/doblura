@@ -177,3 +177,38 @@ called "rehearsal" or "ensayo".
 The code is AGPL-3.0 and **the name is not part of that grant.** Fork it freely;
 ship the fork under a different name. That is the ordinary arrangement and the
 same one Odoo, Grafana and Kubernetes all use.
+
+## Who maintains this, and what happens if they stop
+
+**One person.** Written here rather than implied, because the alternative is that
+somebody discovers it at the worst possible moment.
+
+That is a real risk and the honest thing is to name what actually protects
+somebody who depends on this — which is not a promise about the maintainer:
+
+- **AGPL-3.0 and a public repository.** The code cannot be withdrawn. A fork needs
+  a new name (see Trademark) and nothing else.
+- **The state lives in your cluster.** Every object doblura manages is a Kubernetes
+  resource in your own API server. There is no database of ours holding your
+  inventory, no account, and nothing to export. If this project stopped tomorrow,
+  `kubectl get odooenvironments` keeps working, and so does everything already
+  running — the operator reconciles, and an operator that is not running leaves
+  workloads alone rather than removing them.
+- **No hosted dependency in the free tier.** The console talks to your API server;
+  the operator talks to your API server. Nothing calls home, so nothing stops
+  working when somebody stops paying a bill.
+
+A second name on this file would be a nicer thing to read and a worse guarantee.
+
+### What a contribution looks like
+
+- **Bug fixes and guardrails**: open a pull request. Guardrails especially — a
+  check that catches something this project got wrong is the most useful thing
+  anybody can send.
+- **A new CRD, or a change to the personas**: a conversation first. Not
+  gatekeeping. Those two are the API and the security model, and both are far
+  cheaper to argue about before the code than after it.
+- **Anything security-related**: it gets a fix before it gets a discussion. If
+  it is sensitive, say so and it will be handled privately.
+
+Contributions are under the DCO, as above.
