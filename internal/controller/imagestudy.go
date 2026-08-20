@@ -143,6 +143,20 @@ func (r *OdooTenantReconciler) ensureImageStudy(
 	st *doblurav1alpha1.OdooTenantStatus,
 	entry doblurav1alpha1.ImageCatalogueEntry,
 ) error {
+	// What this entry actually points at. An entry may name a BUILD rather than an
+	// image, and then there is nothing to study until that build has produced
+	// something — resolved through the same function the environment webhook uses,
+	// so a study cannot report on one image while environments run another.
+	ref, why := entry.ResolveWith(r.buildFor(ctx, tenant.Namespace, entry.FromBuild))
+	if ref == "" {
+		// Not an error: a build that has not finished is a normal state, and
+		// failing the customer record over it would be reporting a fact as a
+		// fault. The reason is recorded so the page says why there is no report.
+		setStudyPending(st, entry, why)
+		return nil
+	}
+	entry.Image = ref
+
 	for _, s := range st.ImageStudies {
 		if s.Name == entry.Name && s.Image == entry.Image && s.StudiedAt != nil {
 			return nil // already answered, about this exact image
@@ -196,6 +210,41 @@ func (r *OdooTenantReconciler) ensureImageStudy(
 
 	upsertStudy(st, study)
 	return nil
+}
+
+// buildFor fetches the build a catalogue entry names, or nil.
+func (r *OdooTenantReconciler) buildFor(ctx context.Context, ns, name string) *doblurav1alpha1.OdooBuild {
+	if name == "" {
+		return nil
+	}
+	var b doblurav1alpha1.OdooBuild
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &b); err != nil {
+		return nil
+	}
+	return &b
+}
+
+// setStudyPending records that an entry has nothing to study yet, and why.
+//
+// The alternative is an entry that simply never appears in the report, which
+// reads as "not studied yet" for ever and says nothing about the build it is
+// waiting for.
+func setStudyPending(
+	st *doblurav1alpha1.OdooTenantStatus,
+	entry doblurav1alpha1.ImageCatalogueEntry,
+	why string,
+) {
+	for i := range st.ImageStudies {
+		if st.ImageStudies[i].Name == entry.Name {
+			st.ImageStudies[i].Image = ""
+			st.ImageStudies[i].StudiedAt = nil
+			st.ImageStudies[i].Findings = []string{why}
+			return
+		}
+	}
+	st.ImageStudies = append(st.ImageStudies, doblurav1alpha1.ImageStudy{
+		Name: entry.Name, Findings: []string{why},
+	})
 }
 
 func (r *OdooTenantReconciler) createStudyJob(

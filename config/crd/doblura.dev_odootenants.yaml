@@ -543,6 +543,21 @@ spec:
                       - Doodba
                       - Custom
                       type: string
+                    fromBuild:
+                      description: |-
+                        FromBuild names an OdooBuild in this namespace, and makes this entry
+                        whatever that build produced — by DIGEST, not by the tag it was pushed to.
+
+                        It exists so the last manual step of a build is not a manual step. Without
+                        it, a build finishes, somebody reads a digest off a status and pastes it in
+                        here, and the catalogue is right until the next build. With it the customer
+                        record says what the entry IS — the output of that build — and doblura
+                        resolves it.
+
+                        A tag would be the wrong thing to resolve to: it is a name somebody can
+                        move, and an environment that pulled it last week is not necessarily running
+                        what it names today.
+                      type: string
                     image:
                       description: Image is the pullable reference.
                       minLength: 1
@@ -571,10 +586,14 @@ spec:
                       pattern: ^[0-9]+\.[0-9]+$
                       type: string
                   required:
-                  - image
                   - name
                   - odooVersion
                   type: object
+                  x-kubernetes-validations:
+                  - message: 'an entry names an image OR the build that produces it,
+                      and exactly one: with both, the two can disagree and nothing
+                      says which won; with neither, the entry names nothing'
+                    rule: has(self.image) != has(self.fromBuild)
                 maxItems: 32
                 type: array
                 x-kubernetes-list-map-keys:

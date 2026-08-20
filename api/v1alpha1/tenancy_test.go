@@ -124,3 +124,40 @@ func TestTierSeparation(t *testing.T) {
 		}
 	}
 }
+
+// A catalogue entry that names a build resolves to what that build produced.
+//
+// One function, two callers — the environment webhook and the tenant's image
+// study — because two implementations of "which image is this?" is how a study
+// reports on one thing while an environment runs another.
+func TestACatalogueEntryResolvesToWhatItsBuildProduced(t *testing.T) {
+	digest := "reg/acme/erp@sha256:c0e9195ed79ba81e615743d91446b33d9ea22b38dafe4da346e23befe385dc5b"
+	built := &OdooBuild{Status: OdooBuildStatus{
+		Phase: BuildSucceeded, Image: digest,
+	}}
+
+	plain := &ImageCatalogueEntry{Name: "e", Image: "odoo:18.0"}
+	if ref, why := plain.ResolveWith(nil); ref != "odoo:18.0" || why != "" {
+		t.Errorf("an entry that names an image resolved to %q (%s)", ref, why)
+	}
+
+	fromBuild := &ImageCatalogueEntry{Name: "e", FromBuild: "erp-18"}
+	ref, why := fromBuild.ResolveWith(built)
+	if ref != digest || why != "" {
+		t.Errorf("the built image did not reach the catalogue: %q (%s)", ref, why)
+	}
+
+	// A build that has not produced anything is a sentence, not an empty image:
+	// an environment cannot run what has not been built, and "" as an image is
+	// how a pod ends up pulling something nobody named.
+	if ref, why := fromBuild.ResolveWith(&OdooBuild{
+		Status: OdooBuildStatus{Phase: BuildBuilding, Message: "building"},
+	}); ref != "" || why == "" {
+		t.Errorf("an unfinished build resolved to %q with no reason", ref)
+	}
+	// And a build that is not there at all says so, rather than resolving to
+	// nothing and letting the failure appear as a pull error three steps later.
+	if ref, why := fromBuild.ResolveWith(nil); ref != "" || !strings.Contains(why, "no such build") {
+		t.Errorf("a missing build gave %q / %q", ref, why)
+	}
+}

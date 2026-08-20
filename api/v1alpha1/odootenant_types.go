@@ -4,6 +4,7 @@
 package v1alpha1
 
 import (
+	"fmt"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -315,6 +316,8 @@ type OdooTenantStatus struct {
 // OdooTenant is a customer.
 //
 // ImageCatalogueEntry is one image this customer may run.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.image) != has(self.fromBuild)",message="an entry names an image OR the build that produces it, and exactly one: with both, the two can disagree and nothing says which won; with neither, the entry names nothing"
 type ImageCatalogueEntry struct {
 	// Name is what a person picks from a list: "hms-18", not a registry path.
 	// +kubebuilder:validation:MinLength=1
@@ -324,7 +327,22 @@ type ImageCatalogueEntry struct {
 
 	// Image is the pullable reference.
 	// +kubebuilder:validation:MinLength=1
-	Image string `json:"image"`
+	Image string `json:"image,omitempty"`
+
+	// FromBuild names an OdooBuild in this namespace, and makes this entry
+	// whatever that build produced — by DIGEST, not by the tag it was pushed to.
+	//
+	// It exists so the last manual step of a build is not a manual step. Without
+	// it, a build finishes, somebody reads a digest off a status and pastes it in
+	// here, and the catalogue is right until the next build. With it the customer
+	// record says what the entry IS — the output of that build — and doblura
+	// resolves it.
+	//
+	// A tag would be the wrong thing to resolve to: it is a name somebody can
+	// move, and an environment that pulled it last week is not necessarily running
+	// what it names today.
+	// +optional
+	FromBuild string `json:"fromBuild,omitempty"`
 
 	// OdooVersion this image is, for example "18.0".
 	//
@@ -403,6 +421,49 @@ func (s *OdooTenantSpec) ImageByName(name string) *ImageCatalogueEntry {
 		}
 	}
 	return nil
+}
+
+// ResolveWith turns a catalogue entry into the reference to pull.
+//
+// One function with two callers — the environment webhook and the tenant's image
+// study — because they must not be able to disagree about what an entry means.
+// Two implementations of "which image is this?" is how a study reports on one
+// thing and an environment runs another.
+//
+// The build may be nil, which is what "you named a build that is not there" looks
+// like from a Get; the refusal says so rather than resolving to nothing.
+func (e *ImageCatalogueEntry) ResolveWith(b *OdooBuild) (ref, why string) {
+	if e == nil {
+		return "", ""
+	}
+	if e.FromBuild == "" {
+		return e.Image, ""
+	}
+	switch {
+	case b == nil:
+		return "", fmt.Sprintf(
+			"catalogue entry %q is built by OdooBuild %q, and there is no such build "+
+				"in this namespace", e.Name, e.FromBuild)
+	case b.Status.Image == "":
+		return "", fmt.Sprintf(
+			"catalogue entry %q is built by OdooBuild %q, which has not produced an "+
+				"image yet (%s). An environment cannot run what has not been built",
+			e.Name, e.FromBuild, buildStateWord(b))
+	}
+	// The DIGEST the build recorded, never the tag it was pushed to: a tag is a
+	// name somebody can move, and two environments started a week apart would then
+	// be running different code under the same catalogue entry.
+	return b.Status.Image, ""
+}
+
+func buildStateWord(b *OdooBuild) string {
+	if b.Status.Phase == "" {
+		return "it has not started"
+	}
+	if b.Status.Message != "" {
+		return string(b.Status.Phase) + ": " + b.Status.Message
+	}
+	return string(b.Status.Phase)
 }
 
 // Major is the part of the version that cannot be crossed casually.

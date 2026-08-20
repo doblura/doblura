@@ -310,7 +310,15 @@ func (m *EnvironmentCreator) defaultsFrom(
 
 	switch {
 	case chosen != nil:
-		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", chosen.Image))
+		// A catalogue entry may name a build instead of an image, and then the
+		// reference is whatever that build produced — by digest. Resolved through
+		// the same function the tenant's image study uses, so a study cannot
+		// report on one thing while an environment runs another.
+		ref, why := chosen.ResolveWith(buildFor(ctx, m.Client, env.Namespace, chosen.FromBuild))
+		if why != "" {
+			return nil, why
+		}
+		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", ref))
 		if chosen.Flavor != "" {
 			// The flavour follows the image it belongs to. Written even when it
 			// equals the schema default, so the object records what was decided
@@ -855,6 +863,21 @@ func studiedAddons(
 		return nil
 	}
 	return out
+}
+
+// buildFor fetches the build a catalogue entry names, or nil.
+//
+// nil is a real answer here — "you named a build that is not there" — and
+// ResolveWith turns it into a sentence rather than into an empty image.
+func buildFor(ctx context.Context, c client.Client, ns, name string) *doblurav1alpha1.OdooBuild {
+	if name == "" {
+		return nil
+	}
+	var b doblurav1alpha1.OdooBuild
+	if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &b); err != nil {
+		return nil
+	}
+	return &b
 }
 
 func dataRules(
