@@ -79,6 +79,29 @@ for name, c in containers(docs):
           and (sc.get("capabilities") or {}).get("drop") == ["ALL"],
           f"{name}/{c['name']}: runs restricted (no escalation, read-only root, no capabilities)")
 
+# The manager can read every kind it ships a CRD for.
+#
+# The trap this catches: RBAC markers are package-scoped and controller-gen only
+# reads them from a FREE-FLOATING comment. Attached to a declaration's doc comment
+# they generate nothing — silently. Everything compiles, every test passes, and
+# the manager is denied on its own kind the first time somebody creates one.
+# CONTRIBUTING.md documents it, and this was still written the wrong way.
+crds = [d for d in docs if d.get("kind") == "CustomResourceDefinition"]
+granted = set()
+for d in docs:
+    if d.get("kind") not in ("ClusterRole", "Role"):
+        continue
+    for rule in d.get("rules") or []:
+        if "doblura.dev" in (rule.get("apiGroups") or []):
+            for res in rule.get("resources") or []:
+                if {"get", "list", "watch"} <= set(rule.get("verbs") or []) or "*" in (rule.get("verbs") or []):
+                    granted.add(res)
+missing = sorted(d["spec"]["names"]["plural"] for d in crds
+                 if d["spec"]["names"]["plural"] not in granted)
+check(not missing,
+      "the manager may read every kind the chart installs"
+      + (f" (not: {', '.join(missing)})" if missing else ""))
+
 print()
 if fails:
     print(f"  {len(fails)} rendering problem(s)")

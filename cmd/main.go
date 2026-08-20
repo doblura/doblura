@@ -205,6 +205,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.OdooBuildReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to register controller", "controller", "OdooBuild")
+		os.Exit(1)
+	}
+
 	if err := (&controller.OdooRestoreReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),

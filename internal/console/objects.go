@@ -77,6 +77,13 @@ var objectKinds = []objectKind{
 		Columns: []string{"Name", "State", "Source", "Taken", "What was masked"},
 	},
 	{
+		Slug: "builds", Title: "Builds", Resource: "odoobuilds",
+		Lede: "Images built from the customer's own repositories, in the customer's " +
+			"own cluster. What each one is worth knowing by is its digest and the " +
+			"commit it came from, not the tag somebody can move.",
+		Columns: []string{"Name", "State", "Customer", "Built", "What went in"},
+	},
+	{
 		Slug: "databases", Title: "Databases", Resource: "odoodatabases",
 		Lede:    "The databases the platform knows about, and which customers share them.",
 		Columns: []string{"Name", "Tenancy", "Companies", "Size"},
@@ -135,6 +142,45 @@ type cell struct {
 
 func text(s string) cell  { return cell{Text: s} }
 func muted(s string) cell { return cell{Text: s, Muted: true} }
+
+// buildState maps a build phase onto the shared colour vocabulary.
+func buildState(p string) string {
+	switch p {
+	case string(doblurav1alpha1.BuildSucceeded):
+		return "up"
+	case string(doblurav1alpha1.BuildFailed):
+		return "down"
+	case "":
+		return "unknown"
+	default:
+		return "building"
+	}
+}
+
+// sourcesCell says what went into the image.
+//
+// The commit and not the ref: a build from a branch is not reproducible, and the
+// commit is the only thing that answers "which code is in this image" a year
+// later. A build that succeeded and recorded no commit says so, because that is a
+// build nobody can trace back.
+func sourcesCell(b *doblurav1alpha1.OdooBuild) cell {
+	if len(b.Status.Sources) == 0 {
+		if b.Status.Phase == doblurav1alpha1.BuildSucceeded {
+			return cell{State: "degraded", Word: "nothing recorded"}
+		}
+		return muted("")
+	}
+	var parts []string
+	for _, s := range b.Status.Sources {
+		switch {
+		case s.Commit == "":
+			parts = append(parts, s.Name+" @ "+s.Ref+" (no commit recorded)")
+		default:
+			parts = append(parts, s.Name+" @ "+s.Commit[:min(8, len(s.Commit))])
+		}
+	}
+	return muted(strings.Join(parts, ", "))
+}
 
 // maskingCell answers the question the snapshots page is for: how much of the
 // personal data in this copy was actually changed.
@@ -401,6 +447,27 @@ func (s *Server) objectsIn(
 					muted(sn.Spec.Source.Host),
 					muted(humanSince(sn.Status.LastSuccessfulTime)),
 					maskingCell(sn),
+				},
+			})
+		}
+	case "builds":
+		var l doblurav1alpha1.OdooBuildList
+		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
+			view.Denied, view.refusal = true, err
+			break
+		}
+		for i := range l.Items {
+			b := &l.Items[i]
+			view.Rows = append(view.Rows, objectRow{
+				Name: b.Name, Namespace: b.Namespace,
+				Cells: []cell{
+					verdict(buildState(string(b.Status.Phase)), string(b.Status.Phase)),
+					muted(b.Spec.ForTenant),
+					muted(humanSince(b.Status.BuiltAt)),
+					sourcesCell(b),
 				},
 			})
 		}
