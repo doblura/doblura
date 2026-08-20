@@ -211,6 +211,17 @@ type OdooRehearsalSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
 
+	// ForTenant is the customer whose migration this rehearses.
+	//
+	// Optional, and the same field the other kinds carry. Without it a rehearsal
+	// is an experiment that proves something about an image and about nobody in
+	// particular — which is enough to answer "does this version migrate?" and not
+	// enough to answer "has THIS customer's data been through it?". A staged
+	// rollout across customers has to ask the second question, one customer at a
+	// time, and it cannot without this.
+	// +optional
+	ForTenant string `json:"forTenant,omitempty"`
+
 	// Snapshot is where the data comes from and how to restore it.
 	Snapshot SnapshotSpec `json:"snapshot"`
 

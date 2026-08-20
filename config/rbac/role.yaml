@@ -77,7 +77,6 @@ rules:
   - odoodatabases
   - odooinstances
   - odoorestores
-  - odootenants
   - reviewsets
   verbs:
   - get
@@ -92,6 +91,7 @@ rules:
   - odooenvironments/status
   - odooinstances/status
   - odoorehearsals/status
+  - odooreleases/status
   - odoorestores/status
   - odoosnapshots/status
   - odootenants/status
@@ -107,6 +107,7 @@ rules:
   - odoobuilds
   - odooenvironments
   - odoorehearsals
+  - odooreleases
   - odoosnapshots
   verbs:
   - create
@@ -126,6 +127,7 @@ rules:
 - apiGroups:
   - doblura.dev
   resources:
+  - odootenants
   - runboatlinks
   verbs:
   - get

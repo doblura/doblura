@@ -666,7 +666,7 @@ Odoo 19 on a kind cluster, which is what `make e2e-real` does. What is in place:
 - [x] A restore takes a copy of what it is about to replace, and Production cannot
       turn that off
 - [ ] Prometheus metrics: migration duration per release
-- [ ] `OdooRelease`: staged rollout of one release across many customers
+- [x] `OdooRelease`: staged rollout of one release across many customers
 
 See [ROADMAP.md](ROADMAP.md) for where this is going.
 

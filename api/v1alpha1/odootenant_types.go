@@ -22,10 +22,9 @@ import (
 //   - It is the row every persona shares in the interface. Support looks at a
 //     customer and wants a scratch database; QA looks at the same customer and
 //     wants the staging approval. One list, different actions.
-//   - It is what a release rollout batches over, customer by customer. That kind
-//     — `OdooRelease` — is on the roadmap and DOES NOT EXIST YET; this comment
-//     said it did, which is the shape of defect this project has spent its time
-//     removing everywhere else.
+//   - It is what a release rollout batches over, customer by customer: OdooRelease
+//     selects customers by label, gates each one on a rehearsal of THEIR data,
+//     and moves a few at a time.
 //   - It is the subject of the handover question: "can this copy go to them?"
 
 // OdooTenantSpec describes a customer.
@@ -41,9 +40,11 @@ type OdooTenantSpec struct {
 	// ProductRelease is the version of your own product this customer is on, when
 	// there is a product. Empty means a pure bespoke project.
 	//
-	// A free string today. The `OdooRelease` kind that would give it a referent —
-	// and let one version be rolled out to customers in batches — is on the
-	// roadmap and is not built, so nothing validates that this names anything.
+	// Written by hand, or by an OdooRelease as it moves this customer onto a
+	// version. It is still a free string: nothing validates that it names a
+	// release that exists, because a customer may be on a version of your product
+	// that predates anybody writing it down, and refusing that would make the
+	// field unusable for exactly the customers who most need recording.
 	//
 	// Declaring the release rather than copying the product's code is the whole
 	// difference between being able to ship a new product version to thirty

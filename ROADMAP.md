@@ -102,7 +102,7 @@ is the only way they can be, since the interface has no permissions of its own.
 | 1 | `OdooInstance` + `OdooDatabase` + `OdooTenant` + placement | **done** |
 | 2 | Finish the `OdooEnvironment` controller + company subsetting | **done** |
 | 3 | The interface: customer list, OIDC. The 5 ClusterRoles and the **quota webhook are done** | partly done |
-| 4 | `OdooRelease`: customer batches with soak time — canary across customers | pending |
+| 4 | `OdooRelease`: customer batches with soak time — canary across customers | done |
 | 4b | Metrics: delivery plus the Odoo runtime signals above | pending |
 | 5 | `OdooProject`: consumes a release, adds its own addons | pending |
 | 6 | Multi-stage `OdooRehearsal` with OpenUpgrade | pending |
