@@ -1217,6 +1217,23 @@ type QueueJobTier struct {
 // the whole failure this feature exists to prevent: the crons would run in BOTH
 // places, which looks like it is working right up until a job that assumed it was
 // alone runs twice.
+// RunsQueueJob is whether a queue_job runner was asked for.
+//
+// The tier it gates was declared, given a CEL rule about its replica count, and
+// implemented by nothing: `spec.workload.queueJob` produced no Deployment, no
+// configuration and no runner. Somebody asking for one got silence.
+func (w *WorkloadSplit) RunsQueueJob() bool {
+	return w != nil && w.QueueJob != nil && w.QueueJob.Replicas > 0
+}
+
+// QueueJobChannels is queue_job's own channel syntax, or "".
+func (w *WorkloadSplit) QueueJobChannels() string {
+	if !w.RunsQueueJob() {
+		return ""
+	}
+	return w.QueueJob.Channels
+}
+
 func (w *WorkloadSplit) SplitsCrons() bool {
 	return w != nil && w.Cron != nil && w.Cron.Replicas > 0
 }

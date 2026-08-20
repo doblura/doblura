@@ -61,9 +61,25 @@ func snapshotPodTemplate(snap *doblurav1alpha1.OdooSnapshot) corev1.PodTemplateS
 		ReadOnlyRootFilesystem:   ptr(true),
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
+	// Which image runs each step.
+	//
+	// The masking step runs the CUSTOM image when there is one, because with
+	// engine Custom the image IS the masking configuration. Everything around it
+	// keeps the snapshot's own image: copying, neutralizing and dumping are
+	// doblura's steps and they need doblura's contract, not somebody's masking
+	// container.
+	imageFor := func(name string) string {
+		if name == "3-anonymize" &&
+			snap.Spec.Mask.Engine == doblurav1alpha1.EngineCustom &&
+			snap.Spec.Mask.CustomImage != "" {
+			return snap.Spec.Mask.CustomImage
+		}
+		return snap.Spec.Image
+	}
+
 	step := func(name, script string) corev1.Container {
 		return corev1.Container{
-			Name: name, Image: snap.Spec.Image,
+			Name: name, Image: imageFor(name),
 			Command: []string{"/bin/sh", "-euc"}, Args: []string{script},
 			Env: env, VolumeMounts: mounts, SecurityContext: sec, Resources: res,
 		}
@@ -158,7 +174,14 @@ func anonymizeStep(snap *doblurav1alpha1.OdooSnapshot, work string) string {
 sh /etc/doblura/mask.sh
 echo ">> masked"`
 	case doblurav1alpha1.EngineCustom:
-		return `echo ">> masking delegated to the custom image"`
+		// The image is what does the work here, so the step says which one ran.
+		// It said "delegated to the custom image" while every container in this
+		// pod ran the SNAPSHOT's image — mask.customImage was declared, described
+		// as "the image used when Engine is Custom", and read by nobody. Somebody
+		// choosing Custom got their own masking silently not applied, and a dump
+		// that looks anonymised and is not is the worst artefact this pipeline can
+		// produce.
+		return `echo ">> masking delegated to this image, which is the custom one"`
 	default:
 		// With greenmask the masking happens DURING the dump, so all that is left
 		// here is what greenmask does not do: resetting passwords.

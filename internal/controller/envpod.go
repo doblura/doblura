@@ -159,6 +159,92 @@ func envCronConf(env *doblurav1alpha1.OdooEnvironment) string {
 	return b.String()
 }
 
+// envQueueJobConf is the runner's configuration.
+//
+// Two lines that OCA's queue_job needs and that nothing here wrote, which is why
+// the whole tier did nothing:
+//
+//   - server_wide_modules must load queue_job, or the runner thread never starts
+//     and the pod is an idle Odoo. It is added to whatever the image already
+//     loads rather than replacing it, because replacing that list is how `web`
+//     goes missing and nothing serves.
+//   - channels is queue_job's own syntax, passed through unread — which is what
+//     the field always claimed to be and was not: `channels` was declared,
+//     documented as passed through, and read by nobody.
+//
+// workers = 0 puts Odoo in threaded mode. The runner is a thread, and a prefork
+// Odoo would start one runner PER worker — which is the double execution the CEL
+// rule on replicas already refuses between pods, arriving through the back door
+// inside one.
+func envQueueJobConf(env *doblurav1alpha1.OdooEnvironment) string {
+	base := envOdooConf(env)
+
+	var b strings.Builder
+	sawModules := false
+	for _, line := range strings.Split(strings.TrimRight(base, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "workers "):
+			b.WriteString("workers = 0\n")
+		case strings.HasPrefix(line, "max_cron_threads "):
+			// The queue runner is not a cron worker, and this tier must not also
+			// become a second scheduler.
+			b.WriteString("max_cron_threads = 0\n")
+		case strings.HasPrefix(line, "server_wide_modules "):
+			sawModules = true
+			b.WriteString(withQueueJob(line) + "\n")
+		default:
+			b.WriteString(line + "\n")
+		}
+	}
+	if !sawModules {
+		b.WriteString("server_wide_modules = base,web,queue_job\n")
+	}
+	if ch := env.Spec.Workload.QueueJobChannels(); ch != "" {
+		b.WriteString("channels = " + ch + "\n")
+	}
+	return b.String()
+}
+
+// withQueueJob adds queue_job to a server_wide_modules line without dropping what
+// was already there.
+func withQueueJob(line string) string {
+	_, value, _ := strings.Cut(line, "=")
+	for _, m := range strings.Split(value, ",") {
+		if strings.TrimSpace(m) == "queue_job" {
+			return line
+		}
+	}
+	return strings.TrimRight(line, " ,") + ",queue_job"
+}
+
+// envQueueJobPod is the runner.
+func envQueueJobPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec {
+	vols, mounts := envVolumes(env)
+	_, _, inits := addonsPlumbing(&env.Spec.Addons)
+
+	return corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{Labels: envTierLabels(env, "queuejob")},
+		Spec: corev1.PodSpec{
+			SecurityContext: envPodSecurityContext(env),
+			// envInitContainers, like the cron tier: the module update belongs to
+			// the web tier alone, and two pods running click-odoo-update against
+			// one database is the double execution these splits exist to prevent.
+			InitContainers: envInitContainers(env, inits),
+			Containers: []corev1.Container{{
+				Name:            "odoo-queuejob",
+				Image:           env.Spec.Image,
+				Command:         doblurav1alpha1.FlavorCommand(env.Spec.ImageFlavor),
+				Args:            []string{"-c", envQueueJobConfPath},
+				Env:             envEnv(env),
+				VolumeMounts:    mounts,
+				Resources:       sizeToResources(env.Spec.Size),
+				SecurityContext: envSecurityContext(),
+			}},
+			Volumes: vols,
+		},
+	}
+}
+
 // envVolumes and envMounts are shared by every pod of the environment, so the
 // phase Jobs and the serving Deployment see the same paths.
 func envVolumes(env *doblurav1alpha1.OdooEnvironment) ([]corev1.Volume, []corev1.VolumeMount) {
@@ -449,8 +535,9 @@ func envCronPod(env *doblurav1alpha1.OdooEnvironment) corev1.PodTemplateSpec {
 // ─────────────────────── phase scripts ───────────────────────
 
 const (
-	envConf         = "/etc/doblura/odoo.conf"
-	envCronConfPath = "/etc/doblura/odoo-cron.conf"
+	envConf             = "/etc/doblura/odoo.conf"
+	envCronConfPath     = "/etc/doblura/odoo-cron.conf"
+	envQueueJobConfPath = "/etc/doblura/odoo-queuejob.conf"
 )
 
 // envInitScript creates the database from nothing, with or without demo data.

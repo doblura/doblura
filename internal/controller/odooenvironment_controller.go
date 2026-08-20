@@ -389,7 +389,8 @@ func (r *OdooEnvironmentReconciler) ensureConfigAndSecrets(
 			// hundred bytes, and generating it only when the tier exists would
 			// make enabling the tier a two-step dance where the Deployment can
 			// start before the ConfigMap that configures it has been updated.
-			"odoo-cron.conf": envCronConf(env),
+			"odoo-cron.conf":     envCronConf(env),
+			"odoo-queuejob.conf": envQueueJobConf(env),
 		},
 	}
 	if err := ctrl.SetControllerReference(env, cm, r.Scheme); err != nil {
@@ -480,7 +481,10 @@ func (r *OdooEnvironmentReconciler) ensureWorkload(
 	if err := r.Patch(ctx, dep, client.Apply, fieldOwner, client.ForceOwnership); err != nil {
 		return err
 	}
-	return r.ensureCronTier(ctx, env, replicas)
+	if err := r.ensureCronTier(ctx, env, replicas); err != nil {
+		return err
+	}
+	return r.ensureQueueJobTier(ctx, env, replicas)
 }
 
 // ensureCronTier creates the cron Deployment, or removes it.
@@ -497,6 +501,44 @@ func (r *OdooEnvironmentReconciler) ensureWorkload(
 // That is why this deletes rather than scales to zero. A Deployment sitting at
 // zero replicas reads, to anyone running kubectl get, exactly like a cron tier
 // that is temporarily down.
+// ensureQueueJobTier creates the queue_job runner, or removes it.
+//
+// Mirrors the cron tier, including the deletion when it is switched off: a tier
+// that is created and never removed leaves a pod processing jobs after somebody
+// decided it should not.
+func (r *OdooEnvironmentReconciler) ensureQueueJobTier(
+	ctx context.Context,
+	env *doblurav1alpha1.OdooEnvironment,
+	replicas int32,
+) error {
+	name := env.Name + "-queuejob"
+
+	if !env.Spec.Workload.RunsQueueJob() {
+		dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: env.Namespace}}
+		return client.IgnoreNotFound(r.Delete(ctx, dep))
+	}
+
+	dep := &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: env.Namespace, Labels: envTierLabels(env, "queuejob"),
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			// Recreate, for the reason the CEL rule already gives: OCA's runner is
+			// a singleton by design, and a RollingUpdate deliberately runs two for
+			// a while — which is a supported way to process the same job twice.
+			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
+			Selector: &metav1.LabelSelector{MatchLabels: envTierSelector(env, "queuejob")},
+			Template: envQueueJobPod(env),
+		},
+	}
+	if err := ctrl.SetControllerReference(env, dep, r.Scheme); err != nil {
+		return err
+	}
+	return r.Patch(ctx, dep, client.Apply, fieldOwner, client.ForceOwnership)
+}
+
 func (r *OdooEnvironmentReconciler) ensureCronTier(
 	ctx context.Context,
 	env *doblurav1alpha1.OdooEnvironment,

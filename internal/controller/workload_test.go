@@ -304,3 +304,58 @@ func TestHardeningLeavesProductionAlone(t *testing.T) {
 		}
 	}
 }
+
+// The queue_job tier exists, and its configuration is what the runner needs.
+//
+// spec.workload.queueJob was a declared tier with a CEL rule about its replica
+// count and no implementation at all: no Deployment, no configuration, no runner.
+// Somebody asking for one got silence — and `channels`, documented as "passed
+// through unread", was passed nowhere.
+func TestTheQueueJobTierIsConfiguredForTheRunner(t *testing.T) {
+	env := &doblurav1alpha1.OdooEnvironment{
+		ObjectMeta: metav1.ObjectMeta{Name: "e", Namespace: "d"},
+		Spec: doblurav1alpha1.OdooEnvironmentSpec{
+			Image:    "img",
+			Database: doblurav1alpha1.DatabaseSpec{Host: "h", User: "u", PasswordSecret: "s"},
+			Workload: &doblurav1alpha1.WorkloadSplit{
+				QueueJob: &doblurav1alpha1.QueueJobTier{Replicas: 1, Channels: "root:4,export:1"},
+			},
+		},
+	}
+	conf := envQueueJobConf(env)
+
+	// Without queue_job in server_wide_modules the runner thread never starts and
+	// the pod is an idle Odoo that looks perfectly healthy.
+	if !strings.Contains(conf, "server_wide_modules") || !strings.Contains(conf, "queue_job") {
+		t.Errorf("the runner is never loaded:\n%s", conf)
+	}
+	if !strings.Contains(conf, "channels = root:4,export:1") {
+		t.Errorf("the declared channels are not in the configuration:\n%s", conf)
+	}
+	// Threaded mode: the runner is a thread, and a prefork Odoo starts one runner
+	// PER worker — the double execution the replica rule refuses between pods,
+	// arriving through the back door inside one.
+	if !strings.Contains(conf, "workers = 0") {
+		t.Errorf("a prefork Odoo would run one job runner per worker:\n%s", conf)
+	}
+	// And it is not also a scheduler.
+	if !strings.Contains(conf, "max_cron_threads = 0") {
+		t.Errorf("the queue runner is also firing scheduled actions:\n%s", conf)
+	}
+
+	// An existing server_wide_modules is added to, never replaced: replacing that
+	// list is how `web` goes missing and nothing serves.
+	if got := withQueueJob("server_wide_modules = base,web"); got != "server_wide_modules = base,web,queue_job" {
+		t.Errorf("withQueueJob dropped what was there: %q", got)
+	}
+	if got := withQueueJob("server_wide_modules = base,queue_job,web"); got != "server_wide_modules = base,queue_job,web" {
+		t.Errorf("queue_job was added twice: %q", got)
+	}
+
+	// No tier asked for, no configuration invented.
+	plain := env.DeepCopy()
+	plain.Spec.Workload = nil
+	if strings.Contains(envQueueJobConf(plain), "channels =") {
+		t.Error("an environment with no queue_job tier got channels anyway")
+	}
+}

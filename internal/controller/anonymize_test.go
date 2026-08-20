@@ -4,6 +4,7 @@
 package controller
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"strings"
 	"testing"
 
@@ -224,6 +225,48 @@ func TestGreenmaskConfigIsValidYAML(t *testing.T) {
 	if common, ok := parsed["common"].(map[string]any); ok {
 		if p, exists := common["pg_bin_path"]; exists {
 			t.Errorf("pg_bin_path must not be pinned, got %v", p)
+		}
+	}
+}
+
+// The custom masking image is the one that does the masking.
+//
+// mask.customImage was declared, documented as "the image used when Engine is
+// Custom", and read by nobody: every container in the snapshot pod ran the
+// snapshot's own image. Somebody choosing Custom got their masking silently not
+// applied, and a dump that looks anonymised and is not is the worst artefact this
+// pipeline can produce.
+func TestTheCustomMaskingImageIsUsedForMasking(t *testing.T) {
+	snap := &doblurav1alpha1.OdooSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "n"},
+		Spec: doblurav1alpha1.OdooSnapshotSpec{
+			Image: "doblura/odoo:18.0",
+			Mask: doblurav1alpha1.MaskSpec{
+				Engine:      doblurav1alpha1.EngineCustom,
+				CustomImage: "acme/masker:2",
+			},
+			Source: doblurav1alpha1.SourceDatabase{Host: "h", Name: "d", User: "u", PasswordSecret: "s"},
+			Work:   doblurav1alpha1.WorkDatabase{Host: "h", User: "u", PasswordSecret: "s"},
+			To:     doblurav1alpha1.SnapshotDestination{Type: doblurav1alpha1.ProviderVolume},
+		},
+	}
+	pod := snapshotPodTemplate(snap)
+
+	for _, c := range pod.Spec.InitContainers {
+		want := "doblura/odoo:18.0"
+		if c.Name == "3-anonymize" {
+			want = "acme/masker:2"
+		}
+		if c.Image != want {
+			t.Errorf("%s runs %s, want %s", c.Name, c.Image, want)
+		}
+	}
+	// The steps around it keep doblura's image: copying, neutralizing and dumping
+	// are doblura's own work and need doblura's contract, not somebody's masking
+	// container.
+	for _, c := range pod.Spec.Containers {
+		if c.Image != "doblura/odoo:18.0" {
+			t.Errorf("the upload step runs %s", c.Image)
 		}
 	}
 }
