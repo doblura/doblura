@@ -194,3 +194,36 @@ func TestMigrateScriptNamesTheMissingRequirement(t *testing.T) {
 		t.Error("the odoo -u engine needs no click-odoo-contrib guard")
 	}
 }
+
+// Hardening cuts INCOMING mail as well as outgoing.
+//
+// The outgoing half has always been there. The incoming half was not, while the
+// snapshot pipeline's identical list did cut it — an asymmetry nothing pointed
+// at. What it allowed is worse than the outgoing case: a copy of production
+// polling the customer's real mailbox consumes the messages it reads, so mail
+// meant for the real system lands in a copy nobody is watching and is gone from
+// the inbox. There is no equivalent of the recipient who tells you.
+func TestHardeningCutsIncomingMailToo(t *testing.T) {
+	env := &doblurav1alpha1.OdooEnvironment{
+		ObjectMeta: metav1.ObjectMeta{Name: "e", Namespace: "d"},
+		Spec: doblurav1alpha1.OdooEnvironmentSpec{
+			Image:    "img",
+			Database: doblurav1alpha1.DatabaseSpec{Host: "h", User: "u", PasswordSecret: "s"},
+		},
+	}
+	got := envHardenScript(env)
+	for _, want := range []string{
+		"UPDATE ir_mail_server SET active = false",
+		"UPDATE fetchmail_server SET active = false",
+		"UPDATE ir_cron SET active = false",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("hardening does not do this:\n  %s", want)
+		}
+	}
+	// fetchmail is a module and may not be installed. Without the guard the whole
+	// transaction fails and takes the two lines that matter most with it.
+	if !strings.Contains(got, "to_regclass('fetchmail_server')") {
+		t.Error("the fetchmail line must be guarded on the table existing")
+	}
+}

@@ -680,8 +680,12 @@ spec:
                 type: string
               productRelease:
                 description: |-
-                  ProductRelease is the OdooRelease of your own product this customer is on,
-                  when there is a product. Empty means a pure bespoke project.
+                  ProductRelease is the version of your own product this customer is on, when
+                  there is a product. Empty means a pure bespoke project.
+
+                  A free string today. The `OdooRelease` kind that would give it a referent —
+                  and let one version be rolled out to customers in batches — is on the
+                  roadmap and is not built, so nothing validates that this names anything.
 
                   Declaring the release rather than copying the product's code is the whole
                   difference between being able to ship a new product version to thirty

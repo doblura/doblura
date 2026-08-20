@@ -336,12 +336,37 @@ scale() {
   BASE=${CONSOLE:-http://localhost:$PORT}
   if curl -sf -o /dev/null "$BASE/auth/login" 2>/dev/null; then
     signin toni "$jar"
+    local overview_size=0
     for path in / /o/environments /customers; do
       printf '   %-18s ' "$path"
-      curl -s -b "$jar" -o /tmp/doblura-scale-page -w '%{time_total}s  %{size_download} bytes\n' \
-        "$BASE$path"
+      # Captured and then printed, rather than piped through tee: this runs in
+      # CI and in terminals without a controlling tty, where /dev/tty does not
+      # exist and the whole measurement dies on the first page.
+      local measured size
+      measured=$(curl -s -b "$jar" -o /tmp/doblura-scale-page \
+        -w '%{time_total}s  %{size_download} bytes' "$BASE$path")
+      echo "$measured"
+      size=$(printf '%s' "$measured" | awk '{print $2}')
+      [ "$path" = "/" ] && overview_size=${size:-0}
     done
     note "under a second each is what says the cache is still not needed"
+
+    # And an assertion, not just a number printed for somebody to look at.
+    #
+    # The overview is a SUMMARY: it counts states, and its size must not follow
+    # the number of environments. It once did — it enumerated all 215 of them,
+    # 127KB of cards, and the fix to that is a page that cannot be told apart
+    # from the broken one by reading the code. Only a page rendered against a lot
+    # of data can tell, and until now nothing rendered one.
+    echo
+    if [ "${overview_size:-0}" -lt 40000 ]; then
+      printf '  ok    the overview is a summary (%s bytes with %s environments)\n' \
+        "$overview_size" "$(kc get odooenvironments -A --no-headers | wc -l | tr -d ' ')"
+    else
+      printf '  FAIL  the overview is %s bytes: it is enumerating environments\n' "$overview_size"
+      printf '        rather than counting them, which is the regression this fixture exists to catch\n'
+      return 1
+    fi
   else
     note "no console at $BASE — run '$0 open' and then '$0 scale' again to time it"
   fi

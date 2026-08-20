@@ -21,8 +21,10 @@ import (
 //   - It is the row every persona shares in the interface. Support looks at a
 //     customer and wants a scratch database; QA looks at the same customer and
 //     wants the staging approval. One list, different actions.
-//   - It is what OdooRelease batches over when rolling a product version out
-//     customer by customer.
+//   - It is what a release rollout batches over, customer by customer. That kind
+//     — `OdooRelease` — is on the roadmap and DOES NOT EXIST YET; this comment
+//     said it did, which is the shape of defect this project has spent its time
+//     removing everywhere else.
 //   - It is the subject of the handover question: "can this copy go to them?"
 
 // OdooTenantSpec describes a customer.
@@ -35,8 +37,12 @@ type OdooTenantSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	DisplayName string `json:"displayName"`
 
-	// ProductRelease is the OdooRelease of your own product this customer is on,
-	// when there is a product. Empty means a pure bespoke project.
+	// ProductRelease is the version of your own product this customer is on, when
+	// there is a product. Empty means a pure bespoke project.
+	//
+	// A free string today. The `OdooRelease` kind that would give it a referent —
+	// and let one version be rolled out to customers in batches — is on the
+	// roadmap and is not built, so nothing validates that this names anything.
 	//
 	// Declaring the release rather than copying the product's code is the whole
 	// difference between being able to ship a new product version to thirty

@@ -303,6 +303,44 @@ follows:
 
 ---
 
+## 17. Incoming mail — **no, and the copies are stopped from doing it by accident**
+
+Outgoing mail is a field: doblura writes an `ir_mail_server` pointing at a server
+you already have, and runs no mail infrastructure. Incoming is not the mirror of
+that, and the difference is the whole decision.
+
+Odoo takes mail in two ways. A gateway — an MTA delivering to `odoo-mailgate`,
+routed by alias domain — needs infrastructure doblura would then own, which is
+the same line decision 2 draws everywhere else. And `fetchmail`, where Odoo polls
+an IMAP box, which needs no infrastructure at all and is therefore the tempting
+one to support.
+
+It is refused because of what it does when it is pointed at the wrong database.
+**Polling consumes.** fetchmail marks messages seen or deletes them, so a copy of
+production reading the customer's real mailbox takes mail that was meant for the
+real system and files it somewhere nobody is watching. Outgoing mail from a copy
+is bad and at least leaves a trace: a person received something they should not
+have, and they will say so. Mail that was quietly consumed leaves nothing —
+no bounce, no complaint, just an inbox that is emptier than it should be, and
+records that exist in the copy and not in the system of record.
+
+So doblura writes no fetchmail server, and there is no field for one. Somebody
+who wants incoming mail configures it in Odoo, on the machine they mean.
+
+What doblura does instead is the part that matters: it makes sure a copy cannot
+inherit it. `fetchmail_server` is deactivated in the snapshot pipeline and in
+every environment's hardening step, guarded on the table existing because
+fetchmail is a module. The second of those was missing — the hardening step cut
+outgoing mail and crons and left incoming alone, while the snapshot pipeline's
+identical list cut all three. Nothing pointed at the asymmetry, which is the
+argument for writing this decision down rather than leaving it as an absence.
+
+**Why:** an absent feature that nothing protects against is not a decision, it is
+a gap. The decision is the refusal *plus* the neutralization, and only the second
+one is code.
+
+---
+
 ## What this ordering means for the next work
 
 Done: the default customer (1), read-federation in the console (4, first half),

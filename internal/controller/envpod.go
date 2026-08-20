@@ -639,6 +639,19 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 	b.WriteString(fmt.Sprintf("odoo -c %s neutralize -d \"%s\" || true\n", envConf, db))
 	b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\nBEGIN;\n")
 	b.WriteString("UPDATE ir_mail_server SET active = false;\n")
+	// INCOMING mail as well, which this list did not cut and the snapshot's
+	// identical list did. The asymmetry was silent and the consequence is worse
+	// than the outgoing one: a copy of production polling the customer's real
+	// mailbox CONSUMES the messages it reads — fetchmail marks them seen or
+	// deletes them — so mail meant for the real system arrives in a copy nobody
+	// is watching and is gone from the inbox. A wrong outgoing message at least
+	// leaves a trace with the person who received it.
+	//
+	// to_regclass because fetchmail is a module and may not be installed; without
+	// the guard this whole transaction fails and takes the two lines that matter
+	// most with it.
+	b.WriteString("UPDATE fetchmail_server SET active = false " +
+		"WHERE to_regclass('fetchmail_server') IS NOT NULL;\n")
 	b.WriteString("UPDATE ir_cron SET active = false;\n")
 	b.WriteString("COMMIT;\nSQL\n")
 
