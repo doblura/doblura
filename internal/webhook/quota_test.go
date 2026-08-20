@@ -432,7 +432,7 @@ func TestABuiltImagesAddonsReachTheEnvironment(t *testing.T) {
 	entry := &doblurav1alpha1.ImageCatalogueEntry{Name: "erp", Image: "r/x:1"}
 	env := &doblurav1alpha1.OdooEnvironment{}
 
-	got := studiedAddons(tenant, entry, env)
+	got := studiedAddons(tenant, entry, "r/x:1", env)
 	if len(got) != 1 || got[0] != "/opt/doblura/addons" {
 		t.Fatalf("the built image's addons did not reach the environment: %v", got)
 	}
@@ -450,7 +450,7 @@ func TestABuiltImagesAddonsReachTheEnvironment(t *testing.T) {
 	// Already declared: nothing to add, and no patch, because a no-op patch still
 	// rewrites the field and shows up as a change in every audit of the object.
 	env.Spec.Addons.Baked = []string{"/opt/doblura/addons"}
-	if got := studiedAddons(tenant, entry, env); got != nil {
+	if got := studiedAddons(tenant, entry, "r/x:1", env); got != nil {
 		t.Errorf("an environment that needs no patch got one: %v", got)
 	}
 
@@ -465,14 +465,39 @@ func TestABuiltImagesAddonsReachTheEnvironment(t *testing.T) {
 			}},
 		},
 	}
-	if got := studiedAddons(plain, entry, &doblurav1alpha1.OdooEnvironment{}); got != nil {
+	if got := studiedAddons(plain, entry, "r/x:1", &doblurav1alpha1.OdooEnvironment{}); got != nil {
 		t.Errorf("an official image was given an addons_path it does not need: %v", got)
 	}
 
 	// A study of a DIFFERENT image is not a study of this one. The entry can be
 	// repointed, and a stale report read as current is worse than no report.
 	entry2 := &doblurav1alpha1.ImageCatalogueEntry{Name: "erp", Image: "r/x:2"}
-	if got := studiedAddons(tenant, entry2, &doblurav1alpha1.OdooEnvironment{}); got != nil {
+	if got := studiedAddons(tenant, entry2, "r/x:2", &doblurav1alpha1.OdooEnvironment{}); got != nil {
 		t.Errorf("a study of another image was applied: %v", got)
+	}
+}
+
+// An entry that names a BUILD still finds its study.
+//
+// The study is recorded against the image that was studied — a digest — while
+// the entry's own image field is empty, because the entry names a build instead.
+// Looking the study up by that empty field matched nothing, so every environment
+// on a built image came back with no addons path at all: the build worked, the
+// study worked, the catalogue worked, and the one line joining them asked the
+// wrong question.
+func TestAnEntryBuiltFromABuildStillFindsItsStudy(t *testing.T) {
+	digest := "reg:5000/acme/erp@sha256:33c96cc5d4e9d15252f58f1814545f90c88f24b80e7a4a95fdf22ca53e1dcd03"
+	tenant := &doblurav1alpha1.OdooTenant{
+		Status: doblurav1alpha1.OdooTenantStatus{
+			ImageStudies: []doblurav1alpha1.ImageStudy{{
+				Name: "erp-built", Image: digest,
+				AddonsPaths: []string{"/opt/doblura/addons", "/mnt/extra-addons"},
+			}},
+		},
+	}
+	entry := &doblurav1alpha1.ImageCatalogueEntry{Name: "erp-built", FromBuild: "erp-18"}
+	got := studiedAddons(tenant, entry, digest, &doblurav1alpha1.OdooEnvironment{})
+	if len(got) != 2 || got[0] != "/opt/doblura/addons" {
+		t.Fatalf("a built image's addons did not reach the environment: %v", got)
 	}
 }

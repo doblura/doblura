@@ -261,9 +261,23 @@ func buildScript(b *doblurav1alpha1.OdooBuild) string {
 		"ln -sfn \"$m\" " + addonsInImage + "/$(basename \"$m\"); done; done; " +
 		"echo \"$(ls " + addonsInImage + " | wc -l) modules linked\""
 
+	insecure := b.Spec.To.Insecure != nil && *b.Spec.To.Insecure
 	tls := "--tls-verify=true"
-	if b.Spec.To.Insecure != nil && *b.Spec.To.Insecure {
+	if insecure {
 		tls = "--tls-verify=false"
+	}
+	// The PULL of the base image is a separate decision from the push, and the
+	// first version of this only covered the push: with a cluster-local registry
+	// holding both, the build died on "http: server gave HTTP response to HTTPS
+	// client" before it had built anything.
+	//
+	// Relaxed only when the base image lives on the SAME registry that was
+	// declared insecure. `to.insecure` is a statement about one registry, and
+	// letting it disable TLS for a pull from Docker Hub as well would be reading
+	// it as a statement about the build.
+	pullTLS := "--tls-verify=true"
+	if insecure && registryHost(b.Spec.From) == registryHost(b.Spec.To.Image) {
+		pullTLS = "--tls-verify=false"
 	}
 
 	var s strings.Builder
@@ -288,7 +302,7 @@ func buildScript(b *doblurav1alpha1.OdooBuild) string {
 	s.WriteString("EOF\n")
 	s.WriteString(`echo ">> building ` + ref + `"` + "\n")
 	s.WriteString("buildah --storage-driver=vfs bud --isolation=chroot " +
-		"--format=docker -t " + ref + " .\n")
+		pullTLS + " --format=docker -t " + ref + " .\n")
 	s.WriteString(`echo ">> pushing"` + "\n")
 	s.WriteString("buildah --storage-driver=vfs push " + tls +
 		" --digestfile /tmp/digest " + ref + " docker://" + ref + "\n")
@@ -297,6 +311,23 @@ func buildScript(b *doblurav1alpha1.OdooBuild) string {
 	s.WriteString("cp /tmp/digest " + buildDigestPath + "\n")
 	s.WriteString(`echo ">> pushed $(cat /tmp/digest)"` + "\n")
 	return s.String()
+}
+
+// registryHost is the registry part of an image reference, or "" for a bare name.
+//
+// A reference is host[:port]/path..., and the host is only a host if the first
+// segment looks like one — `alpine:3.20` and `library/alpine` are Docker Hub, not
+// a registry called `alpine`.
+func registryHost(ref string) string {
+	first, rest, found := strings.Cut(ref, "/")
+	if !found {
+		return ""
+	}
+	if !strings.ContainsAny(first, ".:") && first != "localhost" {
+		return "" // docker.io/<org>/<image>
+	}
+	_ = rest
+	return first
 }
 
 // repoNames is the repository names in the order they were declared.

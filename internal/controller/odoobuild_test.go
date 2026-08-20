@@ -122,3 +122,50 @@ func TestTheGeneratedBuildDropsGitAndLabelsTheAddonsPath(t *testing.T) {
 		t.Error("the push defaults to something other than TLS")
 	}
 }
+
+// to.insecure is a statement about ONE registry, not about the build.
+//
+// The first version of this only relaxed TLS on the push, so a build whose base
+// image sat in the same cluster-local registry died on "http: server gave HTTP
+// response to HTTPS client" before building anything. The fix must not go the
+// other way either: a build that pushes to a plain-HTTP registry inside the
+// cluster still pulls its base from Docker Hub over TLS.
+func TestInsecureAppliesToTheRegistryItWasDeclaredFor(t *testing.T) {
+	same := &doblurav1alpha1.OdooBuild{
+		Spec: doblurav1alpha1.OdooBuildSpec{
+			From:  "reg:5000/doblura/odoo:18.0",
+			Repos: []doblurav1alpha1.AddonRepo{{Name: "a", URL: "u"}},
+			To: doblurav1alpha1.BuildDestination{
+				Image: "reg:5000/acme/erp", PushSecret: "s", Insecure: ptr(true),
+			},
+		},
+	}
+	if strings.Count(buildScript(same), "--tls-verify=false") != 2 {
+		t.Error("a base image in the same insecure registry is still pulled over TLS")
+	}
+
+	elsewhere := same.DeepCopy()
+	elsewhere.Spec.From = "docker.io/library/odoo:18.0"
+	s := buildScript(elsewhere)
+	if !strings.Contains(s, "bud --isolation=chroot --tls-verify=true") {
+		t.Error("a base from another registry must still be pulled over TLS")
+	}
+	if !strings.Contains(s, "push --tls-verify=false") {
+		t.Error("the declared insecure registry is still the push destination")
+	}
+}
+
+// A bare name is Docker Hub, not a registry called `alpine`.
+func TestTheRegistryHostIsOnlyAHostWhenItLooksLikeOne(t *testing.T) {
+	for ref, want := range map[string]string{
+		"alpine:3.20":                "",
+		"library/alpine":             "",
+		"reg:5000/acme/erp":          "reg:5000",
+		"ghcr.io/doblura/odoo:18.0":  "ghcr.io",
+		"localhost:5111/doblura/x:1": "localhost:5111",
+	} {
+		if got := registryHost(ref); got != want {
+			t.Errorf("registryHost(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}

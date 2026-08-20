@@ -24,6 +24,7 @@
 #   ./hack/demo-lab.sh up      cluster, operator, console, customers, accounts
 #   ./hack/demo-lab.sh check   assert each account sees what it should
 #   ./hack/demo-lab.sh open    port-forward the console and print the accounts
+#   ./hack/demo-lab.sh build   build an image from a real repository, for real
 #   ./hack/demo-lab.sh scale   add 40 more customers, to measure the big case
 #   ./hack/demo-lab.sh down    delete the cluster
 #
@@ -60,6 +61,18 @@ DEMO_PASSWORD=${DEMO_PASSWORD:-demo-doblura-1234}
 # its blast radius. It happened here — one command in this session ran against the
 # wrong cluster, harmlessly, and there is no version of that which is worth
 # risking twice.
+# The registry k3d creates alongside the cluster. Two names for one thing, and
+# both are needed: the host pushes to localhost:PORT, and the cluster pulls from
+# the container's name on the k3d network.
+REGISTRY=${REGISTRY:-doblura-registry}
+REGISTRY_PORT=${REGISTRY_PORT:-5111}
+# NOT "k3d-$REGISTRY". k3d prefixes its node containers with k3d- and its
+# registries with nothing, so the registry answers to `doblura-registry` — which
+# is the name CoreDNS is given, the name containerd is told to trust, and
+# therefore the only name that works from a pod. The prefixed guess produced a
+# build that pushed nowhere: "lookup k3d-doblura-registry: no such host".
+REGISTRY_IN_CLUSTER="$REGISTRY:5000"
+
 CTX="k3d-$CLUSTER"
 kc()  { kubectl --context "$CTX" "$@"; }
 hlm() { helm --kube-context "$CTX" "$@"; }
@@ -86,8 +99,14 @@ up() {
     # 8080 on the host reaches Traefik, so the public environment's Ingress can be
     # curled from outside without a port-forward — which is the only way to see
     # the middlewares actually refuse something.
+    #
+    # And a registry, because OdooBuild pushes to one and environments pull from
+    # it. k3d's own: it puts the registry on the cluster network AND configures
+    # containerd to trust it, which is the half people forget — a registry the
+    # nodes cannot pull from is a registry that only proves the push worked.
     k3d cluster create "$CLUSTER" --agents 1 \
-      -p "8080:80@loadbalancer" -p "8443:443@loadbalancer" --wait
+      -p "8080:80@loadbalancer" -p "8443:443@loadbalancer" \
+      --registry-create "$REGISTRY:0.0.0.0:$REGISTRY_PORT" --wait
   fi
   kubectl config get-contexts "$CTX" >/dev/null 2>&1 || {
     echo "no kubeconfig context named $CTX" >&2; exit 1; }
@@ -356,6 +375,33 @@ check() {
          "the page does not mention the rules that could not be applied" ;;
   esac
 
+  # ── building from a repository, when it has been run ──
+  #
+  # Skipped and SAID, rather than silently passing: `build` is its own subcommand
+  # because pushing a three-gigabyte base image takes longer than everything else
+  # here, and a check that quietly does nothing in the cluster where it matters is
+  # the failure mode this project keeps rediscovering.
+  local bphase
+  bphase=$(kc -n demo get odoobuild erp-18 -o jsonpath='{.status.phase}' 2>/dev/null)
+  if [ -z "$bphase" ]; then
+    printf '  skip  building from a repository (run %s build first)\n' "$0"
+  else
+    case "$(kc -n demo get odoobuild erp-18 -o jsonpath='{.status.phase}|{.status.image}|{range .status.sources[*]}{.commit}{end}' 2>/dev/null)" in
+      Succeeded\|*@sha256:*\|????????*)
+        ok "a build produced an image, by digest, from a recorded commit" ;;
+      Succeeded\|*\|"")
+        bad "the build recorded the commit it used" \
+          "it succeeded and recorded none, so nothing says which code is in that image" ;;
+      *) bad "the build succeeded" "it is $bphase" ;;
+    esac
+    # And the catalogue entry resolves to it, which is the step that used to be a
+    # person copying a digest.
+    case "$(kc -n demo get odootenant acme -o jsonpath='{range .spec.images[*]}{.name}={.fromBuild} {end}' 2>/dev/null)" in
+      *erp-built=erp-18*) ok "and the catalogue names the build rather than a digest" ;;
+      *) bad "the catalogue names the build" "no entry points at erp-18" ;;
+    esac
+  fi
+
   # ── the edge: the objects spec.exposure promises ──
   local mw
   mw=$(kc -n demo get middlewares.traefik.io -o name 2>/dev/null | wc -l | tr -d ' ')
@@ -366,6 +412,59 @@ check() {
   echo
   if [ "$fails" -eq 0 ]; then echo "  the lab is what it says it is"; else
     echo "  $fails check(s) failed"; return 1; fi
+}
+
+# ── build ──
+#
+# Its own subcommand and not part of `up`, for one measured reason: the base
+# image is nearly three gigabytes and pushing it into the cluster registry takes
+# longer than everything else in this script put together. `up` stays a few
+# minutes; this is here when somebody wants to see decision 6 actually happen.
+build_image() {
+  local base="$REGISTRY_IN_CLUSTER/doblura/odoo:18.0"
+
+  say "the base image, into the cluster registry"
+  if ! docker image inspect "$ODOO_IMAGE" >/dev/null 2>&1; then
+    echo "  $ODOO_IMAGE is not on this machine; build it with 'make images'" >&2
+    return 1
+  fi
+  # Pushed from the HOST to localhost:PORT, pulled by the cluster under the
+  # registry's own name. Same registry, two names, and mixing them up produces a
+  # build that pushes fine and an environment that cannot pull.
+  docker tag "$ODOO_IMAGE" "localhost:$REGISTRY_PORT/doblura/odoo:18.0"
+  note "pushing ~3GB; this is the slow part"
+  docker push -q "localhost:$REGISTRY_PORT/doblura/odoo:18.0" >/dev/null
+
+  say "credentials"
+  # The registry k3d creates has no authentication, and the field is required on
+  # purpose: a build that cannot be pushed produces an image inside a pod that is
+  # about to be deleted. A credential that authenticates nothing still says which
+  # registry this build is allowed to write to.
+  kc -n demo create secret docker-registry regcred \
+    --docker-server="$REGISTRY_IN_CLUSTER" --docker-username=demo --docker-password=demo \
+    --dry-run=client -o yaml | kc apply -f - >/dev/null
+
+  say "building"
+  kc -n demo delete odoobuild erp-18 --ignore-not-found >/dev/null
+  kc -n demo delete job erp-18-build --ignore-not-found >/dev/null
+  sed "s|__BASE__|$base|; s|__REGISTRY__|$REGISTRY_IN_CLUSTER|" \
+    "$HERE/demo/build.yaml" | kc apply -f - >/dev/null
+
+  for _ in $(seq 1 90); do
+    phase=$(kc -n demo get odoobuild erp-18 -o jsonpath='{.status.phase}' 2>/dev/null)
+    [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ] && break
+    sleep 10
+  done
+  kc -n demo get odoobuild erp-18 -o jsonpath='{.status.phase} {.status.image}{"\n"}'
+  [ "${phase:-}" = "Succeeded" ] || {
+    kc -n demo logs job/erp-18-build -c build --tail=30 2>/dev/null; return 1; }
+
+  say "and into the customer's catalogue"
+  # fromBuild, not a pasted digest: the entry says what it IS.
+  kc -n demo patch odootenant acme --type=json -p \
+    '[{"op":"add","path":"/spec/images/-","value":{"name":"erp-built","fromBuild":"erp-18","odooVersion":"18.0","flavor":"Official"}}]' \
+    >/dev/null 2>&1 || note "the catalogue entry is already there"
+  note "now: ./hack/demo-lab.sh check"
 }
 
 scale() {
@@ -446,5 +545,6 @@ case "${1:-}" in
   open) open_console ;;
   scale) scale ;;
   down) down ;;
-  *) echo "usage: $0 {up|check|open|scale|down}" >&2; exit 2 ;;
+  build) build_image ;;
+  *) echo "usage: $0 {up|check|open|build|scale|down}" >&2; exit 2 ;;
 esac

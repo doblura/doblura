@@ -338,7 +338,7 @@ func (m *EnvironmentCreator) defaultsFrom(
 		// From the STUDY, which observed the directory by running the image, and
 		// never from a guess: an addons_path entry that does not exist is exactly
 		// the failure envpod.go warns about.
-		if extra := studiedAddons(&tenant, chosen, env); len(extra) > 0 {
+		if extra := studiedAddons(&tenant, chosen, ref, env); len(extra) > 0 {
 			// RFC 6902 refuses to add a member to an object that does not exist,
 			// and `spec.addons` is absent on an environment that declared none —
 			// schema defaults do not conjure the parent. So the whole object goes
@@ -812,12 +812,20 @@ const dataLabel = "doblura.dev/data"
 func studiedAddons(
 	tenant *doblurav1alpha1.OdooTenant,
 	chosen *doblurav1alpha1.ImageCatalogueEntry,
+	ref string,
 	env *doblurav1alpha1.OdooEnvironment,
 ) []string {
+	// Matched on the RESOLVED reference, not on the entry's image field.
+	//
+	// An entry with fromBuild has no image field at all, so comparing against it
+	// matched nothing and every environment on a built image came back with no
+	// addons path — the exact failure the single resolution function exists to
+	// prevent, reappearing one line further down because the LOOKUP still used
+	// the raw field. Both sides now ask the same question.
 	var study *doblurav1alpha1.ImageStudy
 	for i := range tenant.Status.ImageStudies {
 		if tenant.Status.ImageStudies[i].Name == chosen.Name &&
-			tenant.Status.ImageStudies[i].Image == chosen.Image {
+			tenant.Status.ImageStudies[i].Image == ref {
 			study = &tenant.Status.ImageStudies[i]
 			break
 		}

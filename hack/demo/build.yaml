@@ -1,0 +1,30 @@
+# An image built from a real repository, in the customer's own cluster.
+#
+# Decision 6 made concrete: building means seeing the customer's source, a
+# control plane that only sees metadata cannot see source, so the build happens
+# here and what would leave is a digest.
+#
+# __BASE__ and __REGISTRY__ are substituted by hack/demo-lab.sh, because both are
+# names of the registry it created and hardcoding either one here is how the two
+# drift apart.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooBuild
+metadata: {name: erp-18, namespace: demo}
+spec:
+  forTenant: acme
+  from: __BASE__
+  repos:
+    # A real OCA repository, shallow. Small enough that the lab does not spend a
+    # quarter of an hour cloning, real enough that the module count at the end
+    # means something.
+    - name: mis-builder
+      url: https://github.com/OCA/mis-builder.git
+      ref: "17.0"
+      depth: 1
+  to:
+    image: __REGISTRY__/acme/erp
+    pushSecret: regcred
+    # The registry lives inside the cluster and speaks HTTP. Off by default in
+    # the CRD, because a push over HTTP to anything outside a cluster sends the
+    # credential in clear.
+    insecure: true
