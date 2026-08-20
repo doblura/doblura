@@ -47,13 +47,21 @@ type OdooBuildReconciler struct {
 // /dev/termination-log lives on a read-only root filesystem here.
 const buildDigestPath = "/tmp/pushed-digest"
 
-// addonsInImage is where a build puts the repositories it copied in.
+// Where a build puts what it produced.
 //
-// One directory per repository, and NOT flattened together: two repositories with
-// a module of the same name are a thing that happens — a customer's fix on top of
-// an OCA module is exactly that — and flattening makes which one wins depend on
-// copy order rather than on the addons path, where it is at least visible.
-const addonsInImage = "/opt/doblura/addons"
+// The sources keep one directory per repository, and a SINGLE directory of
+// symlinks points at every module across all of them. One addons path instead of
+// one per repository, and that is what makes the result usable without anybody
+// copying a list of directories into a spec by hand — a value that has to be
+// transcribed is a value that will be transcribed wrong.
+//
+// The link farm is not a flattening: `ls -l` on it says which repository each
+// module came from, so precedence is visible rather than implied by the order of
+// a list somewhere else. Later repositories win, matching what the CRD says.
+const (
+	srcInImage    = "/opt/doblura/src"
+	addonsInImage = "/opt/doblura/addons"
+)
 
 // The RBAC markers are a FREE-FLOATING comment, with a blank line under them.
 // They are package-scoped, and controller-gen does not pick them up from a
@@ -236,13 +244,22 @@ func tagFor(b *doblurav1alpha1.OdooBuild) string {
 func buildScript(b *doblurav1alpha1.OdooBuild) string {
 	ref := b.Spec.To.Image + ":" + tagFor(b)
 
-	var paths []string
 	var copies strings.Builder
 	for _, r := range b.Spec.Repos {
-		dest := addonsInImage + "/" + r.Name
-		paths = append(paths, dest)
-		copies.WriteString("COPY --chown=root:root " + r.Name + " " + dest + "\n")
+		copies.WriteString("COPY --chown=root:root " + r.Name + " " + srcInImage + "/" + r.Name + "\n")
 	}
+	// The link farm, built inside the image. In repository order, with -f, so a
+	// later repository shadows an earlier one — a customer's fix on top of an OCA
+	// module is exactly that case, and it is the order they wrote.
+	//
+	// -maxdepth 2, because an Odoo repository is a directory of modules and a
+	// deeper search picks up the test fixtures that ship inside them.
+	link := "RUN set -eu; mkdir -p " + addonsInImage + "; " +
+		"for r in " + strings.Join(repoNames(b), " ") + "; do " +
+		"for m in $(find " + srcInImage + "/$r -maxdepth 2 -name __manifest__.py " +
+		"-exec dirname {} \\; | sort); do " +
+		"ln -sfn \"$m\" " + addonsInImage + "/$(basename \"$m\"); done; done; " +
+		"echo \"$(ls " + addonsInImage + " | wc -l) modules linked\""
 
 	tls := "--tls-verify=true"
 	if b.Spec.To.Insecure != nil && *b.Spec.To.Insecure {
@@ -261,9 +278,12 @@ func buildScript(b *doblurav1alpha1.OdooBuild) string {
 	s.WriteString("FROM " + b.Spec.From + "\n")
 	s.WriteString("USER root\n")
 	s.WriteString(copies.String())
-	// A label rather than a convention: the image says where its addons are, so
-	// the image study can report it and nobody has to remember.
-	s.WriteString("LABEL dev.doblura.addons-path=\"" + strings.Join(paths, ",") + "\"\n")
+	s.WriteString(link + "\n")
+	// The label is for a person running `docker inspect`. What the rest of doblura
+	// reads is the DIRECTORY, because a label cannot be read from inside the
+	// container that carries it — and the image study works by running the image
+	// and asking it.
+	s.WriteString("LABEL dev.doblura.addons-path=\"" + addonsInImage + "\"\n")
 	s.WriteString("USER odoo\n")
 	s.WriteString("EOF\n")
 	s.WriteString(`echo ">> building ` + ref + `"` + "\n")
@@ -277,6 +297,15 @@ func buildScript(b *doblurav1alpha1.OdooBuild) string {
 	s.WriteString("cp /tmp/digest " + buildDigestPath + "\n")
 	s.WriteString(`echo ">> pushed $(cat /tmp/digest)"` + "\n")
 	return s.String()
+}
+
+// repoNames is the repository names in the order they were declared.
+func repoNames(b *doblurav1alpha1.OdooBuild) []string {
+	out := make([]string, 0, len(b.Spec.Repos))
+	for _, r := range b.Spec.Repos {
+		out = append(out, r.Name)
+	}
+	return out
 }
 
 func (r *OdooBuildReconciler) job(b *doblurav1alpha1.OdooBuild, name string) *batchv1.Job {

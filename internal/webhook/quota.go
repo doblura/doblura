@@ -8,6 +8,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"net/http"
 	"sort"
 	"strings"
@@ -315,6 +316,33 @@ func (m *EnvironmentCreator) defaultsFrom(
 			// equals the schema default, so the object records what was decided
 			// rather than what happened to be left unset.
 			ops = append(ops, jsonpatch.NewOperation("add", "/spec/imageFlavor", string(chosen.Flavor)))
+		}
+		// And the addons directories the image turned out to have, from the study
+		// rather than from a convention.
+		//
+		// This is what closes the loop an OdooBuild opens. A built image carries
+		// its modules in a directory the flavour list knows nothing about, so
+		// without this somebody has to copy that path into spec.addons.baked by
+		// hand — and a value that has to be transcribed is a value that will be
+		// transcribed wrong, on the field whose failure mode is Odoo starting
+		// happily and then not having the module.
+		//
+		// From the STUDY, which observed the directory by running the image, and
+		// never from a guess: an addons_path entry that does not exist is exactly
+		// the failure envpod.go warns about.
+		if extra := studiedAddons(&tenant, chosen, env); len(extra) > 0 {
+			// RFC 6902 refuses to add a member to an object that does not exist,
+			// and `spec.addons` is absent on an environment that declared none —
+			// schema defaults do not conjure the parent. So the whole object goes
+			// in when there is nothing there, and only the member when there is.
+			// The same trap the creator annotation and the data label both fell
+			// into; this is the third.
+			if equality.Semantic.DeepEqual(env.Spec.Addons, doblurav1alpha1.AddonsSpec{}) {
+				ops = append(ops, jsonpatch.NewOperation("add", "/spec/addons",
+					map[string]any{"baked": extra}))
+			} else {
+				ops = append(ops, jsonpatch.NewOperation("add", "/spec/addons/baked", extra))
+			}
 		}
 	case env.Spec.Image == "" && d != nil && d.Image != "":
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", d.Image))
@@ -766,6 +794,68 @@ func (m *EnvironmentCreator) defaultTenant(ctx context.Context, ns string) (stri
 // claiming knowledge of an audit doblura has not read.
 // dataLabel records what kinds of data an environment holds, for selecting on.
 const dataLabel = "doblura.dev/data"
+
+// studiedAddons is the addons directories this image was OBSERVED to have, minus
+// the ones the flavour already puts on the path and the ones already declared.
+//
+// Empty when there is nothing to add, so an environment that needs no patch does
+// not get one — a no-op patch still rewrites the field and shows up as a change
+// in every audit of the object.
+func studiedAddons(
+	tenant *doblurav1alpha1.OdooTenant,
+	chosen *doblurav1alpha1.ImageCatalogueEntry,
+	env *doblurav1alpha1.OdooEnvironment,
+) []string {
+	var study *doblurav1alpha1.ImageStudy
+	for i := range tenant.Status.ImageStudies {
+		if tenant.Status.ImageStudies[i].Name == chosen.Name &&
+			tenant.Status.ImageStudies[i].Image == chosen.Image {
+			study = &tenant.Status.ImageStudies[i]
+			break
+		}
+	}
+	if study == nil {
+		return nil
+	}
+
+	have := map[string]bool{}
+	for _, p := range doblurav1alpha1.FlavorBakedPaths(chosen.Flavor) {
+		have[p] = true
+	}
+	for _, p := range env.Spec.Addons.Baked {
+		have[p] = true
+	}
+
+	// Odoo's own package path is left out, and that needed measuring rather than
+	// assuming — flavor_test.go says an addons_path "REPLACES the default rather
+	// than adding to it", which is true of the IMAGE's declared addons_path and
+	// not of Odoo's core:
+	//
+	//	odoo -c <conf with addons_path = /opt/doblura/addons>
+	//	  → addons paths: ['/usr/lib/python3/dist-packages/odoo/addons',
+	//	                   '/var/lib/odoo/addons/18.0', '/opt/doblura/addons']
+	//
+	// Odoo adds its package and data_dir/addons/<series> whatever the config
+	// says. What IS lost is the image's own value — an empty /mnt/extra-addons in
+	// the official image, and /opt/odoo/auto/addons in Doodba, which is precisely
+	// why FlavorBakedPaths exists. So the studied directories are carried over and
+	// the package path is not: putting it in the field would say doblura decided
+	// something it did not.
+	out := append([]string{}, env.Spec.Addons.Baked...)
+	added := false
+	for _, p := range study.AddonsPaths {
+		if have[p] || strings.Contains(p, "/dist-packages/") {
+			continue
+		}
+		have[p] = true
+		out = append(out, p)
+		added = true
+	}
+	if !added {
+		return nil
+	}
+	return out
+}
 
 func dataRules(
 	env *doblurav1alpha1.OdooEnvironment,

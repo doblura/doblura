@@ -402,3 +402,77 @@ func TestAForgedCreatorAnnotationIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A built image's addons directory reaches the environment without anybody
+// typing it.
+//
+// This is the loop OdooBuild opens: the image carries its modules in a directory
+// the flavour list knows nothing about, and spec.addons.baked is the field that
+// puts it on the addons path. Left to a person, that is a path transcribed by
+// hand into the one field whose failure mode is Odoo starting happily and then
+// not having the module.
+//
+// From the STUDY, which observed the directory by running the image. Never from a
+// convention: an addons_path entry that does not exist is the failure envpod
+// warns about, and a guess is how you get one.
+func TestABuiltImagesAddonsReachTheEnvironment(t *testing.T) {
+	tenant := &doblurav1alpha1.OdooTenant{
+		Status: doblurav1alpha1.OdooTenantStatus{
+			ImageStudies: []doblurav1alpha1.ImageStudy{{
+				Name: "erp", Image: "r/x:1",
+				AddonsPaths: []string{
+					"/opt/doblura/addons",
+					// Odoo's own, which is already found and only makes the field
+					// harder to read.
+					"/usr/lib/python3/dist-packages/odoo/addons",
+				},
+			}},
+		},
+	}
+	entry := &doblurav1alpha1.ImageCatalogueEntry{Name: "erp", Image: "r/x:1"}
+	env := &doblurav1alpha1.OdooEnvironment{}
+
+	got := studiedAddons(tenant, entry, env)
+	if len(got) != 1 || got[0] != "/opt/doblura/addons" {
+		t.Fatalf("the built image's addons did not reach the environment: %v", got)
+	}
+	// Odoo's own package path is deliberately NOT carried into the field. Writing
+	// an addons_path does not lose it — measured, with a config naming only
+	// /opt/doblura/addons, and Odoo still reported dist-packages and
+	// data_dir/addons/18.0 alongside it. Putting it in the spec would record a
+	// decision doblura did not make.
+	for _, p := range got {
+		if strings.Contains(p, "/dist-packages/") {
+			t.Errorf("Odoo's own path was written into the spec: %v", got)
+		}
+	}
+
+	// Already declared: nothing to add, and no patch, because a no-op patch still
+	// rewrites the field and shows up as a change in every audit of the object.
+	env.Spec.Addons.Baked = []string{"/opt/doblura/addons"}
+	if got := studiedAddons(tenant, entry, env); got != nil {
+		t.Errorf("an environment that needs no patch got one: %v", got)
+	}
+
+	// An image whose only studied path is Odoo's own gets NO patch: the official
+	// image finds its own addons, and writing the field for it would replace a
+	// default that was already right.
+	plain := &doblurav1alpha1.OdooTenant{
+		Status: doblurav1alpha1.OdooTenantStatus{
+			ImageStudies: []doblurav1alpha1.ImageStudy{{
+				Name: "erp", Image: "r/x:1",
+				AddonsPaths: []string{"/usr/lib/python3/dist-packages/odoo/addons"},
+			}},
+		},
+	}
+	if got := studiedAddons(plain, entry, &doblurav1alpha1.OdooEnvironment{}); got != nil {
+		t.Errorf("an official image was given an addons_path it does not need: %v", got)
+	}
+
+	// A study of a DIFFERENT image is not a study of this one. The entry can be
+	// repointed, and a stale report read as current is worse than no report.
+	entry2 := &doblurav1alpha1.ImageCatalogueEntry{Name: "erp", Image: "r/x:2"}
+	if got := studiedAddons(tenant, entry2, &doblurav1alpha1.OdooEnvironment{}); got != nil {
+		t.Errorf("a study of another image was applied: %v", got)
+	}
+}

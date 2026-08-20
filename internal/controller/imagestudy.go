@@ -63,7 +63,11 @@ USER_S="$UID_N:$GID_N"
 
 # Where the addons live, from the image rather than from a guess.
 PATHS=""
-for d in /opt/odoo/auto/addons /mnt/extra-addons /usr/lib/python3/dist-packages/odoo/addons; do
+# /opt/doblura/addons is where an image built by OdooBuild puts its link farm.
+# Without it here, the study of an image THIS OPERATOR BUILT reported "no addon
+# manifests were found anywhere Doblura looks" — a false alarm about our own
+# output, on the screen somebody reads to decide whether an image is usable.
+for d in /opt/doblura/addons /opt/odoo/auto/addons /mnt/extra-addons /usr/lib/python3/dist-packages/odoo/addons; do
   [ -d "$d" ] && PATHS="$PATHS$d,"
 done
 PATHS=${PATHS%,}
@@ -73,11 +77,13 @@ PATHS=${PATHS%,}
 COUNT=0
 EXTRA=""
 for d in $(echo "$PATHS" | tr ',' ' '); do
-  n=$(find "$d" -maxdepth 2 -name __manifest__.py 2>/dev/null | wc -l | tr -d ' ')
+  # -L follows symlinks: the addons directory an OdooBuild produces is a farm of
+  # them, and without this every module in a built image counted as zero.
+  n=$(find -L "$d" -maxdepth 2 -name __manifest__.py 2>/dev/null | wc -l | tr -d ' ')
   COUNT=$((COUNT + n))
   case "$d" in
     */dist-packages/*) ;;
-    *) EXTRA="$EXTRA$(find "$d" -maxdepth 2 -name __manifest__.py 2>/dev/null | head -12 | sed -E 's#.*/([^/]+)/__manifest__.py#\1#' | tr '\n' ',')" ;;
+    *) EXTRA="$EXTRA$(find -L "$d" -maxdepth 2 -name __manifest__.py 2>/dev/null | head -12 | sed -E 's#.*/([^/]+)/__manifest__.py#\1#' | tr '\n' ',')" ;;
   esac
 done
 EXTRA=${EXTRA%,}

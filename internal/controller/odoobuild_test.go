@@ -107,8 +107,15 @@ func TestTheGeneratedBuildDropsGitAndLabelsTheAddonsPath(t *testing.T) {
 	if !strings.Contains(s, "-name .git -type d -prune") {
 		t.Error("the sources go into the image with their .git")
 	}
-	if !strings.Contains(s, "LABEL dev.doblura.addons-path=\"/opt/doblura/addons/mis\"") {
+	// ONE addons path, not one per repository: a list of directories somebody has
+	// to transcribe into a spec is a list somebody will transcribe wrong.
+	if !strings.Contains(s, `LABEL dev.doblura.addons-path="/opt/doblura/addons"`) {
 		t.Error("the image does not say where its addons are")
+	}
+	// And a link farm rather than a flattening, so `ls -l` says which repository
+	// each module came from.
+	if !strings.Contains(s, "ln -sfn") || !strings.Contains(s, "/opt/doblura/src/$r") {
+		t.Error("the modules are not linked into one directory from their sources")
 	}
 	// TLS on by default: a push over HTTP sends the credential in clear.
 	if !strings.Contains(s, "--tls-verify=true") {
