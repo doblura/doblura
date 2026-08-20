@@ -167,7 +167,7 @@ type OdooTenantSpec struct {
 	// Images is the catalogue of images this customer may run.
 	//
 	// A catalogue rather than a free-text field, because nobody should have to
-	// remember that this customer runs `ghcr.io/example/hms:18` while the one
+	// remember that this customer runs `ghcr.io/example/atlas:18` while the one
 	// below them runs something else. Support picks a name from a list; the
 	// registry reference is written once, by whoever builds the images.
 	//
@@ -320,7 +320,7 @@ type OdooTenantStatus struct {
 //
 // +kubebuilder:validation:XValidation:rule="has(self.image) != has(self.fromBuild)",message="an entry names an image OR the build that produces it, and exactly one: with both, the two can disagree and nothing says which won; with neither, the entry names nothing"
 type ImageCatalogueEntry struct {
-	// Name is what a person picks from a list: "hms-18", not a registry path.
+	// Name is what a person picks from a list: "atlas-18", not a registry path.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
@@ -348,7 +348,7 @@ type ImageCatalogueEntry struct {
 	// OdooVersion this image is, for example "18.0".
 	//
 	// Declared rather than parsed out of the tag. A tag is a string somebody
-	// chose: `hms:18` and `hms:18.0-rc2` and `hms:stable` may all be Odoo 18, and
+	// chose: `atlas:18` and `atlas:18.0-rc2` and `atlas:stable` may all be Odoo 18, and
 	// guessing from the text is how a major upgrade gets waved through because
 	// the tag did not look like one.
 	// +kubebuilder:validation:Pattern=`^[0-9]+\.[0-9]+$`

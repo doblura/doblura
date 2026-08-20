@@ -456,7 +456,7 @@ func (r *OdooEnvironmentReconciler) ensureWorkload(
 	st *doblurav1alpha1.OdooEnvironmentStatus,
 ) error {
 	replicas := int32(1)
-	if st.Phase == doblurav1alpha1.EnvHibernated {
+	if st.Phase == doblurav1alpha1.EnvHibernated || st.PausedBy != "" {
 		replicas = 0
 	}
 

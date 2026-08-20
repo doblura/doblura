@@ -402,7 +402,7 @@ func (m *EnvironmentCreator) defaultsFrom(
 
 // catalogueNames lists what the person could have meant.
 //
-// Printed in the refusal because "hms-18 is not in the catalogue" leaves them
+// Printed in the refusal because "atlas-18 is not in the catalogue" leaves them
 // guessing, and the list is three or four short names.
 func catalogueNames(t *doblurav1alpha1.OdooTenant) string {
 	if len(t.Spec.Images) == 0 {

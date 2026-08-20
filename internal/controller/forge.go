@@ -74,7 +74,7 @@ func listRefs(
 // repoPath pulls owner and repository out of a clone URL.
 //
 // Both forms, because people paste whichever their forge showed them:
-// https://github.com/acme/hms.git and git@github.com:acme/hms.git.
+// https://github.com/acme/atlas.git and git@github.com:acme/atlas.git.
 func repoPath(raw string) (owner, name string, err error) {
 	s := strings.TrimSuffix(strings.TrimSpace(raw), ".git")
 	if i := strings.Index(s, "@"); i >= 0 && !strings.Contains(s, "://") {

@@ -198,7 +198,25 @@ spec:
                 minLength: 1
                 type: string
               retention:
-                description: Retention is how many are kept.
+                default:
+                  daily: 7
+                  monthly: 3
+                  weekly: 4
+                description: |-
+                  Retention is how many are kept.
+
+                  Defaulted as an OBJECT, not only field by field, and that is the whole
+                  point: schema defaults only apply inside an object that is present, so an
+                  OdooBackup that declared no retention block got a zero policy — daily 0,
+                  weekly 0, monthly 0 — and the CEL rule that refuses exactly that never fired
+                  either, because there was nothing to validate. The result was a backup
+                  schedule that listed every copy it took as pending deletion, measured on the
+                  first backup ever taken in the demo lab.
+                  The value is spelled out and not `{}`, because the API server validates a
+                  default against the object's own rules and an empty one has no `daily` for
+                  the rule to read: "no such key: daily evaluating rule". That means these
+                  three numbers exist twice — here and on the fields below — and
+                  hack/verify-chart-render.py fails if the two ever disagree.
                 properties:
                   daily:
                     default: 7

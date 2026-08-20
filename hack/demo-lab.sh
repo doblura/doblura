@@ -402,6 +402,21 @@ check() {
     esac
   fi
 
+  # ── restores are an audit trail, when there are any ──
+  #
+  # The page exists because after "who did this" the next question is always
+  # "what was there before, and can we put it back". A restore with no safety
+  # copy has no way back, and that has to read as a warning rather than as an
+  # empty cell.
+  if [ -n "$(kc -n demo get odoorestores -o name 2>/dev/null)" ]; then
+    case "$(page /o/restores "$jar")" in
+      *"←"*) ok "the restores page says what was replaced and by whom" ;;
+      *) bad "the restores page" "it does not say what was replaced" ;;
+    esac
+  else
+    printf '  skip  the restores page (no restore has been made in this lab)\n'
+  fi
+
   # ── a rollout says what is holding it ──
   #
   # Not the count. Somebody looking at a stalled rollout needs to know whether it

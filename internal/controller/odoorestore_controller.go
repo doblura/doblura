@@ -101,7 +101,7 @@ func (r *OdooRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Down before, up after. Written as the environment's own field so the
 	// operator's normal reconcile does it, rather than this controller reaching
 	// into a Deployment that another controller owns.
-	if err := r.setHibernated(ctx, env, true); err != nil {
+	if err := r.setHibernated(ctx, env, true, rs.Name); err != nil {
 		return r.failRestore(ctx, &rs, st, "CannotStop", err)
 	}
 
@@ -120,7 +120,7 @@ func (r *OdooRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	switch {
 	case job.Status.Succeeded > 0:
-		if err := r.setHibernated(ctx, env, false); err != nil {
+		if err := r.setHibernated(ctx, env, false, rs.Name); err != nil {
 			return r.failRestore(ctx, &rs, st, "CannotStart", err)
 		}
 		now := metav1.Now()
@@ -147,7 +147,7 @@ func (r *OdooRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// may be running a half-restored database and that is bad — but leaving
 		// it switched off with no explanation is worse, and the status says
 		// exactly what happened.
-		_ = r.setHibernated(ctx, env, false)
+		_ = r.setHibernated(ctx, env, false, rs.Name)
 		return r.failRestore(ctx, &rs, st, "Failed", fmt.Errorf(
 			"the restore failed; the environment has been started again, but its "+
 				"database may be half-restored. Read the logs of Job %s", job.Name))
@@ -198,31 +198,47 @@ func copyNames(b *doblurav1alpha1.OdooBackup) string {
 	return out
 }
 
-// setHibernated switches the environment off and on through its own API.
+// setHibernated stops and restarts the environment while its database is being
+// replaced.
+//
+// Through the STATUS, which is doblura's to write, and not by rewriting
+// spec.lifecycle.type — which is what this did, and which broke the restore that
+// matters most. Rewriting the customer's own declaration as an internal control
+// worked until a rule said a Production environment may not be Hibernating, and
+// then restoring into production failed with a sentence about hibernation that
+// nobody reading it would connect to a restore.
+//
+// It also says WHY the thing is stopped. "Hibernated" on a production environment
+// is a word somebody would be paged about; "paused by vuelta-atras" is an answer.
 func (r *OdooRestoreReconciler) setHibernated(
 	ctx context.Context,
 	env *doblurav1alpha1.OdooEnvironment,
 	down bool,
+	by string,
 ) error {
 	var live doblurav1alpha1.OdooEnvironment
 	if err := r.Get(ctx, client.ObjectKeyFromObject(env), &live); err != nil {
 		return err
 	}
-	want := doblurav1alpha1.LifecyclePersistent
+	want := ""
 	if down {
-		want = doblurav1alpha1.LifecycleHibernating
+		want = by
 	}
-	// Only touched when it differs, and never over an Ephemeral lifecycle: an
-	// ephemeral environment's ttl is what removes it, and rewriting its type
-	// would leave it alive for ever.
-	if live.Spec.Lifecycle.Type == doblurav1alpha1.LifecycleEphemeral {
+	// Never over an ephemeral environment mid-flight, and never over a pause
+	// somebody ELSE set: two restores into one environment is a thing to refuse
+	// rather than to interleave, and clearing another restore's pause would start
+	// its target serving halfway through having its database replaced.
+	if live.Status.PausedBy != "" && live.Status.PausedBy != by {
+		return fmt.Errorf(
+			"%s is already stopped by restore %q; two restores into one environment "+
+				"would replace its database while the other is still writing",
+			live.Name, live.Status.PausedBy)
+	}
+	if live.Status.PausedBy == want {
 		return nil
 	}
-	if live.Spec.Lifecycle.Type == want {
-		return nil
-	}
-	live.Spec.Lifecycle.Type = want
-	return r.Update(ctx, &live)
+	live.Status.PausedBy = want
+	return r.Status().Update(ctx, &live)
 }
 
 func (r *OdooRestoreReconciler) ensureRestoreJob(

@@ -102,6 +102,41 @@ check(not missing,
       "the manager may read every kind the chart installs"
       + (f" (not: {', '.join(missing)})" if missing else ""))
 
+# A NON-EMPTY object default and its fields' defaults have to agree.
+#
+# An EMPTY one — `default: {}` — is the ordinary case and is fine: defaulting
+# recurses, so the object materialises and its fields then get their own defaults.
+# Measured rather than assumed, on an environment that declared no security block
+# at all: it came back with adminUsers ["admin"] and denyEgress true.
+#
+# The exception is an object carrying a CEL rule that reads one of its keys. There
+# `{}` is refused by the API server itself — "no such key: daily evaluating rule"
+# — so the default has to spell the values out, and then the same numbers exist in
+# two places. That drift would be silent and would matter: the object default is
+# what an unspecified retention gets, the field defaults are what a partly
+# specified one gets, and a backup whose retention keeps nothing deletes every
+# copy it takes.
+for d in docs:
+    if d.get("kind") != "CustomResourceDefinition":
+        continue
+    for version in d["spec"]["versions"]:
+        spec = version["schema"]["openAPIV3Schema"]["properties"].get("spec", {})
+        for pname, prop in (spec.get("properties") or {}).items():
+            obj_default = prop.get("default")
+            if not isinstance(obj_default, dict) or not obj_default:
+                continue
+            if not prop.get("properties"):
+                continue
+            field_defaults = {k: v["default"] for k, v in prop["properties"].items()
+                              if "default" in v}
+            if not field_defaults:
+                continue
+            check(obj_default == field_defaults,
+                  f"{d['metadata']['name']}: {pname}'s object default matches its "
+                  f"fields' defaults"
+                  + ("" if obj_default == field_defaults
+                     else f" ({obj_default} vs {field_defaults})"))
+
 print()
 if fails:
     print(f"  {len(fails)} rendering problem(s)")

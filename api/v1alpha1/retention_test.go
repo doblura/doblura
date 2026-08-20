@@ -208,3 +208,37 @@ func TestAnUndatableCopyIsNeverDropped(t *testing.T) {
 		t.Fatalf("the datable copies were not pruned as expected: drop=%v", names(drop))
 	}
 }
+
+// A policy that keeps nothing keeps everything.
+//
+// It reads backwards and it is the only safe reading. Every rule in Retain works
+// by picking the newest of a period, so a policy of all zeros picks nothing and
+// the entire volume comes back as a deletion.
+//
+// Measured before the fix, on the first backup ever taken in the demo lab: an
+// OdooBackup with no retention block reported the copy it had just made as
+// pending deletion. Schema defaults do not apply inside an object that is absent,
+// so daily/weekly/monthly were 0 — and the CEL rule that refuses a keep-nothing
+// policy never fired either, because there was no policy object to validate.
+func TestAPolicyThatKeepsNothingKeepsEverything(t *testing.T) {
+	now := time.Now()
+	copies := []BackupCopy{
+		{Name: "today", TakenAt: metav1.NewTime(now.Add(-time.Hour))},
+		{Name: "yesterday", TakenAt: metav1.NewTime(now.Add(-25 * time.Hour))},
+	}
+
+	keep, drop := Retain(copies, BackupRetention{}, now)
+	if len(drop) != 0 {
+		t.Fatalf("a policy nobody set deleted %d copies: %v", len(drop), drop)
+	}
+	if len(keep) != 2 {
+		t.Fatalf("it kept %d of 2", len(keep))
+	}
+
+	// And a real policy still deletes what it should, so the guard above has not
+	// turned retention off.
+	keep, drop = Retain(copies, BackupRetention{Daily: 1}, now)
+	if len(keep) != 1 || len(drop) != 1 {
+		t.Errorf("daily 1 over two days kept %d and dropped %d", len(keep), len(drop))
+	}
+}

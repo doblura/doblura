@@ -190,9 +190,9 @@ hand means the environment exists for the pull requests somebody remembered.</p>
         <div class="fields">
           <div><label for="rsname">Name</label>
             <input id="rsname" name="name" required
-                   pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="hms"></div>
+                   pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="atlas"></div>
           <div><label for="rsurl">Repository</label>
-            <input id="rsurl" name="url" required placeholder="https://github.com/acme/hms.git"></div>
+            <input id="rsurl" name="url" required placeholder="https://github.com/acme/atlas.git"></div>
           <div><label for="provider">Forge</label>
             <select id="provider" name="provider">
               <option value="GitHub">GitHub</option>
@@ -342,9 +342,9 @@ succeeded against exactly that image first.</p>`))}}
         <div class="fields">
           <div><label for="imageName">Name</label>
             <input id="imageName" name="imageName" required
-                   pattern="[a-z0-9]([-a-z0-9.]*[a-z0-9])?" placeholder="hms-18"></div>
+                   pattern="[a-z0-9]([-a-z0-9.]*[a-z0-9])?" placeholder="atlas-18"></div>
           <div><label for="image">Image</label>
-            <input id="image" name="image" required placeholder="ghcr.io/acme/hms:18"></div>
+            <input id="image" name="image" required placeholder="ghcr.io/acme/atlas:18"></div>
           <div><label for="odooVersion">Odoo version</label>
             <input id="odooVersion" name="odooVersion" required
                    pattern="[0-9]+\.[0-9]+" placeholder="18.0"></div>
@@ -364,8 +364,8 @@ succeeded against exactly that image first.</p>`))}}
       there. The version you type is what the catalogue claims; the study is what
       the image says, and where they disagree the table says so.</p>
       <p class="hint">The version is <b>declared</b>, never read from the tag:
-      <span class="mono">hms:18</span>, <span class="mono">hms:18.0-rc2</span> and
-      <span class="mono">hms:stable</span> can all be Odoo 18, and guessing from
+      <span class="mono">atlas:18</span>, <span class="mono">atlas:18.0-rc2</span> and
+      <span class="mono">atlas:stable</span> can all be Odoo 18, and guessing from
       the text is how a major upgrade gets waved through. “Built as” tells Doblura
       where that image keeps its addons and how to start it — and it is verified
       before anything runs, not assumed.</p>

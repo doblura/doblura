@@ -77,6 +77,13 @@ var objectKinds = []objectKind{
 		Columns: []string{"Name", "State", "Source", "Taken", "What was masked"},
 	},
 	{
+		Slug: "restores", Title: "Restores", Resource: "odoorestores",
+		Lede: "Every time somebody put a copy back over a database, who asked, and " +
+			"what was displaced. This is the page an audit asks for, and the one " +
+			"nobody thinks to build until it is asked for.",
+		Columns: []string{"Name", "State", "What was replaced", "Who and when", "What it displaced"},
+	},
+	{
 		Slug: "releases", Title: "Releases", Resource: "odooreleases",
 		Lede: "One version of your own product on its way across customers. A rollout " +
 			"is the one thing here that is worth watching while it happens.",
@@ -148,6 +155,54 @@ type cell struct {
 
 func text(s string) cell  { return cell{Text: s} }
 func muted(s string) cell { return cell{Text: s, Muted: true} }
+
+// restoreState maps a restore onto the shared colour vocabulary.
+func restoreState(p string) string {
+	switch p {
+	case string(doblurav1alpha1.RestoreSucceeded):
+		return "up"
+	case string(doblurav1alpha1.RestoreFailed):
+		return "down"
+	case "":
+		return "unknown"
+	default:
+		return "building"
+	}
+}
+
+// askedBy is who asked and when, in one cell.
+//
+// Together because they are one fact. "toni" with no time is a name without an
+// afternoon attached, and a timestamp with no name is the half of an audit
+// question that nobody asks first.
+func askedBy(rs *doblurav1alpha1.OdooRestore) string {
+	who := rs.Status.RequestedBy
+	if who == "" {
+		who = "unrecorded"
+	}
+	when := rs.Status.StartedAt
+	if when == nil {
+		when = &rs.CreationTimestamp
+	}
+	return who + " · " + humanSince(when) + " ago"
+}
+
+// displacedCell is what was in the target before, and where it went.
+//
+// The most useful column on this page and the least obvious one. After "who did
+// this" the next question is always "what was there before, and can we put it
+// back" — and a restore with no safety copy is a restore with no way back, which
+// must read as a warning rather than as an empty cell.
+func displacedCell(rs *doblurav1alpha1.OdooRestore) cell {
+	if rs.Status.SafetyCopy != "" {
+		return muted(rs.Status.SafetyCopy + " in " + rs.Status.SafetyCopyIn)
+	}
+	if rs.Status.Phase != doblurav1alpha1.RestoreSucceeded {
+		return muted("")
+	}
+	// Succeeded, and nothing was kept of what it replaced.
+	return cell{State: "degraded", Word: "nothing kept: no way back"}
+}
 
 // releaseState maps a rollout onto the shared colour vocabulary.
 //
@@ -497,6 +552,27 @@ func (s *Server) objectsIn(
 					muted(sn.Spec.Source.Host),
 					muted(humanSince(sn.Status.LastSuccessfulTime)),
 					maskingCell(sn),
+				},
+			})
+		}
+	case "restores":
+		var l doblurav1alpha1.OdooRestoreList
+		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
+			view.Denied, view.refusal = true, err
+			break
+		}
+		for i := range l.Items {
+			rs := &l.Items[i]
+			view.Rows = append(view.Rows, objectRow{
+				Name: rs.Name, Namespace: rs.Namespace,
+				Cells: []cell{
+					verdict(restoreState(string(rs.Status.Phase)), string(rs.Status.Phase)),
+					muted(rs.Spec.Into + " ← " + rs.Spec.Backup + " " + rs.Spec.Copy),
+					muted(askedBy(rs)),
+					displacedCell(rs),
 				},
 			})
 		}

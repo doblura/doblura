@@ -46,6 +46,24 @@ func Retain(copies []BackupCopy, policy BackupRetention, now time.Time) (keep, d
 		return nil, nil
 	}
 
+	// A policy that keeps nothing keeps EVERYTHING.
+	//
+	// It reads backwards and it is the only safe reading. Every rule below works
+	// by picking the newest of a period, so a policy of all zeros picks nothing
+	// and the whole volume comes back as a deletion — which is what happened: an
+	// OdooBackup with no retention block listed the only copy it had ever taken as
+	// pending, because schema defaults do not apply inside an object that is
+	// absent and the CEL rule refusing a keep-nothing policy had nothing to
+	// refuse.
+	//
+	// The schema now defaults the object, so this should be unreachable. It stays
+	// because the direction of the mistake matters more than its likelihood: the
+	// failure mode of the alternative is deleting somebody's only backup, and no
+	// upgrade path, hand-written object or future refactor gets to reach it.
+	if policy.Daily == 0 && policy.Weekly == 0 && policy.Monthly == 0 {
+		return copies, nil
+	}
+
 	// A copy with no date is KEPT and never dropped. The caller is expected to
 	// have set these aside already, and this is the second line: every rule below
 	// works by picking the newest of a period, so a copy that cannot be placed in

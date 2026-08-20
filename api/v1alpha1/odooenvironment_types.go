@@ -981,6 +981,22 @@ type OdooEnvironmentStatus struct {
 	// +optional
 	WAF WAFMode `json:"waf,omitempty"`
 
+	// PausedBy is the OdooRestore that has this environment stopped, or empty.
+	//
+	// A restore has to stop the workload: you cannot replace a database under a
+	// running Odoo. It used to do that by rewriting spec.lifecycle.type to
+	// Hibernating — using a field the CUSTOMER declared as an internal control —
+	// and the day a rule said a Production environment may not be Hibernating,
+	// restoring into production became impossible. Measured: "a Production
+	// environment cannot be Ephemeral or Hibernating", on the one restore that
+	// most needs to work.
+	//
+	// In the status because that is doblura's to write, and because it says WHY
+	// something is stopped. "Hibernated" on a production environment is a sentence
+	// somebody would page about.
+	// +optional
+	PausedBy string `json:"pausedBy,omitempty"`
+
 	// ExpiresAt is when it gets destroyed.
 	// +optional
 	// Printed as a string rather than a date column: kubectl renders a date
