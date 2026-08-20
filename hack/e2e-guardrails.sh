@@ -4,23 +4,42 @@
 set -uo pipefail
 fails=0
 
-# The manager has to be up before anything below means anything.
+# Two ways to run this, and the difference is whether an operator is installed.
 #
-# Its webhooks are failurePolicy: Fail, so while it is rolling out EVERY create is
-# rejected — and this script reports that as a page of guardrails failing, which
-# reads like the rules broke rather than like the pod is thirty seconds old. That
-# happened, and it cost a real investigation before the pod finished starting.
-for _ in $(seq 1 60); do
-  ready=$(kubectl get deploy -A -l app.kubernetes.io/name=doblura \
-    -o jsonpath='{.items[0].status.readyReplicas}' 2>/dev/null)
-  [ "${ready:-0}" -ge 1 ] 2>/dev/null && break
-  sleep 2
-done
-if [ "${ready:-0}" -lt 1 ] 2>/dev/null; then
-  printf '  the manager has no ready replica, so every check below would fail on a\n'
-  printf '  webhook that is not answering rather than on the rule it is testing:\n'
-  kubectl get pods -A -l app.kubernetes.io/name=doblura 2>&1 | sed 's/^/    /'
-  exit 1
+# Most of what follows is CEL in the CRDs, which the API server enforces on its
+# own: `kubectl apply -f config/crd/` and these checks mean something. The quota
+# and the mutating defaults need the operator serving admission, and those parts
+# say so themselves rather than passing quietly.
+#
+# So the wait below is conditional. It was not, and that made `make e2e` — CRDs
+# only, exactly as documented — exit immediately saying the manager had no ready
+# replica. A check that cannot pass in the way its own README tells you to run it
+# is worse than no check: it teaches people that red is normal here.
+have_webhook=$(kubectl get validatingwebhookconfigurations \
+  -l app.kubernetes.io/name=doblura -o name 2>/dev/null | head -1)
+
+if [ -n "$have_webhook" ]; then
+  # The webhooks are failurePolicy: Fail, so while the manager is rolling out
+  # EVERY create is rejected — and this script would report that as a page of
+  # guardrails failing, which reads like the rules broke rather than like the pod
+  # is thirty seconds old. That happened, and it cost a real investigation before
+  # the pod finished starting.
+  for _ in $(seq 1 60); do
+    ready=$(kubectl get deploy -A -l app.kubernetes.io/name=doblura \
+      -o jsonpath='{.items[0].status.readyReplicas}' 2>/dev/null)
+    [ "${ready:-0}" -ge 1 ] 2>/dev/null && break
+    sleep 2
+  done
+  if [ "${ready:-0}" -lt 1 ] 2>/dev/null; then
+    printf '  a webhook configuration is installed but the manager has no ready\n'
+    printf '  replica, so every check below would fail on a webhook that is not\n'
+    printf '  answering rather than on the rule it is testing:\n'
+    kubectl get pods -A -l app.kubernetes.io/name=doblura 2>&1 | sed 's/^/    /'
+    exit 1
+  fi
+else
+  printf '  no operator installed: the CRD guardrails below are checked against the\n'
+  printf '  API server, and the ones that need admission will say they are skipped.\n\n'
 fi
 
 check() { # name, yaml, ok|rejected
@@ -372,6 +391,15 @@ echo
 # Without it that company gets none of the platform — no image catalogue, no
 # generated address, no defaults — unless it writes forTenant on every environment
 # for ever. One record, marked once.
+# Needs the operator: what a new environment INHERITS from its customer is filled in by the mutating
+# webhook: the image, the database, the size, the generated hostname. Without it
+# nothing is inherited and the checks report an empty spec as a broken rule.
+if [ -z "$have_webhook" ]; then
+  echo "-- the default customer: SKIPPED (needs the operator serving admission; run"
+  echo "   make e2e-quota) --"
+  echo
+else
+
 echo "-- the default customer --"
 
 DNS=default-tenant-guardrail
@@ -453,6 +481,7 @@ esac
 
 kubectl delete namespace $DNS --ignore-not-found --wait=false >/dev/null 2>&1
 echo
+fi
 
 # ── the Odoo versions this release supports ──
 #
@@ -506,6 +535,15 @@ echo
 # applies, and have the evidence collected before somebody asks. These check the
 # refusals — a control is a control because it refuses, and a paragraph in a policy
 # document is not.
+# Needs the operator: the classification and the refusals that follow from it are decided by the
+# webhook reading the customer record. Without it every environment is refused for
+# a missing image instead, which is a different sentence about a different thing.
+if [ -z "$have_webhook" ]; then
+  echo "-- what the data is: SKIPPED (needs the operator serving admission; run"
+  echo "   make e2e-quota) --"
+  echo
+else
+
 echo "-- what the data is --"
 
 CNSD=data-guardrail
@@ -591,6 +629,7 @@ fi
 
 kubectl delete namespace $CNSD --ignore-not-found --wait=false >/dev/null 2>&1
 echo
+fi
 
 # ── the edge: what stands between the internet and an Odoo ──
 #
@@ -642,6 +681,16 @@ echo
 # Real objects in a real namespace, because the webhook reads the TARGET to decide
 # — that is the whole point of the field, and a dry-run against nothing would test
 # the code path that refuses a missing environment.
+# Needs the operator: what is asserted here is what the restorer webhook DECIDES —
+# whether a copy is taken before the database is replaced, and for which purposes.
+# With no webhook there is nothing to decide it, every restore is admitted, and the
+# six checks below report a safety rule as broken when it is simply absent.
+if [ -z "$have_webhook" ]; then
+  echo "-- the copy taken before a restore: SKIPPED (needs the operator serving"
+  echo "   admission; run make e2e-quota) --"
+  echo
+else
+
 echo "-- the copy taken before a restore --"
 
 RNS=restore-guardrail
@@ -748,6 +797,7 @@ else printf '  FAIL  a typo in the target: %s\n' "$(printf '%s' "$out" | head -c
 
 kubectl delete namespace $RNS --ignore-not-found --wait=false >/dev/null 2>&1
 echo
+fi
 
 # ── who may hand out access ──
 #
@@ -759,14 +809,27 @@ echo
 # It goes ABOVE the quota section on purpose. That section starts with an early
 # `exit 0` when no quota webhook is installed, and checks added below it have
 # silently not run twice already.
+role_for() { kubectl get clusterrole -l "doblura.dev/persona=$1" \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
+PLAT=$(role_for platform); SUPP=$(role_for support); QA=$(role_for qa)
+
+# The personas come from the CHART, not from config/crd/. Without them every
+# `can-i` below answers "no" — correctly, since the role does not exist — and the
+# script printed twenty-seven failures that all meant "you did not install the
+# chart". Same rule as the quota section: skip, and say which cluster this needs.
+if [ -z "$PLAT" ]; then
+  echo "-- who may hand out access: SKIPPED (no persona ClusterRoles here; they come"
+  echo "   from the chart, so run this against a cluster with doblura installed) --"
+  echo
+  echo "  $fails guardrail(s) failed"
+  [ "$fails" -eq 0 ]
+  exit $?
+fi
+
 echo "-- who may hand out access --"
 
 ACCESS_NS=access-guardrail
 kubectl create namespace $ACCESS_NS >/dev/null 2>&1 || true
-
-role_for() { kubectl get clusterrole -l "doblura.dev/persona=$1" \
-  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
-PLAT=$(role_for platform); SUPP=$(role_for support); QA=$(role_for qa)
 
 for p in $PLAT $SUPP; do
   kubectl create clusterrolebinding "access-guardrail-${p##*-}" \

@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The checks this project already had, run by something other than whoever
+# remembered to type `make all`.
+#
+# Until this existed there was no CI of any kind: 153 guardrails, four test
+# packages and a licence-boundary check that all passed on one laptop. For a
+# project asking other people to install it, "it passed here" is not a claim
+# anybody else can verify.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # So a fork, or anybody wondering whether main is actually green, can run it.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned, and matching the version stamped into the generated CRDs. An
+  # unpinned controller-gen regenerates every file the day it releases, and the
+  # diff arrives in somebody's unrelated pull request.
+  CONTROLLER_GEN_VERSION: v0.21.0
+
+jobs:
+  build:
+    name: build, test, chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: controller-gen
+        run: go install sigs.k8s.io/controller-tools/cmd/controller-gen@${{ env.CONTROLLER_GEN_VERSION }}
+
+      - uses: azure/setup-helm@v4
+
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.x"}
+      - name: python for the chart checks
+        run: python3 -m pip install pyyaml
+
+      - name: make all
+        run: make all
+
+      # `make all` regenerates the CRDs, the RBAC, the deepcopy and the chart's
+      # copies of them. If that changed anything, the committed files did not
+      # match the types they come from — which is the failure mode that matters
+      # most here, because a stale CRD in the chart means the CEL guardrails
+      # silently stop being enforced on anybody who installs it.
+      - name: the generated files are the committed ones
+        run: |
+          if ! git diff --exit-code; then
+            echo
+            echo "The files above are generated and were not regenerated in this commit."
+            echo "Run 'make all' and commit the result."
+            exit 1
+          fi
+
+  guardrails:
+    name: guardrails against a real API server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: doblura-ci
+
+      - uses: azure/setup-helm@v4
+
+      # The operator, actually running. The guardrails split into three tiers —
+      # CEL in the CRDs, RBAC from the chart's personas, and the quota and the
+      # defaults from the operator's own admission webhooks — and only the first
+      # of those means anything without an install. The script degrades honestly
+      # (it says which tier it is skipping), so CI is the place to run all three.
+      - name: build the image
+        run: docker build -t doblura:ci .
+
+      - name: load it into the cluster
+        run: kind load docker-image doblura:ci --name doblura-ci
+
+      - name: install the operator
+        run: |
+          helm upgrade --install doblura charts/doblura \
+            -n doblura-system --create-namespace \
+            --set image.repository=doblura --set image.tag=ci \
+            --set image.pullPolicy=Never \
+            --set webhook.maxEnvironmentsPerCreator=2 --wait --timeout 5m
+          kubectl -n doblura-system rollout status deploy/doblura --timeout=3m
+
+      - name: the samples are valid
+        run: kubectl apply --dry-run=server -f config/samples/
+
+      - name: the API server and the operator reject what they should
+        run: ./hack/e2e-guardrails.sh
+
+      # What the pod said while all that happened. Without this a failure above is
+      # a refusal with no explanation, and the next step is always "run it again
+      # locally" — which is the thing CI exists to stop being necessary.
+      - name: the manager's logs, if anything failed
+        if: failure()
+        run: kubectl -n doblura-system logs deploy/doblura --tail=200

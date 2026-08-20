@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The base images, published on their own schedule.
+#
+# Separate from the release workflow on purpose: these track UPSTREAM Odoo, not
+# doblura. Odoo patches its published images between doblura releases, and an
+# image rebuilt only when this operator happens to cut a version is an image that
+# ships known-fixed bugs for however long that takes.
+#
+# What they are and what they deliberately are not is DECISIONS.md 11: the
+# official image plus the tools a restore and a migration need, and no functional
+# modules — an opinion in a base image is an opinion everybody inherits.
+name: Base images
+
+on:
+  schedule:
+    # Monthly. Frequent enough to pick up upstream patches, rare enough that
+    # nobody is chasing a rebuild they did not ask for.
+    - cron: "0 4 1 * *"
+  workflow_dispatch:
+  # And whenever the image or its checks change, because those are the two
+  # things that can make a published image wrong.
+  push:
+    branches: [main]
+    paths:
+      - images/odoo/**
+      - hack/verify-image.sh
+      - .github/workflows/base-images.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      # One job per major, and one failing major must not cancel the others: a
+      # broken 16 is not a reason to stop publishing 19.
+      fail-fast: false
+      matrix:
+        # DECISIONS.md 15: the three Odoo supports, plus the one in its grace
+        # year. Kept in step with ODOO_VERSIONS in the Makefile.
+        odoo: ["19.0", "18.0", "17.0", "16.0"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build
+        run: |
+          docker build --build-arg ODOO_VERSION=${{ matrix.odoo }} \
+            -t ghcr.io/${{ github.repository_owner }}/odoo:${{ matrix.odoo }} images/odoo
+
+      # The image is asked what it contains rather than trusted to be what its
+      # tag says. Every one of these questions has been answered wrong at some
+      # point by reading a tag: the official image runs as uid 100, Doodba's uid
+      # 100 is messagebus, and Doodba's published base ships no Odoo at all.
+      - name: ask the image what it is
+        run: |
+          docker run --rm -v "$PWD/hack/verify-image.sh:/verify.sh:ro" \
+            --entrypoint sh ghcr.io/${{ github.repository_owner }}/odoo:${{ matrix.odoo }} /verify.sh
+
+      # Only after it answered. A push that happens before the check is a check
+      # that reports on something already published.
+      - name: publish
+        if: github.event_name != 'pull_request'
+        run: docker push ghcr.io/${{ github.repository_owner }}/odoo:${{ matrix.odoo }}

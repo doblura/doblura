@@ -414,6 +414,14 @@ a base image changes what the ERP does in a layer the customer did not choose an
 cannot see. Modules belong in `spec.addons.repos`, named, pinned to a commit, and
 visible on the screen.
 
+Published one per major, rebuilt monthly rather than only when doblura cuts a
+release — they track upstream Odoo, and an image rebuilt on this operator's
+schedule ships known-fixed bugs for however long that takes:
+
+```
+ghcr.io/doblura/odoo:19.0   18.0   17.0   16.0
+```
+
 Bringing your own stays first-class: point `spec.image` at it and the image study
 will tell you what is actually in there, rather than what its tag claims.
 
@@ -594,9 +602,10 @@ user has `CREATEDB`: every rehearsal creates its own scratch database and drops 
 when it finishes (`retain: OnFailure` by default — on failure the crime scene is
 preserved).
 
-The rehearsal image is **yours**, with Odoo inside. The only requirement is that
-it ships `click-odoo-contrib`. There is no Doblura base image to adopt: the
-operator generates the `odoo.conf`.
+The rehearsal image is **yours**, with Odoo inside, and the only requirement is
+that it ships `click-odoo-contrib` — the operator generates the `odoo.conf`. If
+you would rather not own that Dockerfile, there is now a base image per Odoo
+major that meets the contract: see [The base image](#the-base-image).
 
 ## Status
 
@@ -662,6 +671,10 @@ Odoo 19 on a kind cluster, which is what `make e2e-real` does. What is in place:
 See [ROADMAP.md](ROADMAP.md) for where this is going.
 
 ## Development
+
+Everything below also runs on every push and pull request
+([CI](.github/workflows/ci.yml)), including the guardrails against a real API
+server with the operator installed.
 
 ```bash
 make all           # generate + build + test + chart lint

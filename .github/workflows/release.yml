@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# What a tag publishes: the manager image and the chart.
+#
+# The README has said "there is no published chart yet — it goes out with the
+# first tagged release" since the chart existed. This is that release, and until
+# it ran the sentence was a promise with no mechanism behind it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The whole point of a release is that somebody else installs it, so the
+      # tests run again here rather than trusting that the commit was green when
+      # it was pushed: a tag can be moved, and a release built from an untested
+      # tree is exactly the artefact nobody can trust.
+      - uses: actions/setup-go@v5
+        with: {go-version-file: go.mod, cache: true}
+      - run: go test ./... -race
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: the version this is
+        id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # Both architectures: the manager is a static Go binary, so arm64 costs a
+      # second build and nothing else — and half the clusters somebody would try
+      # this on are arm64 laptops.
+      - name: manager image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.v.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository }}:latest
+
+      # The chart's appVersion is what tells an install which image to pull, and
+      # values.yaml leaves image.tag empty precisely so the chart decides. Setting
+      # them from the tag here is what keeps that promise true.
+      - uses: azure/setup-helm@v4
+      - name: chart
+        run: |
+          helm package charts/doblura \
+            --version "${{ steps.v.outputs.version }}" \
+            --app-version "${{ steps.v.outputs.version }}"
+          helm push "doblura-${{ steps.v.outputs.version }}.tgz" \
+            "oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts"
