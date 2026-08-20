@@ -98,7 +98,16 @@ func TestTheConfigIsStable(t *testing.T) {
 // cannot be left with production mail servers active.
 func TestNeutralizeCutsMailAndCronsAndIsIdempotent(t *testing.T) {
 	s := neutralizeScript("work", "/etc/doblura/odoo.conf")
-	for _, want := range []string{"neutralize -d", "ir_mail_server SET active = false", "ir_cron SET active = false"} {
+	if strings.Contains(s, "odoo -c") {
+		t.Error("the config flag comes before the subcommand, so Odoo never sees the " +
+			"subcommand at all: it falls back to `server` and dies on a stray positional")
+	}
+	// "odoo neutralize -c", with the subcommand FIRST. The old assertion here was
+	// the substring "neutralize -d", which the broken form — `odoo -c conf
+	// neutralize -d db` — matched perfectly. Odoo takes its first argument as the
+	// command, so that form died on a stray positional every single time, and this
+	// test reported it as present. A substring is not an argument order.
+	for _, want := range []string{"odoo neutralize -c", "ir_mail_server SET active = false", "ir_cron SET active = false"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("%q is missing from the neutralization script", want)
 		}

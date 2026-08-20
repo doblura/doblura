@@ -4,6 +4,7 @@
 package v1alpha1
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -133,5 +134,26 @@ func TestThePresetCoversThePIIFamilies(t *testing.T) {
 	}
 	if !email {
 		t.Error("res_partner.email is indispensable in the preset")
+	}
+}
+
+// The neutralization subcommand comes first, in every format that uses it.
+//
+// It did not, and Odoo takes its FIRST argument as the command: "odoo -c conf
+// neutralize -d db" falls back to the server command and dies on a stray
+// positional. In these two formats that sits inside an && chain, so the restore
+// failed at its last step — which means neither has ever completed a restore
+// with neutralization switched on. The default format neutralizes through
+// click-odoo-restoredb and is the one the e2e runs, which is why nobody saw it.
+func TestNeutralizationPutsTheSubcommandFirst(t *testing.T) {
+	for _, f := range []SnapshotFormat{FormatPgDump, FormatPgPlain} {
+		cmd := (&SnapshotSpec{Format: f}).RestoreCommand("db", "/etc/doblura/odoo.conf", "/src")
+		if !strings.Contains(cmd, "odoo neutralize -c ") {
+			t.Errorf("%s: %q", f, cmd)
+		}
+		if strings.Contains(cmd, "odoo -c ") {
+			t.Errorf("%s puts the config flag before the subcommand, so Odoo never "+
+				"sees the subcommand: %q", f, cmd)
+		}
 	}
 }

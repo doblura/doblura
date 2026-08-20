@@ -41,7 +41,7 @@ func TestRestoreNeutralizesByDefault(t *testing.T) {
 			cmd := spec.RestoreCommand("db1", "/etc/doblura/odoo.conf", "/snapshot")
 			// OdooBackup neutralizes through the flag; the Postgres formats through
 			// Odoo's native command after restoring.
-			got := strings.Contains(cmd, "--neutralize") || strings.Contains(cmd, " neutralize -d")
+			got := strings.Contains(cmd, "--neutralize") || strings.Contains(cmd, "odoo neutralize -c")
 			if got != tc.wantNeut {
 				t.Fatalf("neutralization = %v, expected %v\n  %s", got, tc.wantNeut, cmd)
 			}

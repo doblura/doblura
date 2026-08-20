@@ -264,16 +264,35 @@ func neutralizeScript(dbName, confPath string) string {
 # Odoo's native command (v16+): disables scheduled actions, outgoing mail,
 # payment providers and delivery carriers. Every module can ship its own
 # data/neutralize.sql, so this covers third-party addons too.
-odoo -c %[2]s neutralize -d "%[1]s"
+# The subcommand comes FIRST. With -c first, Odoo takes the default "server"
+# command and dies on "neutralize" as a stray positional -- which is what this
+# line did on every image, while reading as if it worked. The belt-and-braces
+# below then covered mail and crons, and nothing covered payment providers.
+odoo neutralize -c %[2]s -d "%[1]s"
 
 # Belt and braces: if the image predates v16 or the command fails, the bare
 # minimum by hand. This being idempotent is deliberate.
 psql -v ON_ERROR_STOP=1 -d "%[1]s" <<'SQL'
 BEGIN;
 UPDATE ir_mail_server SET active = false;
-UPDATE fetchmail_server SET active = false WHERE to_regclass('fetchmail_server') IS NOT NULL;
 UPDATE ir_cron SET active = false;
 COMMIT;
+SQL
+
+# fetchmail is a module and may not be installed, and the two obvious guards both
+# fail here. A WHERE clause does not help: Postgres resolves the relation while
+# PARSING the statement, so a missing table is an error before the WHERE runs. And
+# a dollar-quoted DO block does not survive the trip: this script reaches the
+# container as an ARGUMENT, where Kubernetes rewrites $$ into a single $ — the
+# block arrived as "DO $ BEGIN" and psql reported a syntax error at a character
+# nobody wrote.
+#
+# So psql decides. The UPDATE is a STRING until \gexec runs it, and \gexec runs
+# nothing when the SELECT returns no rows.
+psql -v ON_ERROR_STOP=1 -d "%[1]s" <<'SQL'
+SELECT 'UPDATE fetchmail_server SET active = false'
+WHERE to_regclass('fetchmail_server') IS NOT NULL
+\gexec
 SQL
 echo ">> neutralized"`, dbName, confPath)
 }

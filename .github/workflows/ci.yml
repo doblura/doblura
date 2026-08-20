@@ -67,6 +67,9 @@ jobs:
   guardrails:
     name: guardrails against a real API server
     runs-on: ubuntu-latest
+    env:
+      # kind names its context after the cluster.
+      CTX: kind-doblura-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -94,22 +97,26 @@ jobs:
 
       - name: install the operator
         run: |
-          helm upgrade --install doblura charts/doblura \
+          helm --kube-context "$CTX" upgrade --install doblura charts/doblura \
             -n doblura-system --create-namespace \
             --set image.repository=doblura --set image.tag=ci \
             --set image.pullPolicy=Never \
             --set webhook.maxEnvironmentsPerCreator=2 --wait --timeout 5m
-          kubectl -n doblura-system rollout status deploy/doblura --timeout=3m
+          kubectl --context "$CTX" -n doblura-system rollout status deploy/doblura --timeout=3m
 
       - name: the samples are valid
-        run: kubectl apply --dry-run=server -f config/samples/
+        run: kubectl --context "$CTX" apply --dry-run=server -f config/samples/
 
+      # CONTEXT is not optional: the script creates and deletes namespaces and
+      # refuses to guess which cluster. A runner has exactly one, so this is a
+      # formality here — and it is not one on the machine where the script was
+      # written, which is the whole reason it asks.
       - name: the API server and the operator reject what they should
-        run: ./hack/e2e-guardrails.sh
+        run: CONTEXT="$CTX" ./hack/e2e-guardrails.sh
 
       # What the pod said while all that happened. Without this a failure above is
       # a refusal with no explanation, and the next step is always "run it again
       # locally" — which is the thing CI exists to stop being necessary.
       - name: the manager's logs, if anything failed
         if: failure()
-        run: kubectl -n doblura-system logs deploy/doblura --tail=200
+        run: kubectl --context "$CTX" -n doblura-system logs deploy/doblura --tail=200

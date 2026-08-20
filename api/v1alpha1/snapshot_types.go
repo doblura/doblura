@@ -258,16 +258,24 @@ func (s *SnapshotSpec) RestoreCommand(dbName, confPath, source string) string {
 	case FormatPgDump:
 		// pg_restore cannot neutralize: we restore and then neutralize with
 		// Odoo's native command, available since v16.
+		//
+		// The SUBCOMMAND COMES FIRST. It did not, and Odoo takes its first
+		// argument as the command — so `odoo -c conf neutralize -d db` fell back
+		// to `server`, died on a stray positional, and took this whole && chain
+		// with it. These two formats have never completed a restore with
+		// neutralization on. Only FormatOdooBackup, which neutralizes through
+		// click-odoo-restoredb, ever worked, and it is the default and the one the
+		// e2e exercises.
 		cmd := "createdb \"" + dbName + "\" && pg_restore -d \"" + dbName + "\" --no-owner --no-acl " + source
 		if neutralize != "" {
-			cmd += " && odoo -c " + confPath + " neutralize -d \"" + dbName + "\""
+			cmd += " && odoo neutralize -c " + confPath + " -d \"" + dbName + "\""
 		}
 		return cmd
 
 	case FormatPgPlain:
 		cmd := "createdb \"" + dbName + "\" && psql -q -d \"" + dbName + "\" -f " + source
 		if neutralize != "" {
-			cmd += " && odoo -c " + confPath + " neutralize -d \"" + dbName + "\""
+			cmd += " && odoo neutralize -c " + confPath + " -d \"" + dbName + "\""
 		}
 		return cmd
 

@@ -85,9 +85,9 @@ verify-greenmask:
 e2e:
 	kind create cluster --name $(KIND_CLUSTER) --wait 60s || true
 	kind export kubeconfig --name $(KIND_CLUSTER)
-	kubectl apply -f config/crd/
-	kubectl apply --dry-run=server -f config/samples/
-	./hack/e2e-guardrails.sh
+	kubectl --context kind-$(KIND_CLUSTER) apply -f config/crd/
+	kubectl --context kind-$(KIND_CLUSTER) apply --dry-run=server -f config/samples/
+	CONTEXT=kind-$(KIND_CLUSTER) ./hack/e2e-guardrails.sh
 
 ## Chart e2e: a real helm install plus helm test.
 ##
@@ -98,9 +98,9 @@ e2e:
 e2e-chart: chart-sync
 	kind create cluster --name $(KIND_CHART_CLUSTER) --wait 60s || true
 	kind export kubeconfig --name $(KIND_CHART_CLUSTER)
-	helm upgrade --install doblura charts/doblura \
+	helm --kube-context kind-$(KIND_CHART_CLUSTER) upgrade --install doblura charts/doblura \
 		-n doblura-system --create-namespace --set replicaCount=0 --wait
-	helm test doblura -n doblura-system
+	helm --kube-context kind-$(KIND_CHART_CLUSTER) test doblura -n doblura-system
 
 ## e2e-quota: the quota webhook, against a real API server, with the operator
 ## actually serving admission.
@@ -118,13 +118,14 @@ e2e-quota: chart-sync
 	kind create cluster --name $(KIND_CHART_CLUSTER) --wait 60s || true
 	kind export kubeconfig --name $(KIND_CHART_CLUSTER)
 	kind load docker-image $(WEBHOOK_IMAGE) --name $(KIND_CHART_CLUSTER)
-	helm upgrade --install doblura charts/doblura \
+	helm --kube-context kind-$(KIND_CHART_CLUSTER) upgrade --install doblura charts/doblura \
 		-n doblura-system --create-namespace \
 		--set image.repository=doblura --set image.tag=e2e \
 		--set image.pullPolicy=Never \
 		--set webhook.maxEnvironmentsPerCreator=2 --wait
-	kubectl -n doblura-system rollout status deploy/doblura --timeout=120s
-	./hack/e2e-guardrails.sh
+	kubectl --context kind-$(KIND_CHART_CLUSTER) -n doblura-system \
+		rollout status deploy/doblura --timeout=120s
+	CONTEXT=kind-$(KIND_CHART_CLUSTER) ./hack/e2e-guardrails.sh
 
 ## e2e-real: the phase-0b gate. Builds the fixture image, seeds a real Odoo
 ## database, and runs an actual OdooRehearsal end to end.

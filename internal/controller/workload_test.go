@@ -221,9 +221,21 @@ func TestHardeningCutsIncomingMailToo(t *testing.T) {
 			t.Errorf("hardening does not do this:\n  %s", want)
 		}
 	}
-	// fetchmail is a module and may not be installed. Without the guard the whole
-	// transaction fails and takes the two lines that matter most with it.
+	// fetchmail is a module and may not be installed — and the obvious guard is
+	// not one. `UPDATE ... WHERE to_regclass(...) IS NOT NULL` fails while
+	// Postgres is PARSING the statement, before the WHERE it depends on is ever
+	// evaluated, and under ON_ERROR_STOP=1 that takes the two lines above with
+	// it. The first version of this shipped and the demo lab failed on it within
+	// two minutes. Only EXECUTE inside a DO block defers the resolution.
 	if !strings.Contains(got, "to_regclass('fetchmail_server')") {
 		t.Error("the fetchmail line must be guarded on the table existing")
+	}
+	if !strings.Contains(got, `\gexec`) {
+		t.Error("the guard must be a \\gexec: a WHERE clause does not stop Postgres " +
+			"resolving a table that is not there, and a dollar-quoted DO block does " +
+			"not survive Kubernetes rewriting $$ in a container argument")
+	}
+	if strings.Contains(got, "DO $$") {
+		t.Error("dollar quoting in a container argument arrives as a single $")
 	}
 }

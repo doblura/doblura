@@ -4,6 +4,61 @@
 set -uo pipefail
 fails=0
 
+# Which cluster this runs against is NAMED, never inherited.
+#
+# Seventy-three kubectl calls follow, and the first thing several of them do is
+# delete a namespace by a fixed name to clear out a previous run. Taking the
+# current context meant those deletes went to whichever cluster kubectl happened
+# to be pointing at — and it can change between two commands for reasons that
+# have nothing to do with this script. A kubeconfig on a machine that does this
+# work also holds contexts for real clusters.
+CONTEXT=${CONTEXT:-}
+if [ -z "$CONTEXT" ]; then
+  cat >&2 <<'USAGE'
+  This script creates and DELETES namespaces. It will not guess which cluster.
+
+    CONTEXT=kind-doblura-e2e ./hack/e2e-guardrails.sh
+    CONTEXT=current          ./hack/e2e-guardrails.sh    # deliberately the current one
+
+  `kubectl config get-contexts` lists them.
+USAGE
+  exit 2
+fi
+if [ "$CONTEXT" = "current" ]; then
+  CONTEXT=$(command kubectl config current-context 2>/dev/null)
+  [ -n "$CONTEXT" ] || { echo "  there is no current context to use" >&2; exit 2; }
+  printf '  running against the CURRENT context, which is %s\n\n' "$CONTEXT"
+fi
+# A function rather than seventy-three edits: every call below goes through it,
+# including any added later, which is the part an edit-them-all would not cover.
+kubectl() { command kubectl --context "$CONTEXT" "$@"; }
+
+# And the namespaces, which are fixed names in somebody else's cluster.
+#
+# This script only ever deletes a namespace it can see its own label on. Without
+# that, a cluster that happened to have a namespace called `data-guardrail` in it
+# would lose it to a script clearing up after a run that never happened here.
+GUARD_LABEL=doblura.dev/guardrail-namespace
+
+drop_ns() { # name — delete it, but only if this script created it
+  kubectl get namespace "$1" >/dev/null 2>&1 || return 0
+  if kubectl get namespace -l "$GUARD_LABEL=true" -o name 2>/dev/null | grep -qx "namespace/$1"; then
+    kubectl delete namespace "$1" --wait=false >/dev/null 2>&1
+    return 0
+  fi
+  printf '\n  REFUSING to delete namespace %s in %s: it exists and this script did\n' "$1" "$CONTEXT"
+  printf '  not create it. That is somebody else'"'"'s namespace, and everything below\n'
+  printf '  would have been created inside it.\n'
+  exit 3
+}
+
+fresh_ns() { # name — ours, empty, and labelled as ours
+  drop_ns "$1"
+  kubectl wait --for=delete "namespace/$1" --timeout=120s >/dev/null 2>&1
+  kubectl create namespace "$1" >/dev/null 2>&1
+  kubectl label namespace "$1" "$GUARD_LABEL=true" --overwrite >/dev/null 2>&1
+}
+
 # Two ways to run this, and the difference is whether an operator is installed.
 #
 # Most of what follows is CEL in the CRDs, which the API server enforces on its
@@ -403,9 +458,7 @@ else
 echo "-- the default customer --"
 
 DNS=default-tenant-guardrail
-kubectl delete namespace $DNS --ignore-not-found --wait=false >/dev/null 2>&1
-kubectl wait --for=delete namespace/$DNS --timeout=120s >/dev/null 2>&1
-kubectl create namespace $DNS >/dev/null 2>&1
+fresh_ns "$DNS"
 
 mkten() { # name, default(true|false)
   kubectl apply -f - >/dev/null 2>&1 <<YAML
@@ -479,7 +532,7 @@ case "$host" in
   *) printf '  FAIL  the address is %s\n' "${host:-empty}"; fails=$((fails+1)) ;;
 esac
 
-kubectl delete namespace $DNS --ignore-not-found --wait=false >/dev/null 2>&1
+drop_ns "$DNS"
 echo
 fi
 
@@ -495,9 +548,7 @@ fi
 echo "-- the Odoo versions this release supports --"
 
 VNS=version-guardrail
-kubectl delete namespace $VNS --ignore-not-found --wait=false >/dev/null 2>&1
-kubectl wait --for=delete namespace/$VNS --timeout=120s >/dev/null 2>&1
-kubectl create namespace $VNS >/dev/null 2>&1
+fresh_ns "$VNS"
 
 ver() { # label, version, ok|rejected
   out=$(kubectl apply -f - 2>&1 <<YAML
@@ -525,7 +576,7 @@ ver "16.0, in its grace year"      16.0 ok
 # end up disagreeing about which product a customer is on.
 ver "a version that is not one"    latest rejected
 
-kubectl delete namespace $VNS --ignore-not-found --wait=false >/dev/null 2>&1
+drop_ns "$VNS"
 echo
 
 # ── what the data is, and what follows from it ──
@@ -547,9 +598,7 @@ else
 echo "-- what the data is --"
 
 CNSD=data-guardrail
-kubectl delete namespace $CNSD --ignore-not-found --wait=false >/dev/null 2>&1
-kubectl wait --for=delete namespace/$CNSD --timeout=120s >/dev/null 2>&1
-kubectl create namespace $CNSD >/dev/null 2>&1
+fresh_ns "$CNSD"
 kubectl apply -f - >/dev/null 2>&1 <<YAML
 apiVersion: doblura.dev/v1alpha1
 kind: OdooTenant
@@ -627,7 +676,7 @@ else
   printf '  FAIL  the environment records %s\n' "${got:-nothing}"; fails=$((fails+1))
 fi
 
-kubectl delete namespace $CNSD --ignore-not-found --wait=false >/dev/null 2>&1
+drop_ns "$CNSD"
 echo
 fi
 
@@ -694,9 +743,7 @@ else
 echo "-- the copy taken before a restore --"
 
 RNS=restore-guardrail
-kubectl delete namespace $RNS --ignore-not-found --wait=false >/dev/null 2>&1
-kubectl wait --for=delete namespace/$RNS --timeout=120s >/dev/null 2>&1
-kubectl create namespace $RNS >/dev/null 2>&1
+fresh_ns "$RNS"
 
 renv() { # name, purpose, lifecycle, dataType
   printf 'apiVersion: doblura.dev/v1alpha1
@@ -795,7 +842,7 @@ YAML
 if printf '%s' "$out" | grep -q 'no environment called'; then printf '  ok    a typo in the target is refused by name\n'
 else printf '  FAIL  a typo in the target: %s\n' "$(printf '%s' "$out" | head -c 140)"; fails=$((fails+1)); fi
 
-kubectl delete namespace $RNS --ignore-not-found --wait=false >/dev/null 2>&1
+drop_ns "$RNS"
 echo
 fi
 
@@ -829,7 +876,7 @@ fi
 echo "-- who may hand out access --"
 
 ACCESS_NS=access-guardrail
-kubectl create namespace $ACCESS_NS >/dev/null 2>&1 || true
+fresh_ns "$ACCESS_NS"
 
 for p in $PLAT $SUPP; do
   kubectl create clusterrolebinding "access-guardrail-${p##*-}" \
@@ -901,7 +948,7 @@ done
 CUST=$(role_for customer)
 CNS=$ACCESS_NS
 OTHER=access-guardrail-other
-kubectl create namespace $OTHER >/dev/null 2>&1
+fresh_ns "$OTHER"
 kubectl -n $CNS create rolebinding cust --clusterrole="$CUST" \
   --group=access-guardrail-customer >/dev/null 2>&1
 
@@ -940,8 +987,8 @@ ncan "no backups"                              list odoobackups      "$CNS"   no
 ncan "cannot restart anything"                 patch odooenvironments "$CNS"  no
 ncan "cannot delete anything"                  delete odooenvironments "$CNS" no
 
-kubectl delete namespace $OTHER --ignore-not-found --wait=false >/dev/null 2>&1
-kubectl delete namespace $ACCESS_NS --ignore-not-found --wait=false >/dev/null 2>&1
+drop_ns "$OTHER"
+drop_ns "$ACCESS_NS"
 for p in platform support; do
   kubectl delete clusterrolebinding "access-guardrail-$p" --ignore-not-found >/dev/null 2>&1
 done
@@ -978,7 +1025,7 @@ BRUNO=bruno@example.com
 OPERATOR=$(kubectl get deploy -A -l app.kubernetes.io/name=doblura \
   -o jsonpath='system:serviceaccount:{.items[0].metadata.namespace}:{.items[0].spec.template.spec.serviceAccountName}' 2>/dev/null)
 
-kubectl delete namespace $NS --ignore-not-found --wait=false >/dev/null 2>&1
+drop_ns "$NS"
 kubectl wait --for=delete namespace/$NS --timeout=120s >/dev/null 2>&1
 if ! kubectl create namespace $NS >/dev/null 2>&1; then
   # Usually the previous run's namespace still terminating, which means the
@@ -987,6 +1034,7 @@ if ! kubectl create namespace $NS >/dev/null 2>&1; then
   printf '  FAIL  could not create the %s namespace (still terminating from a previous run?)\n' "$NS"
   echo; echo "  $((fails+1)) guardrail(s) failed"; exit 1
 fi
+kubectl label namespace $NS "$GUARD_LABEL=true" --overwrite >/dev/null 2>&1
 
 # The two people are bound to the SUPPORT persona, which is the role this quota
 # exists for: it can create and delete ephemeral environments and nothing else.
@@ -1096,7 +1144,7 @@ fi
 # terminating for as long as nothing reconciles them, and the next run then finds a
 # namespace it cannot create.
 kubectl delete odooenvironment --all -n $NS --timeout=60s >/dev/null 2>&1
-kubectl delete namespace $NS --wait=false >/dev/null 2>&1
+drop_ns "$NS"
 for u in $ALICE $BRUNO; do
   kubectl delete clusterrolebinding "quota-guardrail-${u%%@*}" --ignore-not-found >/dev/null 2>&1
 done

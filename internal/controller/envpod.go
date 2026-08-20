@@ -636,7 +636,22 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 	// Belt and braces on top of whatever the snapshot already neutralized: this
 	// environment may be reachable from the internet.
 	b.WriteString(`echo ">> re-asserting neutralization"` + "\n")
-	b.WriteString(fmt.Sprintf("odoo -c %s neutralize -d \"%s\" || true\n", envConf, db))
+	// The SUBCOMMAND COMES FIRST. `odoo -c conf neutralize -d db` never ran: Odoo
+	// takes the first argument as the command, sees `-c`, falls back to `server`,
+	// and dies on `neutralize` as a stray positional. The `|| true` — put there for
+	// images older than v16, which do not have the command — then swallowed it, so
+	// a mistake that made this line a no-op on EVERY image looked exactly like the
+	// case it was written to tolerate.
+	//
+	// What was therefore never applied: payment providers and delivery carriers,
+	// and every module's own data/neutralize.sql. The SQL below covers mail and
+	// crons and nothing else — so a copy of production kept live payment providers,
+	// which is the one item on that list that moves real money.
+	b.WriteString(fmt.Sprintf(
+		"odoo neutralize -c %s -d \"%s\" || "+
+			"echo \">> WARNING: odoo neutralize did not run; only the SQL below applies, \"\\\n"+
+			"        \"which does not touch payment providers or delivery carriers\"\n",
+		envConf, db))
 	b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\nBEGIN;\n")
 	b.WriteString("UPDATE ir_mail_server SET active = false;\n")
 	// INCOMING mail as well, which this list did not cut and the snapshot's
@@ -647,13 +662,30 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 	// is watching and is gone from the inbox. A wrong outgoing message at least
 	// leaves a trace with the person who received it.
 	//
-	// to_regclass because fetchmail is a module and may not be installed; without
-	// the guard this whole transaction fails and takes the two lines that matter
-	// most with it.
-	b.WriteString("UPDATE fetchmail_server SET active = false " +
-		"WHERE to_regclass('fetchmail_server') IS NOT NULL;\n")
+	// Not here: this statement has to leave the transaction below, because the
+	// table may not exist and psql resolves a relation while PARSING. See the
+	// separate psql call after the block.
 	b.WriteString("UPDATE ir_cron SET active = false;\n")
 	b.WriteString("COMMIT;\nSQL\n")
+
+	// Incoming mail, in its own statement and its own transaction.
+	//
+	// fetchmail is a module and may not be installed, and both obvious guards
+	// fail. A WHERE clause does not help: Postgres resolves the relation while
+	// PARSING, so a missing table is an error before the WHERE is evaluated —
+	// and under ON_ERROR_STOP=1 it took the two lines above with it. A
+	// dollar-quoted DO block does not survive either: this script reaches the
+	// container as an ARGUMENT, where Kubernetes rewrites $$ into a single $, so
+	// it arrived as "DO $ BEGIN" and psql reported a syntax error at a character
+	// nobody wrote. Both of those were measured in the demo lab, one after the
+	// other, within ten minutes.
+	//
+	// So psql decides. The UPDATE is a STRING until \gexec runs it, and \gexec
+	// runs nothing when the SELECT returns no rows.
+	b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\n" +
+		"SELECT 'UPDATE fetchmail_server SET active = false'\n" +
+		"WHERE to_regclass('fetchmail_server') IS NOT NULL\n" +
+		"\\gexec\nSQL\n")
 
 	// Mail goes in AFTER everything above has switched it off.
 	//
