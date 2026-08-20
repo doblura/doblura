@@ -43,9 +43,9 @@ jobs:
         # year. Kept in step with ODOO_VERSIONS in the Makefile.
         odoo: ["19.0", "18.0", "17.0", "16.0"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

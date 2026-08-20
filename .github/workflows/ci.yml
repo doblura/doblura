@@ -30,9 +30,9 @@ jobs:
     name: build, test, chart
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -40,9 +40,9 @@ jobs:
       - name: controller-gen
         run: go install sigs.k8s.io/controller-tools/cmd/controller-gen@${{ env.CONTROLLER_GEN_VERSION }}
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: "3.x"}
       - name: python for the chart checks
         run: python3 -m pip install pyyaml
@@ -68,9 +68,9 @@ jobs:
     name: guardrails against a real API server
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -79,7 +79,7 @@ jobs:
         with:
           cluster_name: doblura-ci
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       # The operator, actually running. The guardrails split into three tiers —
       # CEL in the CRDs, RBAC from the chart's personas, and the quota and the
