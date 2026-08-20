@@ -22,6 +22,14 @@
   </div>
 </div>
 
+{{/* Whose data this is. Above the load figure and below the health answer:
+     somebody arrives asking "is it up", and the very next thing they need
+     before touching anything is whether this is the real system. */}}
+<div class="provenance {{.Data.RealOrCopyState}}">
+  <span class="what">{{.Data.RealOrCopy}}</span>
+  <p class="why">{{.Data.RealOrCopyWhy}}</p>
+</div>
+
 {{if .Data.Load}}
 <div class="answer {{.Data.LoadState}}">
   <span class="icon">{{icon .Data.LoadState}}</span>

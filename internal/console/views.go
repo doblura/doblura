@@ -398,6 +398,41 @@ func (s *Server) handleCustomer(w http.ResponseWriter, r *http.Request, id Ident
 	})
 }
 
+// realOrCopy says whether this is the customer's own system or a copy of it, and
+// what that means for the person reading.
+//
+// The words are about consequences rather than about fields. Somebody deciding
+// whether they can click something does not want "randomizeUserPasswords: true";
+// they want to know whether an email sent from here reaches a customer.
+func realOrCopy(e *doblurav1alpha1.OdooEnvironment) (title, state, why string) {
+	if e.Spec.Purpose == doblurav1alpha1.PurposeProduction {
+		return "This is the customer's real system", "real",
+			"Nothing here has been neutralised: the passwords are theirs, the " +
+				"scheduled jobs run, the integrations are connected and mail goes " +
+				"to real people. Anything done here happens for real."
+	}
+
+	sec := e.Spec.Security
+	switch {
+	case e.Spec.Data.Type == doblurav1alpha1.DataDemo:
+		return "A copy with no customer data in it", "copy",
+			"This environment was built from Odoo's demo data. There is nothing " +
+				"of the customer's in here to protect, and mail and scheduled jobs " +
+				"are off."
+	case sec.RandomizeUserPasswords != nil && !*sec.RandomizeUserPasswords:
+		// Somebody turned it off deliberately. Never let that be invisible.
+		return "A copy of real data, with the original passwords", "exposed",
+			"Mail and scheduled jobs are off, but security.randomizeUserPasswords " +
+				"was set to false, so every account has the password it had in " +
+				"production. Anybody who can reach this can sign in as those people."
+	default:
+		return "A copy, not the real thing", "copy",
+			"Every password was replaced, outgoing mail and scheduled jobs are off, " +
+				"and the external credentials were removed. What is here cannot " +
+				"reach the customer's suppliers, their bank or their inbox."
+	}
+}
+
 // ── one environment ──
 
 type environmentView struct {
@@ -407,6 +442,20 @@ type environmentView struct {
 	Health health
 	Expiry string
 	Map    template.HTML
+
+	// RealOrCopy is the first thing somebody needs to know before they touch
+	// anything, and the page did not say it.
+	//
+	// Until today the operator treated every environment the same: it randomised
+	// every password, stripped the external credentials and switched off mail and
+	// scheduled jobs, on a copy and on the customer's real system alike. Now
+	// Production is left alone — which is right, and which makes the difference
+	// between the two something a person has to be able to see. "Live data,
+	// persistent" does not say it: that is a description of the data source, and
+	// somebody reading it quickly reads "test-ish".
+	RealOrCopy      string
+	RealOrCopyState string
+	RealOrCopyWhy   string
 
 	// Load answers "is it slow", in the only honest way available without a
 	// metrics stack: memory against the limit the size class set. Empty when
@@ -470,6 +519,7 @@ func (s *Server) handleEnvironment(w http.ResponseWriter, r *http.Request, id Id
 		Health: environmentHealth(&env, replicas, readyN, workloadVisible),
 		Expiry: hibernationHint(&env),
 	}
+	view.RealOrCopy, view.RealOrCopyState, view.RealOrCopyWhy = realOrCopy(&env)
 	if workloadVisible {
 		view.WebReplicas = fmt.Sprintf("%d running of %d wanted", readyN, replicas)
 		view.CronSummary = cronSummary(&env, &deps)

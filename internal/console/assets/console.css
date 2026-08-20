@@ -294,6 +294,28 @@ h2.sect {
 .answer.down .icon { color: var(--down); }
 .answer.building .icon { color: var(--building); }
 .answer.unknown .icon, .answer.asleep .icon { color: var(--unknown); }
+/* whose data is this: the real system, or a copy of it
+ *
+ * Its own block rather than another .answer variant. The answer block's classes
+ * are about HEALTH, and a production environment that is working perfectly is
+ * not "degraded" — reusing the word in the markup is the mistake the cell type
+ * already warns about: sharing the colours across kinds is right, sharing the
+ * nouns is not. */
+.provenance {
+  display: flex; gap: 14px; align-items: baseline;
+  border: 1px solid var(--line); border-left: 4px solid var(--unknown);
+  border-radius: var(--r); background: var(--surface);
+  padding: 14px 18px; margin-top: 14px;
+}
+.provenance.real     { border-left-color: var(--degraded); }
+.provenance.exposed  { border-left-color: var(--degraded); }
+.provenance.copy     { border-left-color: var(--up); }
+.provenance .what { font-weight: 640; flex: none; }
+.provenance.real .what, .provenance.exposed .what { color: var(--degraded); }
+.provenance.copy .what { color: var(--up); }
+.provenance .why { margin: 0; color: var(--ink-2); }
+@media (max-width: 720px) { .provenance { flex-direction: column; gap: 4px; } }
+
 .answer .big { font-size: 17px; font-weight: 640; letter-spacing: -0.01em; margin: 0 0 3px; }
 .answer p { margin: 0; color: var(--ink-2); }
 .answer p + p { margin-top: 5px; }

@@ -304,6 +304,28 @@ check() {
   [ "$canlog" = "no" ] && ok "the customer cannot read logs" \
     || bad "the customer cannot read logs" "the API server says: $canlog"
 
+  # Back to the platform account: everything below is an operator's view.
+  signin toni "$jar"
+
+  # ── whose data is this ──
+  #
+  # The operator now treats Production differently from a copy — it neutralises
+  # one and leaves the other alone — so the difference has to be visible to the
+  # person deciding whether they can touch something. "Live data, persistent" is
+  # a description of the data source and reads as test-ish.
+  case "$(page /e/demo/prod "$jar")" in
+    # No apostrophe in the pattern: html/template writes it as &#39;, so
+    # "customer's" never matches the raw page. The first version of this check
+    # failed against a page that was correct.
+    *"real system"*) ok "the production page says it is the real system" ;;
+    *) bad "production says what it is" \
+         "the page does not say that nothing here has been neutralised" ;;
+  esac
+  case "$(page /e/demo/pr-482 "$jar")" in
+    *"copy"*) ok "and a review environment says it is a copy" ;;
+    *) bad "a copy says what it is" "the page does not distinguish it from production" ;;
+  esac
+
   # ── the anonymization pipeline, which is invisible until it runs ──
   #
   # Not "does the object exist": whether a dump came out, and whether the object
@@ -328,7 +350,6 @@ check() {
     bad "the snapshot records what it did not mask" \
       "status.notMasked is empty; on this fixture five tables and one column are absent"
   fi
-  signin toni "$jar"
   case "$(page /o/snapshots "$jar")" in
     *"not in this database"*) ok "and the console says so on the snapshots page" ;;
     *) bad "the console shows what was masked" \
