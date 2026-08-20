@@ -18,14 +18,14 @@ on:
     # nobody is chasing a rebuild they did not ask for.
     - cron: "0 4 1 * *"
   workflow_dispatch:
-  # And whenever the image or its checks change, because those are the two
-  # things that can make a published image wrong.
-  push:
-    branches: [main]
-    paths:
-      - images/odoo/**
-      - hack/verify-image.sh
-      - .github/workflows/base-images.yml
+
+# Deliberately NOT triggered by a push to images/odoo, which is the obvious
+# wiring and the wrong one for now. Pushing here claims the name `doblura` in a
+# public registry, and no trademark search has been done — that is on this
+# project's own list of things blocking a 1.0, and a publish that happens as a
+# side effect of an unrelated commit is a decision nobody made. The first one is
+# a `workflow_dispatch` somebody presses. Add the push trigger back once the
+# name is settled.
 
 permissions:
   contents: read
