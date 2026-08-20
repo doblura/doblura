@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -28,6 +29,13 @@ func hashPassword(args []string) {
 	if len(args) > 0 && args[0] == "--stdin" {
 		r := bufio.NewReader(os.Stdin)
 		line, e := r.ReadString('\n')
+		// io.EOF with data is a password that simply had no trailing newline,
+		// which is what `printf '%s' pw |` and most pipes produce. Treating it as
+		// an error refused a password it had already read, and said "no password
+		// read" while holding one.
+		if e == io.EOF && line != "" {
+			e = nil
+		}
 		pw, err = []byte(strings.TrimRight(line, "\r\n")), e
 	} else {
 		fmt.Fprint(os.Stderr, "password: ")

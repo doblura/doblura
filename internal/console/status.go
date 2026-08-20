@@ -6,6 +6,7 @@ package console
 import (
 	"context"
 	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"net/http"
 	"sort"
 	"time"
@@ -147,7 +148,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id Identit
 		// they forward the screenshot to can, and "something went wrong" cannot
 		// be forwarded to anybody.
 		view.Denied = err.Error()
-		s.render(w, "status.html", page{Title: "Status", Identity: id, Data: view})
+		// And the code the answer deserves. This page is the one handed to a
+		// customer, so it is also the one somebody points a monitor at, and a
+		// refusal served as 200 reads to that monitor as a healthy page.
+		code := http.StatusInternalServerError
+		if apierrors.IsForbidden(err) {
+			code = http.StatusForbidden
+		}
+		s.render(w, "status.html", page{
+			Title: "Status", Identity: id, Data: view, Status: code,
+		})
 		return
 	}
 

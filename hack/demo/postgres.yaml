@@ -1,0 +1,109 @@
+# One Postgres per customer namespace, for the demo lab.
+#
+# Deliberately a plain Deployment and not CloudNativePG: the point of this lab is
+# the console and the edge, and every operator installed to reach them is another
+# thing that can fail with a message about something else. Decision 7 says
+# doblura integrates with a Postgres operator when one is present and respects an
+# external server when it is not; this is the second case, which is also the one
+# most installations are in.
+#
+# emptyDir: a `demo-lab.sh down` deletes the cluster anyway, and a PVC on a k3d
+# node buys nothing but a volume to forget about.
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: pg-app, namespace: demo}
+stringData:
+  # Not a secret and says so: this file is in a public repository, and a
+  # plausible-looking password here would be copied into somewhere it matters.
+  password: demo-lab-not-a-secret
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pg, namespace: demo}
+spec:
+  selector: {app: pg}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pg, namespace: demo}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: pg}}
+  template:
+    metadata: {labels: {app: pg}}
+    spec:
+      containers:
+        - name: pg
+          image: postgres:18-alpine
+          env:
+            - {name: POSTGRES_USER, value: odoo}
+            - {name: POSTGRES_DB, value: postgres}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: pg-app, key: password}}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -U, odoo]}
+            initialDelaySeconds: 5
+            periodSeconds: 3
+          # A memory LIMIT and not just a request. Postgres in this lab was
+          # killed by the node running out of memory more than once, and an OOM
+          # with no limit set takes whatever the kernel picks — which was Odoo,
+          # or the console, and the failure then looked like anything but
+          # Postgres.
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes: [{name: data, emptyDir: {sizeLimit: 2Gi}}]
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: pg-app, namespace: norte}
+stringData:
+  # Not a secret and says so: this file is in a public repository, and a
+  # plausible-looking password here would be copied into somewhere it matters.
+  password: demo-lab-not-a-secret
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pg, namespace: norte}
+spec:
+  selector: {app: pg}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pg, namespace: norte}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: pg}}
+  template:
+    metadata: {labels: {app: pg}}
+    spec:
+      containers:
+        - name: pg
+          image: postgres:18-alpine
+          env:
+            - {name: POSTGRES_USER, value: odoo}
+            - {name: POSTGRES_DB, value: postgres}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: pg-app, key: password}}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: [pg_isready, -U, odoo]}
+            initialDelaySeconds: 5
+            periodSeconds: 3
+          # A memory LIMIT and not just a request. Postgres in this lab was
+          # killed by the node running out of memory more than once, and an OOM
+          # with no limit set takes whatever the kernel picks — which was Odoo,
+          # or the console, and the failure then looked like anything but
+          # Postgres.
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes: [{name: data, emptyDir: {sizeLimit: 2Gi}}]

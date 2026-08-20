@@ -19,6 +19,11 @@
 #   - Two device pixels per CSS pixel, because a screenshot of an interface that
 #     is soft on a retina display looks like a screenshot of a soft interface.
 #
+# Where the console with something in it comes from — this script needs one and
+# used to leave that as the reader's problem:
+#
+#   ./hack/demo-lab.sh up && ./hack/demo-lab.sh open
+#
 # Usage: CONSOLE=http://localhost:8092 USER=toni PASS=... ./hack/screenshots.sh
 set -euo pipefail
 

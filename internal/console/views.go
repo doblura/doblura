@@ -31,6 +31,11 @@ type metaTime = metav1.Time
 type page struct {
 	Title    string
 	Identity Identity
+	// Status is the HTTP code this page is served with, 0 meaning 200. A page
+	// whose whole content is "you may not see this" used to be served as 200,
+	// which is a page telling the reader one thing and every monitor, script and
+	// proxy in front of it the opposite.
+	Status   int
 	DevMode  bool
 	AuthMode string
 	Perms    map[string]bool
@@ -100,6 +105,11 @@ func (s *Server) render(w http.ResponseWriter, name string, p page) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// After the header and before the body: WriteHeader freezes the headers, and
+	// the Content-Type set afterwards would never be sent.
+	if p.Status != 0 {
+		w.WriteHeader(p.Status)
+	}
 	_, _ = buf.WriteTo(w)
 }
 

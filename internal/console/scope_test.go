@@ -3,7 +3,15 @@
 
 package console
 
-import "testing"
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
 
 // The return path after a bounce cannot leave this site.
 //
@@ -43,6 +51,47 @@ func TestAScopeIsANamespaceName(t *testing.T) {
 	for _, v := range bad {
 		if scopeNamePattern.MatchString(v) {
 			t.Errorf("%q should NOT be accepted as a scope", v)
+		}
+	}
+}
+
+// A refusal that is really a question gets asked, and one that is not does not.
+//
+// The case: somebody whose access is a RoleBinding to one customer's namespace.
+// Every cluster-wide list refuses them, and telling them "your groups do not
+// permit reading these" sends them to ask for access they already have. The
+// console has to ask WHICH CUSTOMER instead.
+//
+// This was wired into the overview and nowhere else, so the rail — which is how
+// most people leave the front page — led straight back to the refusal.
+func TestARefusalThatIsReallyAQuestionIsAsked(t *testing.T) {
+	forbidden := apierrors.NewForbidden(
+		schema.GroupResource{Group: "doblura.dev", Resource: "odooenvironments"},
+		"", errors.New("cluster-scoped list"))
+
+	for _, c := range []struct {
+		name  string
+		view  objectsView
+		scope string
+		want  bool
+	}{
+		{"refused with no customer chosen: ask which",
+			objectsView{Denied: true, refusal: forbidden}, "", true},
+		{"refused with a customer already chosen: they really may not",
+			objectsView{Denied: true, refusal: forbidden}, "demo", false},
+		{"not refused at all",
+			objectsView{}, "", false},
+		// The cluster being down is not a permissions answer, and offering
+		// "choose a customer" for it sends somebody to fix the wrong thing.
+		{"unreachable, not refused",
+			objectsView{Denied: true, refusal: errors.New("connection refused")}, "", false},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/o/environments", nil)
+		if c.scope != "" {
+			r.AddCookie(&http.Cookie{Name: scopeCookie, Value: c.scope})
+		}
+		if got := c.view.shouldAskForScope(r); got != c.want {
+			t.Errorf("%s: asked=%v, want %v", c.name, got, c.want)
 		}
 	}
 }

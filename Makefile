@@ -65,6 +65,7 @@ lint-chart: chart-sync
 		fi; done
 	@echo "  values.schema.json rejects typos"
 	@python3 hack/verify-webhook-chart.py
+	@python3 hack/verify-chart-render.py
 
 ## verify-image: report what Doblura can drive with a candidate image.
 ## Usage: make verify-image IMAGE=odoo:19.0

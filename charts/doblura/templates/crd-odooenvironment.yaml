@@ -44,7 +44,7 @@ spec:
       type: string
     - jsonPath: .status.expiresAt
       name: Expires
-      type: date
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -1404,7 +1404,12 @@ spec:
                   adminUsers. It is the only way in once passwords are randomized.
                 type: string
               expiresAt:
-                description: ExpiresAt is when it gets destroyed.
+                description: |-
+                  ExpiresAt is when it gets destroyed.
+                  Printed as a string rather than a date column: kubectl renders a date
+                  column as the time SINCE the value, and an expiry is in the future, which
+                  it prints as "<invalid>". The column that says when this gets deleted read
+                  as broken for the whole of the environment's life.
                 format: date-time
                 type: string
               lastRequestTime:

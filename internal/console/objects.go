@@ -158,6 +158,11 @@ type objectsView struct {
 	// Denied is set when the person may not list this kind at all, which is a
 	// different page from an empty one.
 	Denied bool
+	// refusal is the API server's own words for that Denied, kept so the handler
+	// can hand them to the "which customer?" page. Unexported: it is for the
+	// handler's decision, not for a template to print — the template already has
+	// its own sentence for a refusal.
+	refusal error
 
 	// Cluster is which one these rows came from, when they came from one.
 	Cluster string
@@ -166,6 +171,16 @@ type objectsView struct {
 	// Troubles are the clusters that could not be asked. Shown, never dropped: a
 	// federated list that quietly returns fewer rows reports an outage as calm.
 	Troubles []clusterTrouble
+}
+
+// shouldAskForScope is whether this refusal is really a question.
+//
+// A function rather than a condition inline, because this exact answer has been
+// lost once already — a refactor moved the List out of the overview's handler and
+// took the ask with it — and a condition in a handler cannot be tested without an
+// API server, which is why nothing caught it.
+func (v objectsView) shouldAskForScope(r *http.Request) bool {
+	return v.Denied && clusterWideRefusal(r, v.refusal)
 }
 
 func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identity) {
@@ -197,6 +212,16 @@ func (s *Server) handleObjects(w http.ResponseWriter, r *http.Request, id Identi
 		s.fail(w, id, err)
 		return
 	}
+	// The same answer the overview gives, for the same reason: these lists are
+	// cluster-wide, a RoleBinding to one namespace never permits a cluster-wide
+	// list, and telling that person "your groups do not permit reading these"
+	// sends them to ask for access they already have. It was wired into the
+	// overview alone, so anybody who reached the rail instead of the front page
+	// met the refusal the fix exists to prevent.
+	if view.shouldAskForScope(r) {
+		s.askForScope(w, r, id, view.refusal)
+		return
+	}
 	s.renderFor(w, r, "objects.html", page{Title: kind.Title, Identity: id, Data: view})
 }
 
@@ -224,7 +249,7 @@ func (s *Server) objectsIn(
 			if !apierrors.IsForbidden(err) {
 				return view, err
 			}
-			view.Denied = true
+			view.Denied, view.refusal = true, err
 			break
 		}
 		deps := listDeployments(ctx, c, scope)
@@ -250,7 +275,7 @@ func (s *Server) objectsIn(
 			if !apierrors.IsForbidden(err) {
 				return view, err
 			}
-			view.Denied = true
+			view.Denied, view.refusal = true, err
 			break
 		}
 		for i := range l.Items {
@@ -279,7 +304,7 @@ func (s *Server) objectsIn(
 			if !apierrors.IsForbidden(err) {
 				return view, err
 			}
-			view.Denied = true
+			view.Denied, view.refusal = true, err
 			break
 		}
 		for i := range l.Items {
@@ -300,7 +325,7 @@ func (s *Server) objectsIn(
 			if !apierrors.IsForbidden(err) {
 				return view, err
 			}
-			view.Denied = true
+			view.Denied, view.refusal = true, err
 			break
 		}
 		for i := range l.Items {
@@ -327,7 +352,7 @@ func (s *Server) objectsIn(
 			if !apierrors.IsForbidden(err) {
 				return view, err
 			}
-			view.Denied = true
+			view.Denied, view.refusal = true, err
 			break
 		}
 		for i := range l.Items {
@@ -348,7 +373,7 @@ func (s *Server) objectsIn(
 			if !apierrors.IsForbidden(err) {
 				return view, err
 			}
-			view.Denied = true
+			view.Denied, view.refusal = true, err
 			break
 		}
 		for i := range l.Items {
@@ -368,7 +393,7 @@ func (s *Server) objectsIn(
 			if !apierrors.IsForbidden(err) {
 				return view, err
 			}
-			view.Denied = true
+			view.Denied, view.refusal = true, err
 			break
 		}
 		for i := range l.Items {

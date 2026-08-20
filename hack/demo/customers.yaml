@@ -1,0 +1,140 @@
+# The demo: two customers, and enough environments between them that every screen
+# in the console has something to show.
+#
+# Why this file exists at all: the console was developed against a cluster built
+# by hand over one long session, and when that cluster was deleted the only
+# record of what had been in it was a paragraph of prose. hack/screenshots.sh
+# needs a populated console and neither created one nor said who did. This is
+# who does.
+#
+# Two namespaces on purpose. One customer proves nothing about the scoping rules:
+# a viewer bound to `demo` and refused in `norte` is the case the console's
+# customer scope exists for, and it can only be exercised with a second customer
+# they may not see.
+---
+# ── Acme: live, with a production environment and work going on around it ──
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: acme, namespace: demo}
+spec:
+  displayName: Acme Distribución, S.L.
+  # Environments get generated names under this domain. Production never does.
+  domain: acme.example
+  odooVersion: "18.0"
+  maxEphemeralEnvironments: 4
+  images:
+    # The base image this repository builds. Local on purpose: the demo must come
+    # up on a laptop with no registry credentials.
+    - name: base-18
+      image: doblura/odoo:18.0
+      odooVersion: "18.0"
+      flavor: Official
+      default: true
+      notes: The image images/odoo/Dockerfile builds.
+    # A second entry so the catalogue is a catalogue. Nothing runs it here; it is
+    # what the "which image?" column looks like when there is a choice.
+    - name: base-17
+      image: doblura/odoo:17.0
+      odooVersion: "17.0"
+      flavor: Official
+      notes: Previous major, kept for the one customer still on it.
+  environmentDefaults:
+    database: {host: pg, port: 5432, user: odoo, passwordSecret: pg-app}
+    # Attachments in Postgres: no volume to share, which is what lets several
+    # tiers run without a ReadWriteMany claim on a single-node cluster.
+    storage: {filestore: {mode: Database}}
+    size: small
+---
+apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: prod, namespace: demo}
+spec:
+  forTenant: acme
+  purpose: Production
+  imageRef: base-18
+  data: {type: Live}
+  lifecycle: {type: Persistent}
+  database: {host: pg, port: 5432, user: odoo, passwordSecret: pg-app}
+  storage: {filestore: {mode: Database}}
+  security: {denyEgress: true}
+  size: small
+---
+# Public, because the edge is a third of what this operator does and none of it
+# is visible on an environment nobody can reach: this is the one that produces
+# Traefik middlewares, an Ingress, a generated hostname and a WAF.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: pr-482, namespace: demo}
+spec:
+  forTenant: acme
+  purpose: Review
+  imageRef: base-18
+  data: {type: Demo}
+  lifecycle: {type: Ephemeral, ttl: 72h}
+  database: {host: pg, port: 5432, user: odoo, passwordSecret: pg-app}
+  storage: {filestore: {mode: Ephemeral}}
+  security: {randomizeUserPasswords: true, denyEgress: true}
+  exposure:
+    public: true
+    auth: {type: BasicAuth}
+    noIndex: true
+    rateLimitRPS: 20
+    hsts: true
+    waf:
+      mode: InCluster
+      enforcement: Block
+---
+# Hibernating: an environment that exists, costs nothing, and wakes on demand.
+# It is also what keeps this lab runnable on a laptop.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: qa-cierre, namespace: demo}
+spec:
+  forTenant: acme
+  purpose: QA
+  imageRef: base-18
+  # Demo data rather than the Snapshot a QA environment defaults to: a snapshot
+  # needs a production database to anonymise, and this lab has no such thing to
+  # take one from. hack/e2e/run.sh is where that path is exercised for real.
+  data: {type: Demo}
+  lifecycle: {type: Hibernating}
+  database: {host: pg, port: 5432, user: odoo, passwordSecret: pg-app}
+  storage: {filestore: {mode: Database}}
+  size: small
+---
+# ── Norte: a customer who has not gone live yet ──
+#
+# No production environment, on purpose. It gives the console a customer whose
+# rows are all "not yet", and it is the namespace a viewer scoped to `demo` must
+# be refused in.
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: norte, namespace: norte}
+spec:
+  displayName: Norte Logística
+  domain: norte.example
+  odooVersion: "18.0"
+  maxEphemeralEnvironments: 2
+  images:
+    - name: base-18
+      image: doblura/odoo:18.0
+      odooVersion: "18.0"
+      flavor: Official
+      default: true
+  environmentDefaults:
+    database: {host: pg, port: 5432, user: odoo, passwordSecret: pg-app}
+    storage: {filestore: {mode: Database}}
+    size: small
+---
+apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: staging, namespace: norte}
+spec:
+  forTenant: norte
+  purpose: Staging
+  imageRef: base-18
+  data: {type: Demo}
+  lifecycle: {type: Hibernating}
+  database: {host: pg, port: 5432, user: odoo, passwordSecret: pg-app}
+  storage: {filestore: {mode: Database}}
+  size: small

@@ -1,0 +1,44 @@
+# The one database the lab cannot invent.
+#
+# A Production environment declares data.type Live, which means "the customer's
+# own data is already in that database". doblura does not create it, and it is
+# right not to: a production database that an operator conjures out of nothing is
+# a production database nobody restored, and the day somebody notices is the day
+# they look for the data that was supposed to be in it.
+#
+# So the lab plays the part of the customer's history: it initialises env_prod
+# once, the way a real installation would have arrived at it years earlier, and
+# from then on doblura does what it does — migrate it, back it up, expose it.
+#
+# Without this, `demo/prod` sits in Failed with "Database does not exist", which
+# is the operator being correct about a lab that was not.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: seed-production, namespace: demo}
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      # 100 is `odoo` in the official image, which is what images/odoo builds on.
+      securityContext: {runAsUser: 100, runAsGroup: 101, fsGroup: 101}
+      containers:
+        - name: seed
+          image: doblura/odoo:18.0
+          imagePullPolicy: Never
+          command: [sh, -euc]
+          args:
+            - |
+              # --without-demo=all: this stands in for a real customer's
+              # database, and a production database full of demo invoices is the
+              # thing every one of doblura's guardrails exists to keep apart.
+              odoo -d env_prod -i base --without-demo=all --stop-after-init \
+                --db_host=pg --db_port=5432 --db_user=odoo \
+                --db_password="$PGPASSWORD" --no-http
+              echo ">> env_prod exists"
+          env:
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: pg-app, key: password}}
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {memory: 1Gi}

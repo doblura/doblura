@@ -112,10 +112,16 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- end }}
-            {{- range $k, $v := .Values.defaults }}
-            - name: DOBLURA_{{ $k | snakecase | upper }}
-              value: {{ $v | quote }}
-            {{- end }}
+            {{/*
+            And NOT a `range` over .Values.defaults as well. Both were here, so
+            every one of these three was emitted TWICE and Kubernetes warned that
+            the first copy may be dropped. Worse than the duplication: a range
+            turns any key somebody adds to `defaults` into an environment
+            variable the manager does not read — which is the shape of defect
+            this project keeps finding, a value that describes what something
+            else will do with nobody reading it. Three names, read in
+            internal/controller/helperimages.go, written here.
+            */}}
           ports:
             - name: probes
               containerPort: 8081

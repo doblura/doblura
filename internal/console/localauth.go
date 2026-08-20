@@ -18,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Local accounts.
@@ -155,7 +156,18 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		// The same message for a missing user and a wrong password, matching the
 		// same-time comparison above: telling them which one they got right is
 		// half the work of an attack.
-		http.Redirect(w, r, "/auth/login?e="+url.QueryEscape(errBadCredentials.Error())+
+		msg := errBadCredentials.Error()
+		// But NOT for a failure to read the accounts at all. That used to fall in
+		// here too, so a console whose ServiceAccount could not read its own
+		// accounts Secret told everybody their password was wrong — a sentence
+		// that sends people to reset a password that was always right, and hides
+		// the one fact that would have fixed it. The person cannot act on the
+		// detail, so the detail goes to the log and they get a true sentence.
+		if !errors.Is(err, errBadCredentials) {
+			log.Log.Error(err, "the console could not read its local accounts")
+			msg = "sign-in is unavailable: the console cannot read its accounts. Ask whoever runs it to check its logs"
+		}
+		http.Redirect(w, r, "/auth/login?e="+url.QueryEscape(msg)+
 			"&next="+url.QueryEscape(safeNext(r.FormValue("next"))), http.StatusSeeOther)
 		return
 	}

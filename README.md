@@ -679,6 +679,29 @@ The quota is not a CEL rule — it has to read other objects — so `make e2e` c
 test it and says so rather than skipping quietly. `make e2e-quota` builds the image,
 installs the chart for real and denies an actual create.
 
+### A cluster with something in it
+
+```bash
+./hack/demo-lab.sh up      # k3d + the operator + the console + two customers
+./hack/demo-lab.sh open    # port-forward, and the accounts to sign in with
+./hack/demo-lab.sh check   # assert each account sees what it should
+./hack/demo-lab.sh scale   # 40 more customers, and time the pages
+./hack/demo-lab.sh down    # delete the cluster
+```
+
+This is the cluster to look at the console in, take screenshots against, and try
+the edge on: it has a public environment, so Traefik middlewares, a generated
+hostname and a WAF actually exist. It also has three accounts with genuinely
+different access — the whole platform, one customer, and a customer's own status
+page — which is the only way to see that the interface has no permissions of its
+own.
+
+`hack/oidc-demo.sh up` then points the same console at a real identity provider.
+
+It is deliberately not `make e2e`: that one runs a real migration end to end and
+takes twenty minutes. This one is about the interface and the edge, and comes up
+in about three.
+
 ## Non-goals
 
 - **Not another way to run Odoo.** Bitnami's chart and three operators already

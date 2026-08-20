@@ -969,6 +969,10 @@ type OdooEnvironmentStatus struct {
 
 	// ExpiresAt is when it gets destroyed.
 	// +optional
+	// Printed as a string rather than a date column: kubectl renders a date
+	// column as the time SINCE the value, and an expiry is in the future, which
+	// it prints as "<invalid>". The column that says when this gets deleted read
+	// as broken for the whole of the environment's life.
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 
 	// AddonRevisions is the commit each declared repository was ACTUALLY at.
@@ -1019,7 +1023,7 @@ type OdooEnvironmentStatus struct {
 // +kubebuilder:printcolumn:name="Lifecycle",type=string,JSONPath=`.spec.lifecycle.type`
 // +kubebuilder:printcolumn:name="Public",type=boolean,JSONPath=`.spec.exposure.public`
 // +kubebuilder:printcolumn:name="URL",type=string,JSONPath=`.status.url`
-// +kubebuilder:printcolumn:name="Expires",type=date,JSONPath=`.status.expiresAt`
+// +kubebuilder:printcolumn:name="Expires",type=string,JSONPath=`.status.expiresAt`
 type OdooEnvironment struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
