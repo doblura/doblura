@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -19,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
+	"github.com/doblura/doblura/internal/metrics"
 )
 
 // OdooTenantReconciler keeps the customer record true, and counts consumption.
@@ -107,6 +109,17 @@ func (r *OdooTenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			log.FromContext(ctx).Error(err, "could not study an image",
 				"tenant", tenant.Name, "entry", entry.Name)
 		}
+	}
+
+	// Which release this customer is on, as a label rather than as a number.
+	//
+	// Deleted first: a customer who moves from 2026.2 to 2026.3 would otherwise
+	// keep a series saying they are still on the old one, for as long as the
+	// retention holds — and "how many customers are on the new release" would
+	// count both.
+	metrics.CustomerRelease.DeletePartialMatch(prometheus.Labels{"tenant": tenant.Name})
+	if v := tenant.Spec.ProductRelease; v != "" {
+		metrics.CustomerRelease.WithLabelValues(tenant.Name, v).Set(1)
 	}
 
 	quota := tenant.Spec.EphemeralQuota()

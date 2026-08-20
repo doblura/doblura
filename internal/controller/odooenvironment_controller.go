@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
+	"github.com/doblura/doblura/internal/metrics"
 )
 
 // OdooEnvironmentReconciler brings up Odoo environments.
@@ -295,6 +296,17 @@ func (r *OdooEnvironmentReconciler) runPhase(
 	// know which commit it was running.
 	r.recordAddonRevisions(ctx, env, st, name)
 
+	// What this phase said last time, captured before the condition below
+	// overwrites it. It is the only thing that can tell a phase that just failed
+	// from one that failed an hour ago: unlike a completed phase, a failed one is
+	// re-evaluated on every reconcile — the early return at the top of this
+	// function only fires for conditions that are TRUE — so a counter without
+	// this guard would report one broken migration as hundreds.
+	previously := meta.FindStatusCondition(st.Conditions, condType)
+	firstFailure := previously == nil ||
+		previously.Status != metav1.ConditionFalse ||
+		previously.Reason != "PhaseFailed"
+
 	switch {
 	case live.Status.Succeeded > 0:
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
@@ -302,6 +314,13 @@ func (r *OdooEnvironmentReconciler) runPhase(
 			Reason: "PhaseCompleted", Message: "phase " + step.name + " completed",
 			ObservedGeneration: env.Generation,
 		})
+		// Observed HERE, on the transition, and nowhere else. This function is
+		// called on every reconcile, and the early return above — "already
+		// completed, never repeated" — is the only thing that makes this happen
+		// once. A histogram fed on every pass reports the same migration a
+		// hundred times and its quantiles become a measure of reconcile
+		// frequency.
+		observePhase(env, step.name, &live)
 		return true, true, nil
 	case live.Status.Failed > 0:
 		st.Phase = doblurav1alpha1.EnvFailed
@@ -311,9 +330,45 @@ func (r *OdooEnvironmentReconciler) runPhase(
 			Reason: "PhaseFailed", Message: st.Message,
 			ObservedGeneration: env.Generation,
 		})
+		// The same reasoning in reverse: a failed phase is not retried, so the
+		// condition it just set makes the next pass return early. Counting here
+		// counts once.
+		if firstFailure {
+			metrics.PhaseFailures.WithLabelValues(
+				step.name, purposeLabel(env), env.Spec.ForTenant).Inc()
+		}
 		return false, false, nil
 	}
 	return false, false, nil
+}
+
+// observePhase records how long a phase took, from the Job's own clock.
+//
+// The Job's start and completion times rather than anything this controller
+// measures: a reconcile can be minutes after the Job finished, and a duration
+// that includes however long the queue was is a duration about the queue.
+func observePhase(env *doblurav1alpha1.OdooEnvironment, phase string, job *batchv1.Job) {
+	if job.Status.StartTime == nil || job.Status.CompletionTime == nil {
+		return
+	}
+	d := job.Status.CompletionTime.Sub(job.Status.StartTime.Time).Seconds()
+	if d < 0 {
+		return
+	}
+	metrics.PhaseDuration.WithLabelValues(
+		phase, purposeLabel(env), env.Spec.ForTenant).Observe(d)
+}
+
+// purposeLabel is the purpose, or "unset" — never the empty string.
+//
+// An empty label value is a series that looks like a bug in a dashboard, and
+// "unset" is a fact: an environment that declares no purpose is a real thing this
+// operator supports.
+func purposeLabel(env *doblurav1alpha1.OdooEnvironment) string {
+	if env.Spec.Purpose == "" {
+		return "unset"
+	}
+	return string(env.Spec.Purpose)
 }
 
 // ensureConfigAndSecrets generates the odoo.conf and the environment credentials.

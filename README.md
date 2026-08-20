@@ -665,7 +665,7 @@ Odoo 19 on a kind cluster, which is what `make e2e-real` does. What is in place:
       else's
 - [x] A restore takes a copy of what it is about to replace, and Production cannot
       turn that off
-- [ ] Prometheus metrics: migration duration per release
+- [x] Prometheus metrics: migration duration per release
 - [x] `OdooRelease`: staged rollout of one release across many customers
 
 See [ROADMAP.md](ROADMAP.md) for where this is going.
@@ -714,6 +714,40 @@ own.
 It is deliberately not `make e2e`: that one runs a real migration end to end and
 takes twenty minutes. This one is about the interface and the edge, and comes up
 in about three.
+
+## What it tells Prometheus
+
+`metrics.enabled` is on by default and serves on 8080;
+`metrics.serviceMonitor.enabled` adds a ServiceMonitor for the Prometheus
+Operator (off, because it fails to apply where Prometheus's CRDs are absent).
+
+Besides controller-runtime's own, doblura exposes three:
+
+| | |
+|---|---|
+| `doblura_phase_duration_seconds` | how long each phase of bringing up an environment took, from the Job's own start and completion times, by `phase`, `purpose` and `tenant` |
+| `doblura_phase_failures_total` | phases that failed, same labels |
+| `doblura_customer_release` | 1 per customer, labelled with the product release they are on |
+
+Two things about that list are decisions rather than omissions.
+
+**Nothing is labelled by environment name.** A review environment exists per pull
+request, so a busy month is thousands of label values that will never be seen
+again — and every distinct combination is a time series held for the whole
+retention. Tenant is bounded by how many customers you have, which is a number
+you chose.
+
+**The release is a separate metric, not a label on the durations.** Putting it on
+the histogram splits a customer's history in two every time they move onto a new
+version, and "did migrations get slower after 2026.3?" is exactly the question
+that needs both halves in one series. Join it at query time:
+
+```promql
+histogram_quantile(0.9,
+  sum by (le, version) (
+    rate(doblura_phase_duration_seconds_bucket{phase="migrate"}[1d])
+    * on (tenant) group_left(version) doblura_customer_release))
+```
 
 ## Non-goals
 

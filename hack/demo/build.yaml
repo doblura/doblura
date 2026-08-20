@@ -19,7 +19,13 @@ spec:
     # means something.
     - name: mis-builder
       url: https://github.com/OCA/mis-builder.git
-      ref: "17.0"
+      # 18.0, matching the base image. It said 17.0 first, and the build was
+      # perfectly happy: buildah copied the files, the study counted three extra
+      # modules, and the environment died on "Module mis_builder: invalid
+      # manifest" — an Odoo 18 refusing a 17 manifest. Nothing before that step
+      # can catch it, which is the entire argument for rehearsing a version
+      # against real data rather than trusting that an image built.
+      ref: "18.0"
       depth: 1
   to:
     image: __REGISTRY__/acme/erp
