@@ -77,6 +77,12 @@ var objectKinds = []objectKind{
 		Columns: []string{"Name", "State", "Source", "Taken", "What was masked"},
 	},
 	{
+		Slug: "releases", Title: "Releases", Resource: "odooreleases",
+		Lede: "One version of your own product on its way across customers. A rollout " +
+			"is the one thing here that is worth watching while it happens.",
+		Columns: []string{"Name", "State", "Version", "Progress", "What is holding it"},
+	},
+	{
 		Slug: "builds", Title: "Builds", Resource: "odoobuilds",
 		Lede: "Images built from the customer's own repositories, in the customer's " +
 			"own cluster. What each one is worth knowing by is its digest and the " +
@@ -142,6 +148,50 @@ type cell struct {
 
 func text(s string) cell  { return cell{Text: s} }
 func muted(s string) cell { return cell{Text: s, Muted: true} }
+
+// releaseState maps a rollout onto the shared colour vocabulary.
+//
+// Soaking is "building" and not "degraded": a rollout that is waiting out its
+// soak is doing exactly what it was asked to do, and amber for it teaches people
+// that amber means nothing.
+func releaseState(rel *doblurav1alpha1.OdooRelease) string {
+	switch rel.Status.Phase {
+	case doblurav1alpha1.ReleaseComplete:
+		return "up"
+	case doblurav1alpha1.ReleaseBlocked:
+		return "degraded"
+	case doblurav1alpha1.ReleaseSoaking, doblurav1alpha1.ReleaseRolling:
+		return "building"
+	default:
+		return "unknown"
+	}
+}
+
+// holdingCell says what a rollout is waiting on, in the words of the thing that
+// is waiting.
+//
+// Not "3 waiting". Somebody looking at a stalled rollout wants to know whether it
+// is waiting for a clock or for a person, because those need different actions —
+// and a count answers neither.
+func holdingCell(rel *doblurav1alpha1.OdooRelease) cell {
+	var unrehearsed []string
+	for _, c := range rel.Status.Customers {
+		if c.State == "notRehearsed" {
+			unrehearsed = append(unrehearsed, c.Name)
+		}
+	}
+	switch {
+	case len(unrehearsed) > 0:
+		// A person has to run a rehearsal. Amber, because time will not fix it.
+		return cell{State: "degraded", Word: "not rehearsed: " + strings.Join(unrehearsed, ", ")}
+	case rel.Status.NextBatchAt != nil:
+		return muted("the next batch is due " + humanUntil(rel.Status.NextBatchAt))
+	case rel.Status.Phase == doblurav1alpha1.ReleaseComplete:
+		return muted("")
+	default:
+		return muted(rel.Status.Message)
+	}
+}
 
 // buildState maps a build phase onto the shared colour vocabulary.
 func buildState(p string) string {
@@ -447,6 +497,28 @@ func (s *Server) objectsIn(
 					muted(sn.Spec.Source.Host),
 					muted(humanSince(sn.Status.LastSuccessfulTime)),
 					maskingCell(sn),
+				},
+			})
+		}
+	case "releases":
+		var l doblurav1alpha1.OdooReleaseList
+		if err := c.List(ctx, &l, scope); err != nil {
+			if !apierrors.IsForbidden(err) {
+				return view, err
+			}
+			view.Denied, view.refusal = true, err
+			break
+		}
+		for i := range l.Items {
+			rel := &l.Items[i]
+			view.Rows = append(view.Rows, objectRow{
+				Name: rel.Name, Namespace: rel.Namespace,
+				Cells: []cell{
+					verdict(releaseState(rel), string(rel.Status.Phase)),
+					muted(rel.Spec.Version),
+					muted(fmt.Sprintf("%d of %s",
+						rel.Status.OnThisRelease, plural(int(rel.Status.InScope), "customer"))),
+					holdingCell(rel),
 				},
 			})
 		}

@@ -402,6 +402,30 @@ check() {
     esac
   fi
 
+  # ── a rollout says what is holding it ──
+  #
+  # Not the count. Somebody looking at a stalled rollout needs to know whether it
+  # is waiting for a clock or for a person, because those need different actions,
+  # and "3 waiting" answers neither.
+  kc apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooRelease
+metadata: {name: check-rollout, namespace: demo}
+spec:
+  version: "0.0-check"
+  image: doblura/odoo:18.0
+  selector: {matchLabels: {producto: erp}}
+  batch: {size: 1, soak: 5m}
+YAML
+  sleep 4
+  case "$(page /o/releases "$jar")" in
+    *"not rehearsed"*)
+      ok "a rollout says it is waiting on a rehearsal, and on whom" ;;
+    *) bad "the rollout says what is holding it" \
+         "the page does not name the customer that has not been rehearsed" ;;
+  esac
+  kc -n demo delete odoorelease check-rollout --ignore-not-found >/dev/null 2>&1
+
   # ── the edge: the objects spec.exposure promises ──
   local mw
   mw=$(kc -n demo get middlewares.traefik.io -o name 2>/dev/null | wc -l | tr -d ' ')

@@ -646,6 +646,32 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request, id Identit
 	s.renderFor(w, r, "me.html", page{Title: "Your access", Identity: id, Data: scopes})
 }
 
+// humanUntil is the other direction, and it needs its own function rather than a
+// negated humanSince: kubectl's date columns print "<invalid>" for a future time
+// for exactly this reason, and a deadline shown as a negative age is the same bug
+// with better manners.
+func humanUntil(t *metav1.Time) string {
+	if t == nil || t.IsZero() {
+		return "—"
+	}
+	d := time.Until(t.Time).Round(time.Second)
+	if d <= 0 {
+		// Due, not overdue: the next reconcile picks it up, and "3s late" would
+		// read as a fault where there is none.
+		return "now"
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("in %ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("in %dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("in %dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("in %dd", int(d.Hours()/24))
+	}
+}
+
 func humanSince(t *metav1.Time) string {
 	if t == nil || t.IsZero() {
 		return "—"

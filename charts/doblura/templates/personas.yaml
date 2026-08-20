@@ -146,7 +146,7 @@ metadata:
       Sees everything and changes nothing. The starting point for anybody in the company.
 rules:
   - apiGroups: [doblura.dev]
-    resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots, odoobackups, odoorestores, reviewsets, odoobuilds]
+    resources: [odootenants, odoodatabases, odooinstances, odooenvironments, odoorehearsals, odoosnapshots, odoobackups, odoorestores, reviewsets, odoobuilds, odooreleases]
     verbs: [get, list, watch]
   # Deployments, read-only, and nothing else from apps/.
   #
