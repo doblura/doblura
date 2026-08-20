@@ -1,0 +1,39 @@
+# An anonymised copy of the demo's production database, taken once.
+#
+# In the lab because everything about this pipeline is invisible until it runs.
+# It had six separate faults stacked on top of each other — a missing binary in
+# the base image, a missing config section, a config section in the wrong place,
+# rules naming tables the database does not have, transformers that are not
+# greenmask's, and a destination volume that was never mounted — and every Go
+# test passed throughout, because they all asserted on substrings of a string.
+#
+# No schedule: this takes one copy when it is created, which is what somebody
+# asking for an anonymised copy means.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: snapshots, namespace: demo}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
+apiVersion: doblura.dev/v1alpha1
+kind: OdooSnapshot
+metadata: {name: prod-anon, namespace: demo}
+spec:
+  image: doblura/odoo:18.0
+  source:
+    host: pg
+    port: 5432
+    name: env_prod
+    user: odoo
+    passwordSecret: pg-app
+  # A separate work database on the same server: the copy is made there and
+  # masked there, so production is only ever read.
+  work:
+    host: pg
+    port: 5432
+    user: odoo
+    passwordSecret: pg-app
+  to:
+    type: Volume
+    volume: {claimName: snapshots}

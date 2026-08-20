@@ -96,11 +96,18 @@ func snapshotPodTemplate(snap *doblurav1alpha1.OdooSnapshot) corev1.PodTemplateS
 		})
 	}
 
+	dump := step("4-dump", dumpScript(snap, work))
+	dump.TerminationMessagePath = maskReportPath
+	// FallbackToLogsOnError: when the dump fails there is no report to write, and
+	// the last lines of the log say what greenmask refused — which beats an empty
+	// message on the one path that matters.
+	dump.TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
+
 	inits := []corev1.Container{
 		step("1-copy", copyScript(work)),
 		step("2-neutralize", neutralizeScript(work, "/etc/doblura/odoo.conf")),
 		step("3-anonymize", anonymizeStep(snap, work)),
-		step("4-dump", dumpScript(snap, work)),
+		dump,
 	}
 
 	return corev1.PodTemplateSpec{
@@ -178,6 +185,18 @@ echo ">> masked"`
 // It PRINTS what it dropped. A filter that quietly removes masking rules is a
 // filter that quietly stops anonymizing a column, and the whole point of this
 // pipeline is that somebody can say what was masked.
+// maskReportPath is where the prune step leaves what it decided.
+//
+// Inside /tmp, which this pod mounts writable: the root filesystem is read-only
+// and the default termination path (/dev/termination-log) is on it — the same
+// trap the addons clone hit.
+//
+// What travels this way is a DATA-PROTECTION FACT, not a log line: which columns
+// this run did not mask. It was printed to a Job's log, where it lives as long as
+// the pod does and is visible to whoever thinks to look. On the object it can be
+// read months later by somebody asking what was in that dump.
+const maskReportPath = "/tmp/masking-report"
+
 const greenmaskPrune = `python3 - <<'PRUNE'
 import yaml, subprocess, sys
 
@@ -233,6 +252,13 @@ if gone:
     print(">> not in this database, so not masked: " + ", ".join(gone))
 if dropped_cols:
     print(">> columns not in this database, so not masked: " + ", ".join(sorted(dropped_cols)))
+
+# And back to the object, not only to this log. The size is added after the dump,
+# because that is when there is one.
+import json
+with open("/tmp/prune.json", "w") as fh:
+    json.dump({"tables": sorted(gone), "columns": sorted(set(dropped_cols)),
+               "masked": sum(len(r.get("transformers") or []) for r in keep)}, fh)
 if not keep and rules:
     print("!! none of the tables this snapshot masks exist in the source database.",
           file=sys.stderr)
@@ -258,7 +284,9 @@ greenmask --config /tmp/greenmask.yaml dump
 d=$(ls -1dt ` + greenmaskOut + `/*/ 2>/dev/null | head -1)
 if [ -z "$d" ]; then echo "greenmask reported success and produced no dump" >&2; exit 1; fi
 mv "$d" /scratch/dump
-echo ">> dumped"`
+sz=$(du -sb /scratch/dump | cut -f1)
+python3 -c "import json; d=json.load(open('/tmp/prune.json')); d['size_bytes']=int('$sz'); json.dump(d, open('` + maskReportPath + `','w'))"
+echo ">> dumped, $sz bytes"`
 	}
 	// With SQL or Custom the database is already clean: a plain pg_dump, with the
 	// volume tables left out through --exclude-table-data.

@@ -156,6 +156,16 @@ up() {
   kc -n demo wait --for=condition=complete job/seed-production --timeout=10m >/dev/null \
     || { kc -n demo logs job/seed-production --tail=30; exit 1; }
   kc apply -f "$HERE/demo/customers.yaml" >/dev/null
+  kc apply -f "$HERE/demo/snapshot.yaml" >/dev/null
+  # Waited for, or `check` races it on a cold start and reports a pipeline that
+  # is simply still running as one that did not run.
+  note "taking the anonymised copy"
+  for _ in $(seq 1 40); do
+    phase=$(kc -n demo get odoosnapshot prod-anon -o jsonpath='{.status.phase}' 2>/dev/null)
+    [ "$phase" = "Succeeded" ] || [ "$phase" = "Failed" ] && break
+    sleep 5
+  done
+  [ "${phase:-}" = "Succeeded" ] || note "the snapshot is $phase; ./hack/demo-lab.sh check will say more"
 
   say "6/7  who may see what"
   # toni: the whole platform, cluster-wide.
@@ -293,6 +303,37 @@ check() {
     --as=nobody --as-group=cliente-acme 2>/dev/null || true)
   [ "$canlog" = "no" ] && ok "the customer cannot read logs" \
     || bad "the customer cannot read logs" "the API server says: $canlog"
+
+  # ── the anonymization pipeline, which is invisible until it runs ──
+  #
+  # Not "does the object exist": whether a dump came out, and whether the object
+  # says what was actually masked rather than what the spec asked for. The
+  # difference between those two numbers is the whole reason this check is here.
+  local snap
+  snap=$(kc -n demo get odoosnapshot prod-anon \
+    -o jsonpath='{.status.phase}|{.status.columnsMasked}|{.status.sizeBytes}' 2>/dev/null)
+  case "$snap" in
+    Succeeded\|0\|*) bad "the snapshot masked something" \
+      "it succeeded and masked no columns, which is a copy of production with the names left on" ;;
+    Succeeded\|*\|0) bad "the snapshot produced a dump" "it succeeded with a size of zero" ;;
+    Succeeded\|*) ok "the anonymization pipeline produced a masked dump ($snap)" ;;
+    Copying*|"") bad "the snapshot finished" "still $snap after the lab came up" ;;
+    *) bad "the snapshot succeeded" "phase is $snap" ;;
+  esac
+  # And the object knows what it did NOT mask. That is a data-protection fact:
+  # a column listed there has its real values in that dump.
+  if [ -n "$(kc -n demo get odoosnapshot prod-anon -o jsonpath='{.status.notMasked}' 2>/dev/null)" ]; then
+    ok "and it records the rules it could not apply"
+  else
+    bad "the snapshot records what it did not mask" \
+      "status.notMasked is empty; on this fixture five tables and one column are absent"
+  fi
+  signin toni "$jar"
+  case "$(page /o/snapshots "$jar")" in
+    *"not in this database"*) ok "and the console says so on the snapshots page" ;;
+    *) bad "the console shows what was masked" \
+         "the page does not mention the rules that could not be applied" ;;
+  esac
 
   # ── the edge: the objects spec.exposure promises ──
   local mw

@@ -5,6 +5,7 @@ package console
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -68,7 +69,12 @@ var objectKinds = []objectKind{
 		Slug: "snapshots", Title: "Snapshots", Resource: "odoosnapshots",
 		Lede: "Anonymised copies of production. Every one of these is customer data " +
 			"with the names changed, which is not the same as customer data removed.",
-		Columns: []string{"Name", "State", "Source", "Taken", "Message"},
+		// "What was masked" rather than "Message". The message repeated the state
+		// pill next to it, and the question this page exists to answer — how much
+		// of the personal data in this copy was actually changed — was not on it
+		// at all. On a failed snapshot the same column carries the reason, because
+		// that is what somebody is looking for on that row.
+		Columns: []string{"Name", "State", "Source", "Taken", "What was masked"},
 	},
 	{
 		Slug: "databases", Title: "Databases", Resource: "odoodatabases",
@@ -129,6 +135,37 @@ type cell struct {
 
 func text(s string) cell  { return cell{Text: s} }
 func muted(s string) cell { return cell{Text: s, Muted: true} }
+
+// maskingCell answers the question the snapshots page is for: how much of the
+// personal data in this copy was actually changed.
+//
+// The number the object used to carry was the count of RULES — computed from the
+// spec, before anything ran, and reported as evidence. On a database missing the
+// tables some rules name it read far higher than what happened. So this shows
+// both numbers when they differ, and names the gap rather than averaging it away:
+// a column that was not masked is a column whose real values are in that dump.
+func maskingCell(sn *doblurav1alpha1.OdooSnapshot) cell {
+	st := sn.Status
+	if st.Phase != doblurav1alpha1.SnapSucceeded {
+		// The reason, which is what somebody is looking for on a row that failed.
+		return muted(st.Message)
+	}
+	if st.ColumnsMasked == 0 && st.ColumnsDeclared == 0 {
+		return muted("nothing declared to mask")
+	}
+	if st.ColumnsMasked == 0 {
+		// A copy of production with nothing changed in it. Never quietly.
+		return cell{State: "down", Word: "nothing was masked"}
+	}
+	if len(st.NotMasked) == 0 {
+		return muted(fmt.Sprintf("%d columns", st.ColumnsMasked))
+	}
+	return cell{
+		State: "degraded",
+		Word: fmt.Sprintf("%d of %d — %s not in this database",
+			st.ColumnsMasked, st.ColumnsDeclared, plural(len(st.NotMasked), "rule")),
+	}
+}
 
 // address is a URL somebody can open, or grey text when there is none.
 //
@@ -363,7 +400,7 @@ func (s *Server) objectsIn(
 					verdict(snapshotState(string(sn.Status.Phase)), snapshotWord(string(sn.Status.Phase))),
 					muted(sn.Spec.Source.Host),
 					muted(humanSince(sn.Status.LastSuccessfulTime)),
-					muted(sn.Status.Message),
+					maskingCell(sn),
 				},
 			})
 		}

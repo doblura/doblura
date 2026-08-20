@@ -393,13 +393,43 @@ type OdooSnapshotStatus struct {
 	// +optional
 	SizeBytes int64 `json:"sizeBytes,omitempty"`
 
-	// TablesTruncated and ColumnsMasked are the effective counts. They serve as
-	// evidence of diligence: how many personal-data columns were actually
-	// handled in this particular dump.
+	// TablesTruncated and ColumnsDeclared are what the SPEC asks for, computed
+	// without looking at any database.
 	// +optional
 	TablesTruncated int32 `json:"tablesTruncated,omitempty"`
 	// +optional
+	ColumnsDeclared int32 `json:"columnsDeclared,omitempty"`
+
+	// ColumnsMasked is what the last run actually applied, and it is a different
+	// number from ColumnsDeclared whenever the source database does not have every
+	// table and column the rules name.
+	//
+	// It used to BE the declared count, under this name, described as "evidence of
+	// diligence: how many personal-data columns were actually handled in this
+	// particular dump". It was nothing of the sort — it was a count of intentions,
+	// reported before anything had run, and it read 41 on a database where the run
+	// masked far fewer. Evidence that is computed from the request rather than from
+	// the result is the most expensive kind of wrong: it is exactly what somebody
+	// reaches for when asked to show that a copy was anonymised.
+	//
+	// Zero until a run has finished.
+	// +optional
 	ColumnsMasked int32 `json:"columnsMasked,omitempty"`
+
+	// NotMasked is what the last run skipped, and why it could: tables and columns
+	// the masking rules name that the source database does not have.
+	//
+	// Odoo's schema differs by major and by which modules are installed, and
+	// greenmask refuses the whole dump over a rule naming something absent — so
+	// doblura drops those rules to let the dump happen. That is the right
+	// behaviour and it is also a decision somebody must be able to see: a column
+	// listed here is a column that was NOT anonymised in this dump, and if it is
+	// there because a module was uninstalled last week rather than never
+	// installed, this is the only place that would say so.
+	//
+	// Entries are "table" or "table.column".
+	// +optional
+	NotMasked []string `json:"notMasked,omitempty"`
 
 	// +optional
 	Message string `json:"message,omitempty"`

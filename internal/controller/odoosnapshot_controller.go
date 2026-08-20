@@ -5,7 +5,9 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -95,7 +97,7 @@ func (r *OdooSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	st.TablesTruncated = int32(len(snap.Spec.TablesToTruncate()))
-	st.ColumnsMasked = int32(len(snap.Spec.RulesToApply()))
+	st.ColumnsDeclared = int32(len(snap.Spec.RulesToApply()))
 
 	if equality.Semantic.DeepEqual(&snap.Status, st) {
 		return ctrl.Result{}, nil
@@ -245,6 +247,13 @@ func (r *OdooSnapshotReconciler) ensureJob(
 	case job.Status.Succeeded > 0:
 		st.Phase = doblurav1alpha1.SnapSucceeded
 		st.Message = "copy taken"
+		if st.LastSuccessfulTime == nil && job.Status.CompletionTime != nil {
+			st.LastSuccessfulTime = job.Status.CompletionTime
+		}
+		// What the run actually did, read back off the pod. Without this the
+		// object reports the count of rules the spec asks for and calls it
+		// evidence.
+		r.applyMaskReport(ctx, snap, st, name)
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
 			Type: "Taken", Status: metav1.ConditionTrue, Reason: "JobCompleted",
 			Message: "Job " + name + " completed", ObservedGeneration: snap.Generation,
@@ -263,6 +272,58 @@ func (r *OdooSnapshotReconciler) ensureJob(
 		st.Message = "taking a copy; no schedule was set, so this happens once"
 	}
 	return nil
+}
+
+// maskReport is what the dump step leaves in its termination message.
+type maskReport struct {
+	Tables  []string `json:"tables"`
+	Columns []string `json:"columns"`
+	Masked  int      `json:"masked"`
+	// SizeBytes of the dump. The field it fills has a printcolumn of its own and
+	// nothing had ever written it, so `kubectl get odoosnapshots` had a Size
+	// column that was always empty.
+	SizeBytes int64 `json:"size_bytes"`
+}
+
+// applyMaskReport reads it back onto the object.
+//
+// Best effort on purpose: a snapshot that ran and produced a dump has succeeded
+// whether or not its report could be read, and refusing to record the success
+// because the accounting is missing would be the worse failure. When it cannot be
+// read, the counts stay at zero rather than being filled in from the spec — an
+// unknown is shown as unknown.
+func (r *OdooSnapshotReconciler) applyMaskReport(
+	ctx context.Context,
+	snap *doblurav1alpha1.OdooSnapshot,
+	st *doblurav1alpha1.OdooSnapshotStatus,
+	jobName string,
+) {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(snap.Namespace),
+		client.MatchingLabels{"job-name": jobName}); err != nil {
+		return
+	}
+	for i := range pods.Items {
+		// The init container statuses, not the containers': the report comes from
+		// 4-dump, and Kubernetes does not copy a Job's labels onto its pods but it
+		// does keep every init container's termination message here.
+		for _, cs := range pods.Items[i].Status.InitContainerStatuses {
+			if cs.Name != "4-dump" || cs.State.Terminated == nil {
+				continue
+			}
+			var rep maskReport
+			if err := json.Unmarshal([]byte(cs.State.Terminated.Message), &rep); err != nil {
+				continue
+			}
+			st.ColumnsMasked = int32(rep.Masked)
+			st.SizeBytes = rep.SizeBytes
+			st.NotMasked = nil
+			st.NotMasked = append(st.NotMasked, rep.Tables...)
+			st.NotMasked = append(st.NotMasked, rep.Columns...)
+			sort.Strings(st.NotMasked)
+			return
+		}
+	}
 }
 
 func (r *OdooSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
