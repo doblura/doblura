@@ -82,6 +82,25 @@ func (r *OdooBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	st := b.Status.DeepCopy()
 	st.ObservedGeneration = b.Generation
 
+	// Before anything expensive: are these modules for this Odoo?
+	//
+	// A build takes minutes and produces an image that is accepted by everything
+	// downstream — the registry stores it, the study counts its modules — and
+	// then fails when Odoo reads a manifest from another major. Catching it here
+	// costs one comparison of two strings.
+	//
+	// From the customer's own declared Odoo version, and only when there is one
+	// and when a ref names a series. A build that cannot be judged is not
+	// blocked: this refuses what it KNOWS is wrong, never what it cannot check.
+	if why := r.seriesRefusal(ctx, &b); why != "" {
+		st.Phase, st.Message = doblurav1alpha1.BuildFailed, why
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
+			Type: "Built", Status: metav1.ConditionFalse, Reason: "WrongOdooSeries",
+			Message: why, ObservedGeneration: b.Generation,
+		})
+		return r.saveStatus(ctx, &b, st)
+	}
+
 	name := b.Name + "-build"
 	var job batchv1.Job
 	err := r.Get(ctx, client.ObjectKey{Namespace: b.Namespace, Name: name}, &job)
@@ -107,6 +126,43 @@ func (r *OdooBuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	b.Status = *st
 	return ctrl.Result{}, r.Status().Update(ctx, &b)
+}
+
+// seriesRefusal is the sentence for modules built for a different Odoo, or "".
+func (r *OdooBuildReconciler) seriesRefusal(
+	ctx context.Context,
+	b *doblurav1alpha1.OdooBuild,
+) string {
+	if b.Spec.ForTenant == "" {
+		return "" // nothing to compare against, so nothing to say
+	}
+	var t doblurav1alpha1.OdooTenant
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: b.Namespace, Name: b.Spec.ForTenant}, &t); err != nil {
+		return ""
+	}
+	wrong := doblurav1alpha1.AddonsOnTheWrongSeries(t.Spec.OdooVersion, b.Spec.Repos)
+	if len(wrong) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"these repositories are on a different Odoo series than %s runs: %s. The "+
+			"build would succeed and the image would be refused by Odoo itself, with "+
+			"\"invalid manifest\", when an environment starts",
+		t.Name, strings.Join(wrong, "; "))
+}
+
+// saveStatus writes the status when it changed.
+func (r *OdooBuildReconciler) saveStatus(
+	ctx context.Context,
+	b *doblurav1alpha1.OdooBuild,
+	st *doblurav1alpha1.OdooBuildStatus,
+) (ctrl.Result, error) {
+	if equality.Semantic.DeepEqual(&b.Status, st) {
+		return ctrl.Result{}, nil
+	}
+	b.Status = *st
+	return ctrl.Result{}, r.Status().Update(ctx, b)
 }
 
 // readBack turns the Job and its pod into a status.

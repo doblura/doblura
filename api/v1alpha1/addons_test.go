@@ -78,3 +78,44 @@ func TestAcknowledgementIsExplicit(t *testing.T) {
 		t.Error("the acknowledgement must be long and must name the real consequence")
 	}
 }
+
+// Modules have to be for the Odoo that is going to run them.
+//
+// The failure this prevents is invisible until the last possible moment and looks
+// like something else: cloning an OCA repository at 17.0 onto an Odoo 18 image is
+// accepted by git, by buildah, by the registry and by the image study — which
+// counted the modules and reported three more than the base — and then Odoo says
+// "Module mis_builder: invalid manifest". That sentence does not contain the word
+// version, and it arrives after the expensive part.
+func TestModulesOnTheWrongOdooAreNamed(t *testing.T) {
+	repos := []AddonRepo{
+		{Name: "mis-builder", Ref: "17.0"},
+		{Name: "server-tools", Ref: "18.0"},
+		{Name: "ours", Ref: "3f9a1c2"}, // a commit says nothing about a series
+		{Name: "theirs", Ref: "main"},  // nor does a branch name
+	}
+
+	wrong := AddonsOnTheWrongSeries("18.0", repos)
+	if len(wrong) != 1 || !strings.Contains(wrong[0], "mis-builder") {
+		t.Fatalf("expected only mis-builder to be named: %v", wrong)
+	}
+
+	// It only speaks when it knows. A rule that guesses is a rule people turn off.
+	if got := AddonsOnTheWrongSeries("", repos); got != nil {
+		t.Errorf("with no version to compare against it invented findings: %v", got)
+	}
+	if got := AddonsOnTheWrongSeries("17.0", []AddonRepo{{Name: "a", Ref: "17.0"}}); got != nil {
+		t.Errorf("a matching series was reported as wrong: %v", got)
+	}
+	// "18" and "18.0" are the same major.
+	if got := AddonsOnTheWrongSeries("18", []AddonRepo{{Name: "a", Ref: "18.0"}}); got != nil {
+		t.Errorf("18 and 18.0 were treated as different: %v", got)
+	}
+	// And a two-digit series is not confused with a one-digit one.
+	if got := SeriesOf("9.0"); got != "9" {
+		t.Errorf("SeriesOf(9.0) = %q", got)
+	}
+	if got := SeriesOf("18.0-fix"); got != "" {
+		t.Errorf("a decorated branch name was read as a series: %q", got)
+	}
+}

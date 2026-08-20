@@ -319,6 +319,27 @@ func (m *EnvironmentCreator) defaultsFrom(
 			return nil, why
 		}
 		ops = append(ops, jsonpatch.NewOperation("add", "/spec/image", ref))
+
+		// The modules have to be for the Odoo that is about to run them.
+		//
+		// Refused here because everything downstream accepts the mismatch: git
+		// clones the branch, buildah copies the files, the registry stores them
+		// and the image study counts the modules. Odoo is the first thing that
+		// objects, at the end, with "invalid manifest" — a sentence that does not
+		// contain the word version and arrives after the expensive part.
+		//
+		// The declared version rather than the studied one, because this runs at
+		// admission and a study may not have happened yet. It is the customer's
+		// own statement about what they run, which is the right thing to hold
+		// them to.
+		if wrong := doblurav1alpha1.AddonsOnTheWrongSeries(
+			chosen.OdooVersion, env.Spec.Addons.Repos); len(wrong) > 0 {
+			return nil, fmt.Sprintf(
+				"these repositories are on a different Odoo series than image %q: %s. "+
+					"Odoo rejects a manifest from another major with \"invalid manifest\", "+
+					"which is discovered when the environment starts and says nothing "+
+					"about versions", chosen.Name, strings.Join(wrong, "; "))
+		}
 		if chosen.Flavor != "" {
 			// The flavour follows the image it belongs to. Written even when it
 			// equals the schema default, so the object records what was decided

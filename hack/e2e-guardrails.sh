@@ -108,6 +108,16 @@ else
   printf '  API server, and the ones that need admission will say they are skipped.\n\n'
 fi
 
+# Rejected AND for the right reason. Plain `rejected` was not enough here and the
+# first version of these checks proved it: without the lifecycle line above, all
+# three were refused because a Production environment may not be Ephemeral, and a
+# check that only asks "was it refused?" reported them as passing.
+refused_because() { # label, yaml, substring
+  out=$(printf '%s' "$2" | kubectl apply --dry-run=server -f - 2>&1)
+  if printf '%s' "$out" | grep -q "$3"; then printf '  ok    %s\n' "$1"
+  else printf '  FAIL  %s: %s\n' "$1" "$(printf '%s' "$out" | head -c 160)"; fails=$((fails+1)); fi
+}
+
 check() { # name, yaml, ok|rejected
   if printf '%s' "$2" | kubectl apply --dry-run=server -f - >/dev/null 2>&1; then r=ok; else r=rejected; fi
   if [ "$3" = "$r" ]; then printf '  ok    %s\n' "$1"; else printf '  FAIL  %s: %s (expected %s)\n' "$1" "$r" "$3"; fails=$((fails+1)); fi
@@ -186,6 +196,59 @@ check "public, everything in order"     "$ENV  exposure: {public: true, host: h.
   data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: d}}}, acknowledgeReidentificationRisk: $ACK_REID}" ok
 
 echo
+echo "-- modules for the Odoo that will run them --"
+# The failure this prevents is invisible until the last possible moment and looks
+# like something else. Cloning an OCA repository at 17.0 onto an Odoo 18 image is
+# accepted by git, by buildah, by the registry and by the image study — which
+# counted the modules and reported three more than the base — and then Odoo says
+# "Module mis_builder: invalid manifest". That sentence does not contain the word
+# version, and it arrives after the expensive part.
+#
+# Not a CEL rule: it compares the environment against its CUSTOMER's catalogue,
+# which CEL cannot see. It lives in the creator webhook, so these run only where
+# the operator is serving admission.
+if [ -n "$have_webhook" ]; then
+  MIXNS=series-guardrail
+  fresh_ns "$MIXNS"
+  kubectl apply -f - >/dev/null 2>&1 <<YAML
+apiVersion: doblura.dev/v1alpha1
+kind: OdooTenant
+metadata: {name: mix, namespace: $MIXNS}
+spec:
+  displayName: Mix
+  odooVersion: "18.0"
+  images:
+    - {name: v18, image: 'odoo:18.0', odooVersion: '18.0', default: true}
+  environmentDefaults:
+    database: {host: pg, user: odoo, passwordSecret: pg}
+YAML
+  mixenv() { # name, ref
+    printf 'apiVersion: doblura.dev/v1alpha1
+kind: OdooEnvironment
+metadata: {name: %s, namespace: '"$MIXNS"'}
+spec:
+  forTenant: mix
+  purpose: Review
+  imageRef: v18
+  data: {type: Demo}
+  addons:
+    repos:
+      - {name: r, url: "https://example.com/r.git", ref: "%s"}
+' "$1" "$2"
+  }
+  refused_because "a repository on another Odoo series" \
+    "$(mixenv wrong-series 17.0)" "different Odoo series"
+  check "the same series"            "$(mixenv right-series 18.0)" ok
+  # A commit is not a claim about a version, and refusing it would make the rule
+  # unusable for exactly the repositories a rehearsal is supposed to pin.
+  check "a commit, which says nothing" "$(mixenv a-commit 3f9a1c2e5b7d)" ok
+  check "a branch that is not a series" "$(mixenv a-branch feature-x)" ok
+  drop_ns "$MIXNS"
+else
+  echo "   SKIPPED (needs the operator serving admission)"
+fi
+echo
+
 echo "-- production is not a copy --"
 # The hardening step exists to make a COPY safe, and it ran on everything. Against
 # a Production environment with Live data — which is what the CRD tells people to
@@ -201,15 +264,6 @@ PROD="$ENV  purpose: Production
   data: {type: Live}
   lifecycle: {type: Persistent}
 "
-# Rejected AND for the right reason. Plain `rejected` was not enough here and the
-# first version of these checks proved it: without the lifecycle line above, all
-# three were refused because a Production environment may not be Ephemeral, and a
-# check that only asks "was it refused?" reported them as passing.
-refused_because() { # label, yaml, substring
-  out=$(printf '%s' "$2" | kubectl apply --dry-run=server -f - 2>&1)
-  if printf '%s' "$out" | grep -q "$3"; then printf '  ok    %s\n' "$1"
-  else printf '  FAIL  %s: %s\n' "$1" "$(printf '%s' "$out" | head -c 160)"; fails=$((fails+1)); fi
-}
 refused_because "randomised passwords on production" \
   "$PROD  security: {randomizeUserPasswords: true}" "locks every one of their users out"
 refused_because "stripping the real credentials" \

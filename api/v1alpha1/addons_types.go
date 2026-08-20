@@ -3,6 +3,12 @@
 
 package v1alpha1
 
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
+
 // ─────────────────────────── Addons ───────────────────────────
 //
 // The antipattern this type exists to avoid
@@ -285,3 +291,59 @@ const StagePath = "/stage"
 // AddonRepoMountBase is where the init container leaves the cloned repos.
 // It is an emptyDir: born empty in every pod, and that is the whole point.
 const AddonRepoMountBase = "/mnt/addons-repos"
+
+// ─────────── modules and the Odoo they are for ───────────
+
+// odooSeries matches a ref that names an Odoo series, which is the convention
+// every OCA repository and most private ones follow: a branch per major, called
+// "18.0". A ref that is not one of these — a commit, a feature branch, a tag — is
+// not a claim about a version and this file says nothing about it.
+var odooSeries = regexp.MustCompile(`^(\d{1,2})\.0$`)
+
+// SeriesOf is the Odoo major a ref names, or "" when it does not name one.
+func SeriesOf(ref string) string {
+	m := odooSeries.FindStringSubmatch(strings.TrimSpace(ref))
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// MajorOf is the major part of a version like "18.0" or "18".
+func MajorOf(version string) string {
+	major, _, _ := strings.Cut(strings.TrimSpace(version), ".")
+	return major
+}
+
+// AddonsOnTheWrongSeries names the repositories whose branch is for a different
+// Odoo than the one they are about to run on.
+//
+// This exists because the failure it prevents is invisible until the last
+// possible moment and looks like something else entirely. Cloning OCA/mis-builder
+// at 17.0 onto an Odoo 18 image is accepted by git, by buildah, by the registry
+// and by the image study — which cheerfully counted three extra modules — and
+// then Odoo says:
+//
+//	ValueError: Module mis_builder: invalid manifest
+//
+// Nothing in that sentence mentions a version, and nothing before that step can
+// catch it. This can, from two strings, before anything runs.
+//
+// It only speaks when it KNOWS. An empty version, or a ref that does not name a
+// series, produces no finding: a rule that guesses is a rule people turn off.
+func AddonsOnTheWrongSeries(odooVersion string, repos []AddonRepo) []string {
+	want := MajorOf(odooVersion)
+	if want == "" {
+		return nil
+	}
+	var wrong []string
+	for _, r := range repos {
+		got := SeriesOf(r.Ref)
+		if got == "" || got == want {
+			continue
+		}
+		wrong = append(wrong, fmt.Sprintf("%s is on branch %s and this runs Odoo %s",
+			r.Name, r.Ref, want))
+	}
+	return wrong
+}
