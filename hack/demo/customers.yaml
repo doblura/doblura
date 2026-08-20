@@ -18,6 +18,10 @@ kind: OdooTenant
 metadata: {name: acme, namespace: demo}
 spec:
   displayName: Acme Distribución, S.L.
+  # The one screen a customer reads is in the customer's language — decision 10.
+  # Without this the demo never shows the only localized page in the product, and
+  # a screenshot of it in English is a screenshot of a feature nobody built.
+  language: es
   # Environments get generated names under this domain. Production never does.
   domain: acme.example
   odooVersion: "18.0"

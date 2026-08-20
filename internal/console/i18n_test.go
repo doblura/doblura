@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	doblurav1alpha1 "github.com/doblura/doblura/api/v1alpha1"
 )
 
 // Every string the catalogue has in one language, it has in the other.
@@ -70,5 +72,36 @@ func TestTheStatusTemplateAsksForStringsThatExist(t *testing.T) {
 			t.Errorf("the template asks for %q and the catalogue has no such string, "+
 				"so the page renders the id", m[1])
 		}
+	}
+}
+
+// The purposes are translated, and the ordering is not.
+//
+// They were printed raw, so a Spanish page read "prod · Production · lleva así 2
+// horas" — a page translated except for the nouns, on the only screen a customer
+// ever sees. And translating them in place silently changed the sort: production
+// is first because it is production, not because of where its name falls in the
+// alphabet of whichever language the reader has.
+func TestThePurposesAreTranslatedAndTheOrderingIsNot(t *testing.T) {
+	if got := purposeIn(localeES, doblurav1alpha1.PurposeProduction); got != "Producción" {
+		t.Errorf("Production in Spanish is %q", got)
+	}
+	if got := purposeIn(localeEN, doblurav1alpha1.PurposeProduction); got != "Production" {
+		t.Errorf("Production in English is %q", got)
+	}
+	// A purpose nobody translated shows up as itself rather than vanishing.
+	if got := purposeIn(localeES, doblurav1alpha1.EnvPurpose("Sandbox")); got != "Sandbox" {
+		t.Errorf("an untranslated purpose became %q", got)
+	}
+	if purposeIn(localeES, "") != "" {
+		t.Error("no purpose must stay no purpose, not become a word")
+	}
+	// The rank is over the spec value in both languages.
+	if purposeRank(string(doblurav1alpha1.PurposeProduction)) != 0 {
+		t.Error("production is not first")
+	}
+	if purposeRank("Producción") == 0 {
+		t.Error("the rank is being computed over a translated string, so the order " +
+			"of a customer's page depends on their language")
 	}
 }

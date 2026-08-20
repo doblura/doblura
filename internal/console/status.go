@@ -55,6 +55,10 @@ type statusRow struct {
 	// "Production" beside a single row is noise and beside three rows is the
 	// difference between panicking and not.
 	Purpose string
+	// RankBy is the untranslated purpose, kept because the ordering is about what
+	// the thing IS and must not change with the reader's language. Translating
+	// Purpose in place silently sorted a Spanish page differently.
+	RankBy string
 	// State is the stylesheet's word: up, degraded, down, building, asleep.
 	State string
 	// Headline is what a person says out loud: "It is working".
@@ -105,6 +109,23 @@ type statusView struct {
 	// looking at.
 	Scope  string
 	Denied string
+}
+
+// purposeIn is the purpose in the reader's language, or the raw value when there
+// is no translation for it — a new purpose should appear untranslated rather than
+// disappear.
+func purposeIn(l locale, p doblurav1alpha1.EnvPurpose) string {
+	if p == "" {
+		return ""
+	}
+	// say() returns the ID when the catalogue has no entry — the usual fallback,
+	// and the reason this compares against the id rather than against "": an
+	// unknown purpose came out as the literal "purpose-Sandbox".
+	id := "purpose-" + string(p)
+	if s := say(l, id); s != "" && s != id {
+		return s
+	}
+	return string(p)
 }
 
 // handleStatus renders it.
@@ -173,7 +194,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, id Identit
 	sort.Slice(view.Rows, func(i, j int) bool {
 		// Production first. On the day it matters, it is the row somebody is
 		// looking for, and alphabetical order puts it wherever its name lands.
-		pi, pj := purposeRank(view.Rows[i].Purpose), purposeRank(view.Rows[j].Purpose)
+		pi, pj := purposeRank(view.Rows[i].RankBy), purposeRank(view.Rows[j].RankBy)
 		if pi != pj {
 			return pi < pj
 		}
@@ -212,7 +233,8 @@ func (s *Server) statusOf(
 	row := statusRow{
 		Name:     env.Name,
 		Customer: env.Spec.ForTenant,
-		Purpose:  string(env.Spec.Purpose),
+		Purpose:  purposeIn(l, env.Spec.Purpose),
+		RankBy:   string(env.Spec.Purpose),
 	}
 
 	// Readiness from the Deployment, which is what actually decides whether

@@ -53,6 +53,30 @@ var catalogue = map[string]map[locale]string{
 		localeEN: "look now",
 		localeES: "míralo ahora",
 	},
+	// The purposes, on the one page written in the customer's language.
+	//
+	// They are enum values from the CRD and they were printed raw, so a Spanish
+	// sentence read "prod · Production · lleva así 2 horas". A page that is
+	// translated except for the nouns is a page that looks half-translated, which
+	// is the impression it must not give: it is the only screen a customer sees.
+	"purpose-Production": {
+		localeEN: "Production",
+		localeES: "Producción",
+	},
+	"purpose-Staging": {
+		localeEN: "Staging",
+		localeES: "Preproducción",
+	},
+	"purpose-QA": {
+		localeEN: "QA",
+		// Left as QA: it is what the people who use it call it in Spanish too,
+		// and "control de calidad" in a status line reads as a different thing.
+		localeES: "QA",
+	},
+	"purpose-Review": {
+		localeEN: "Review",
+		localeES: "Revisión",
+	},
 	"cannot-tell": {
 		localeEN: "We cannot tell you right now",
 		localeES: "Ahora mismo no podemos decírtelo",

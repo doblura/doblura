@@ -44,8 +44,17 @@ curl -sf -c "$jar" -b "$jar" -X POST "$CONSOLE/auth/login" \
 
 shot() { # path, name, theme
   curl -s -c "$jar" -b "$jar" "$CONSOLE/theme?to=$3&back=/" -o /dev/null
-  curl -sf -b "$jar" "$CONSOLE$1" \
-    | sed "s|href=\"/assets/|href=\"$CONSOLE/assets/|g" > "$WORK/$2.html"
+  if ! curl -sf -b "$jar" "$CONSOLE$1" \
+      | sed "s|href=\"/assets/|href=\"$CONSOLE/assets/|g" > "$WORK/$2.html"; then
+    echo "  !! $1 did not answer; not shooting $2" >&2
+    return 1
+  fi
+  # A page that rendered an error is not a screenshot of the console. This script
+  # used to name objects that no longer existed and shoot the 404 page for them.
+  if grep -q "class=\"problem\"\|Not Found" "$WORK/$2.html"; then
+    echo "  !! $1 rendered an error page; not shooting $2" >&2
+    return 1
+  fi
   "$CHROME" --headless=new --disable-gpu --hide-scrollbars \
     --window-size=1400,880 --force-device-scale-factor=2 \
     --virtual-time-budget=4000 --allow-file-access-from-files \
@@ -53,11 +62,20 @@ shot() { # path, name, theme
   printf '  %s\n' "$OUT/$2.png"
 }
 
+# The pages, named after what hack/demo-lab.sh actually creates. They used to
+# name url-staging and rb-nightly, objects from a cluster that was built by hand
+# and then deleted — so this script silently shot 404 pages.
 shot /                     console-overview-light     light
 shot /                     console-overview-dark      dark
 shot /c/demo/acme          console-customer-light     light
-shot /e/demo/url-staging   console-environment-light  light
-shot /b/demo/rb-nightly    console-backup-light       light
+shot /e/demo/prod          console-production-light   light
+shot /e/demo/pr-482        console-review-dark        dark
+shot /o/snapshots          console-snapshots-light    light
+# No theme claim in the name: the customer's status page has no theme control of
+# its own — it is not part of the console's furniture — so it follows whatever
+# the reader's machine says, which is the right behaviour and makes "light" in a
+# filename a lie.
+shot /status/demo          console-status             light
 
 # Leave the account as it was found: the theme is a cookie on this session, but
 # somebody running this against a console they use would rather it did not choose
