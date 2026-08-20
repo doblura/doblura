@@ -239,3 +239,68 @@ func TestHardeningCutsIncomingMailToo(t *testing.T) {
 		t.Error("dollar quoting in a container argument arrives as a single $")
 	}
 }
+
+// Production is not a copy, and hardening is what makes a copy safe.
+//
+// This ran on every environment. Pointed at a customer's real database — which
+// is what purpose Production with data.type Live means, and what the CRD tells
+// people to write — it randomised every user's password, deleted the API tokens
+// their integrations run on, switched off outgoing mail and every scheduled
+// action, and once the neutralize command was fixed to actually run it would
+// have disabled their payment providers.
+//
+// Measured before it was fixed: `UPDATE 5` on res_users of a Production
+// environment in the demo lab. An operator for the delivery lifecycle must not
+// have a code path that destroys the thing being delivered.
+func TestHardeningLeavesProductionAlone(t *testing.T) {
+	prod := &doblurav1alpha1.OdooEnvironment{
+		ObjectMeta: metav1.ObjectMeta{Name: "e", Namespace: "d"},
+		Spec: doblurav1alpha1.OdooEnvironmentSpec{
+			Image:    "img",
+			Purpose:  doblurav1alpha1.PurposeProduction,
+			Database: doblurav1alpha1.DatabaseSpec{Host: "h", User: "u", PasswordSecret: "s"},
+			Data:     doblurav1alpha1.EnvData{Type: doblurav1alpha1.DataLive},
+			Storage: &doblurav1alpha1.StorageSpec{
+				Filestore: &doblurav1alpha1.FilestoreSpec{Mode: doblurav1alpha1.FilestoreDatabase},
+			},
+		},
+	}
+	got := envHardenScript(prod)
+	for _, mustNot := range []string{
+		"UPDATE res_users SET password",
+		"DELETE FROM ir_config_parameter",
+		"odoo neutralize",
+		"UPDATE ir_mail_server SET active = false",
+		"UPDATE ir_cron SET active = false",
+		"fetchmail_server",
+	} {
+		if strings.Contains(got, mustNot) {
+			t.Errorf("a Production environment is the customer's real system and this "+
+				"would run against it:\n  %s", mustNot)
+		}
+	}
+	// The filestore decision is not part of the copy protection: it is where
+	// attachments live, and it is as valid in production as anywhere.
+	if !strings.Contains(got, "ir_attachment.location") {
+		t.Error("the filestore decision still applies to production")
+	}
+
+	// And every other purpose keeps all of it.
+	for _, p := range []doblurav1alpha1.EnvPurpose{
+		doblurav1alpha1.PurposeReview,
+		doblurav1alpha1.PurposeQA,
+		doblurav1alpha1.PurposeStaging,
+		"", // no purpose declared at all is not a claim to be production
+	} {
+		copy := prod.DeepCopy()
+		copy.Spec.Purpose = p
+		s := envHardenScript(copy)
+		for _, must := range []string{
+			"UPDATE res_users SET password", "odoo neutralize", "UPDATE ir_cron SET active = false",
+		} {
+			if !strings.Contains(s, must) {
+				t.Errorf("purpose %q is a copy and must still get: %s", p, must)
+			}
+		}
+	}
+}

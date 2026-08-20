@@ -173,6 +173,42 @@ check "public without the reident ack"  "$ENV  exposure: {public: true, host: h.
   data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: d}}}}" rejected
 check "public, everything in order"     "$ENV  exposure: {public: true, host: h.x}
   data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: d}}}, acknowledgeReidentificationRisk: $ACK_REID}" ok
+
+echo
+echo "-- production is not a copy --"
+# The hardening step exists to make a COPY safe, and it ran on everything. Against
+# a Production environment with Live data — which is what the CRD tells people to
+# write for the customer's real system — it randomised every user's password,
+# deleted the API tokens their integrations run on, and switched off mail and every
+# scheduled action. Measured in the demo lab before it was fixed: UPDATE 5 on
+# res_users of a production database.
+#
+# The controller no longer does any of it there. These two say the API server will
+# not accept the request either: a field that is accepted and then ignored is the
+# defect this project keeps finding in itself.
+PROD="$ENV  purpose: Production
+  data: {type: Live}
+  lifecycle: {type: Persistent}
+"
+# Rejected AND for the right reason. Plain `rejected` was not enough here and the
+# first version of these checks proved it: without the lifecycle line above, all
+# three were refused because a Production environment may not be Ephemeral, and a
+# check that only asks "was it refused?" reported them as passing.
+refused_because() { # label, yaml, substring
+  out=$(printf '%s' "$2" | kubectl apply --dry-run=server -f - 2>&1)
+  if printf '%s' "$out" | grep -q "$3"; then printf '  ok    %s\n' "$1"
+  else printf '  FAIL  %s: %s\n' "$1" "$(printf '%s' "$out" | head -c 160)"; fails=$((fails+1)); fi
+}
+refused_because "randomised passwords on production" \
+  "$PROD  security: {randomizeUserPasswords: true}" "locks every one of their users out"
+refused_because "stripping the real credentials" \
+  "$PROD  security: {stripExternalCredentials: true}" "real API tokens and webhook URLs"
+# And the same fields on a copy, which is what they are for.
+check "randomised passwords on a review"   "$ENV  purpose: Review
+  data: {type: Demo}
+  security: {randomizeUserPasswords: true}" ok
+# Turning them OFF on production is not a request to do anything, so it is fine.
+check "production saying so explicitly"    "$PROD  security: {randomizeUserPasswords: false, stripExternalCredentials: false}" ok
 check "private with real data"          "$ENV  data: {type: Snapshot, snapshot: {from: {type: Volume, volume: {claimName: d}}}}" ok
 check "Snapshot without the snapshot field" "$ENV  data: {type: Snapshot}" rejected
 

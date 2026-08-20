@@ -541,8 +541,26 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("echo \">> hardening %s\"\n", db))
 
+	// PRODUCTION IS NOT A COPY, and everything in this function except the
+	// filestore decision exists to make a copy safe.
+	//
+	// This ran on every environment, Production included. Pointed at a customer's
+	// real database — which is exactly what purpose Production with data.type Live
+	// means, and what the CRD tells people to write — it randomised every user's
+	// password, deleted the API tokens and webhook URLs their integrations run on,
+	// switched off outgoing mail and every scheduled action, and (once the
+	// neutralize command was fixed to actually run) would have disabled their
+	// payment providers. Measured, not reasoned about: `UPDATE 5` on res_users of a
+	// Production environment in the demo lab.
+	//
+	// There is no acknowledgement for this and no flag to set. An operator whose
+	// job is the delivery lifecycle must not have a code path that destroys the
+	// thing being delivered, and a purpose that means "this is the customer's real
+	// system" is the clearest signal a CRD can carry.
+	copyOfSomethingReal := env.Spec.Purpose != doblurav1alpha1.PurposeProduction
+
 	sec := env.Spec.Security
-	if sec.RandomizeUserPasswords == nil || *sec.RandomizeUserPasswords {
+	if copyOfSomethingReal && (sec.RandomizeUserPasswords == nil || *sec.RandomizeUserPasswords) {
 		admins := sec.AdminUsers
 		if len(admins) == 0 {
 			admins = []string{"admin"}
@@ -605,7 +623,7 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 		b.WriteString(`fi` + "\n")
 	}
 
-	if sec.StripExternalCredentials == nil || *sec.StripExternalCredentials {
+	if copyOfSomethingReal && (sec.StripExternalCredentials == nil || *sec.StripExternalCredentials) {
 		// The gap neutralization leaves open. `odoo neutralize` cuts mail, crons,
 		// payment providers and carriers; it does not touch the API tokens and
 		// webhook URLs your own modules keep in ir_config_parameter. That is how
@@ -635,57 +653,68 @@ func envHardenScript(env *doblurav1alpha1.OdooEnvironment) string {
 
 	// Belt and braces on top of whatever the snapshot already neutralized: this
 	// environment may be reachable from the internet.
-	b.WriteString(`echo ">> re-asserting neutralization"` + "\n")
-	// The SUBCOMMAND COMES FIRST. `odoo -c conf neutralize -d db` never ran: Odoo
-	// takes the first argument as the command, sees `-c`, falls back to `server`,
-	// and dies on `neutralize` as a stray positional. The `|| true` — put there for
-	// images older than v16, which do not have the command — then swallowed it, so
-	// a mistake that made this line a no-op on EVERY image looked exactly like the
-	// case it was written to tolerate.
 	//
-	// What was therefore never applied: payment providers and delivery carriers,
-	// and every module's own data/neutralize.sql. The SQL below covers mail and
-	// crons and nothing else — so a copy of production kept live payment providers,
-	// which is the one item on that list that moves real money.
-	b.WriteString(fmt.Sprintf(
-		"odoo neutralize -c %s -d \"%s\" || "+
-			"echo \">> WARNING: odoo neutralize did not run; only the SQL below applies, \"\\\n"+
-			"        \"which does not touch payment providers or delivery carriers\"\n",
-		envConf, db))
-	b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\nBEGIN;\n")
-	b.WriteString("UPDATE ir_mail_server SET active = false;\n")
-	// INCOMING mail as well, which this list did not cut and the snapshot's
-	// identical list did. The asymmetry was silent and the consequence is worse
-	// than the outgoing one: a copy of production polling the customer's real
-	// mailbox CONSUMES the messages it reads — fetchmail marks them seen or
-	// deletes them — so mail meant for the real system arrives in a copy nobody
-	// is watching and is gone from the inbox. A wrong outgoing message at least
-	// leaves a trace with the person who received it.
-	//
-	// Not here: this statement has to leave the transaction below, because the
-	// table may not exist and psql resolves a relation while PARSING. See the
-	// separate psql call after the block.
-	b.WriteString("UPDATE ir_cron SET active = false;\n")
-	b.WriteString("COMMIT;\nSQL\n")
+	// Not on Production. Neutralization is what makes a COPY safe — no mail, no
+	// crons, no payment providers — and every one of those is something the
+	// customer's real system is supposed to do.
+	if !copyOfSomethingReal {
+		// And an early return would have been wrong here too: a Production
+		// environment may declare spec.mail — it is the one purpose that may,
+		// without an acknowledgement — and returning here would skip writing it.
+		b.WriteString(`echo ">> production: its crons, its payment providers and its` +
+			` own credentials are left alone"` + "\n")
+	} else {
+		b.WriteString(`echo ">> re-asserting neutralization"` + "\n")
+		// The SUBCOMMAND COMES FIRST. `odoo -c conf neutralize -d db` never ran: Odoo
+		// takes the first argument as the command, sees `-c`, falls back to `server`,
+		// and dies on `neutralize` as a stray positional. The `|| true` — put there for
+		// images older than v16, which do not have the command — then swallowed it, so
+		// a mistake that made this line a no-op on EVERY image looked exactly like the
+		// case it was written to tolerate.
+		//
+		// What was therefore never applied: payment providers and delivery carriers,
+		// and every module's own data/neutralize.sql. The SQL below covers mail and
+		// crons and nothing else — so a copy of production kept live payment providers,
+		// which is the one item on that list that moves real money.
+		b.WriteString(fmt.Sprintf(
+			"odoo neutralize -c %s -d \"%s\" || "+
+				"echo \">> WARNING: odoo neutralize did not run; only the SQL below applies, \"\\\n"+
+				"        \"which does not touch payment providers or delivery carriers\"\n",
+			envConf, db))
+		b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\nBEGIN;\n")
+		b.WriteString("UPDATE ir_mail_server SET active = false;\n")
+		// INCOMING mail as well, which this list did not cut and the snapshot's
+		// identical list did. The asymmetry was silent and the consequence is worse
+		// than the outgoing one: a copy of production polling the customer's real
+		// mailbox CONSUMES the messages it reads — fetchmail marks them seen or
+		// deletes them — so mail meant for the real system arrives in a copy nobody
+		// is watching and is gone from the inbox. A wrong outgoing message at least
+		// leaves a trace with the person who received it.
+		//
+		// It is not in this transaction, though: the table may not exist and psql
+		// resolves a relation while PARSING. It gets its own call, below.
+		b.WriteString("UPDATE ir_cron SET active = false;\n")
+		b.WriteString("COMMIT;\nSQL\n")
 
-	// Incoming mail, in its own statement and its own transaction.
-	//
-	// fetchmail is a module and may not be installed, and both obvious guards
-	// fail. A WHERE clause does not help: Postgres resolves the relation while
-	// PARSING, so a missing table is an error before the WHERE is evaluated —
-	// and under ON_ERROR_STOP=1 it took the two lines above with it. A
-	// dollar-quoted DO block does not survive either: this script reaches the
-	// container as an ARGUMENT, where Kubernetes rewrites $$ into a single $, so
-	// it arrived as "DO $ BEGIN" and psql reported a syntax error at a character
-	// nobody wrote. Both of those were measured in the demo lab, one after the
-	// other, within ten minutes.
-	//
-	// So psql decides. The UPDATE is a STRING until \gexec runs it, and \gexec
-	// runs nothing when the SELECT returns no rows.
-	b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\n" +
-		"SELECT 'UPDATE fetchmail_server SET active = false'\n" +
-		"WHERE to_regclass('fetchmail_server') IS NOT NULL\n" +
-		"\\gexec\nSQL\n")
+		// Incoming mail, in its own statement and its own transaction.
+		//
+		// fetchmail is a module and may not be installed, and both obvious guards
+		// fail. A WHERE clause does not help: Postgres resolves the relation while
+		// PARSING, so a missing table is an error before the WHERE is evaluated —
+		// and under ON_ERROR_STOP=1 it took the two lines above with it. A
+		// dollar-quoted DO block does not survive either: this script reaches the
+		// container as an ARGUMENT, where Kubernetes rewrites $$ into a single $, so
+		// it arrived as "DO $ BEGIN" and psql reported a syntax error at a character
+		// nobody wrote. Both of those were measured in the demo lab, one after the
+		// other, within ten minutes.
+		//
+		// So psql decides. The UPDATE is a STRING until \gexec runs it, and \gexec
+		// runs nothing when the SELECT returns no rows.
+		b.WriteString("psql -v ON_ERROR_STOP=1 <<'SQL'\n" +
+			"SELECT 'UPDATE fetchmail_server SET active = false'\n" +
+			"WHERE to_regclass('fetchmail_server') IS NOT NULL\n" +
+			"\\gexec\nSQL\n")
+	}
 
 	// Mail goes in AFTER everything above has switched it off.
 	//
