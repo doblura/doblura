@@ -337,7 +337,16 @@ type EnvSecurity struct {
 	// carries the same known password for every user, because a rehearsal
 	// without an ingress needs that to be validated by hand. Serving that same
 	// dump on a public URL hands over the administrator account.
-	// +kubebuilder:default=true
+	//
+	// NOT ON PRODUCTION, where it is refused outright: that is the customer's real
+	// system and this locks every one of their users out.
+	//
+	// No schema default, deliberately. It defaults to on for every purpose but
+	// Production, and a `+kubebuilder:default=true` is applied by the API server
+	// before anything else runs — so nothing downstream, webhook or CEL, can tell
+	// a value somebody asked for from a value the schema filled in. With the
+	// default in place the rule below refused every Production environment ever
+	// created, including ones whose author had never heard of this field.
 	// +optional
 	RandomizeUserPasswords *bool `json:"randomizeUserPasswords,omitempty"`
 
@@ -366,7 +375,10 @@ type EnvSecurity struct {
 	// Neutralizing cuts mail, crons, payments and carriers. It does NOT touch
 	// the credentials your own modules store there. That is the gap through
 	// which a test environment ends up writing into a supplier's ERP.
-	// +kubebuilder:default=true
+	//
+	// NOT ON PRODUCTION, where it is refused outright: those are the real tokens
+	// the customer's integrations run on. No schema default, for the reason given
+	// on RandomizeUserPasswords.
 	// +optional
 	StripExternalCredentials *bool `json:"stripExternalCredentials,omitempty"`
 }

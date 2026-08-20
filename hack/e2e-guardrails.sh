@@ -39,9 +39,19 @@ kubectl() { command kubectl --context "$CONTEXT" "$@"; }
 # that, a cluster that happened to have a namespace called `data-guardrail` in it
 # would lose it to a script clearing up after a run that never happened here.
 GUARD_LABEL=doblura.dev/guardrail-namespace
+# What THIS run created, which is the answer that cannot be wrong. The label is
+# the fallback for a previous run that was interrupted before its cleanup, and it
+# is a read against the API server — which can fail transiently, and did: CI
+# refused to delete a namespace this run had created and labelled seconds earlier,
+# while the same code passed locally. A guard that stops the script on a flake is
+# a guard people turn off.
+OWNED_NS=" "
 
 drop_ns() { # name — delete it, but only if this script created it
   kubectl get namespace "$1" >/dev/null 2>&1 || return 0
+  case "$OWNED_NS" in
+    *" $1 "*) kubectl delete namespace "$1" --wait=false >/dev/null 2>&1; return 0 ;;
+  esac
   if kubectl get namespace -l "$GUARD_LABEL=true" -o name 2>/dev/null | grep -qx "namespace/$1"; then
     kubectl delete namespace "$1" --wait=false >/dev/null 2>&1
     return 0
@@ -57,6 +67,7 @@ fresh_ns() { # name — ours, empty, and labelled as ours
   kubectl wait --for=delete "namespace/$1" --timeout=120s >/dev/null 2>&1
   kubectl create namespace "$1" >/dev/null 2>&1
   kubectl label namespace "$1" "$GUARD_LABEL=true" --overwrite >/dev/null 2>&1
+  OWNED_NS="$OWNED_NS$1 "
 }
 
 # Two ways to run this, and the difference is whether an operator is installed.
@@ -1071,6 +1082,7 @@ if ! kubectl create namespace $NS >/dev/null 2>&1; then
   echo; echo "  $((fails+1)) guardrail(s) failed"; exit 1
 fi
 kubectl label namespace $NS "$GUARD_LABEL=true" --overwrite >/dev/null 2>&1
+OWNED_NS="$OWNED_NS$NS "
 
 # The two people are bound to the SUPPORT persona, which is the role this quota
 # exists for: it can create and delete ephemeral environments and nothing else.
