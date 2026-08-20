@@ -53,6 +53,32 @@ RUN pip3 install --no-cache-dir --break-system-packages click-odoo-contrib \
       "$c" --help >/dev/null || { echo "MISSING: $c"; exit 1; }; \
     done
 
+# greenmask, the anonymization engine.
+#
+# Not optional in practice: OdooSnapshot's mask engine DEFAULTS to greenmask, so
+# an image without it fails the snapshot pipeline at its last step with
+# "greenmask: not found" — after copying production, neutralizing it and masking
+# it. Measured on this very image before this layer existed. doblura does not do
+# its own anonymization (README: it configures greenmask), which makes greenmask
+# part of the contract exactly like click-odoo-contrib, not an opinion.
+#
+# Pinned. An anonymizer that changes under a customer between two runs of the same
+# OdooSnapshot is a data-protection change nobody approved.
+ARG GREENMASK_VERSION=v0.2.22
+RUN set -eu; \
+    arch=$(dpkg --print-architecture); \
+    case "$arch" in \
+      amd64) asset=greenmask-linux-amd64.tar.gz ;; \
+      arm64) asset=greenmask-linux-arm64.tar.gz ;; \
+      *) echo "no greenmask build for $arch"; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/greenmask.tar.gz \
+      "https://github.com/GreenmaskIO/greenmask/releases/download/${GREENMASK_VERSION}/${asset}"; \
+    tar -xzf /tmp/greenmask.tar.gz -C /usr/local/bin greenmask; \
+    rm -f /tmp/greenmask.tar.gz; \
+    chmod 0755 /usr/local/bin/greenmask; \
+    greenmask --version
+
 # Everything below is a check, not an install. The image is only useful if these
 # hold, and a build that fails is enormously cheaper than an environment that
 # comes up and cannot be restored.
@@ -71,7 +97,9 @@ RUN set -eu; \
     # The database client tools, which every restore and backup shells out to.
     psql --version >/dev/null || { echo "no psql"; exit 1; }; \
     pg_dump --version >/dev/null || { echo "no pg_dump"; exit 1; }; \
-    echo "odoo $real, click-odoo-contrib, wkhtmltopdf and the postgres client are all present"
+    pg_restore --version >/dev/null || { echo "no pg_restore"; exit 1; }; \
+    greenmask --version >/dev/null || { echo "no greenmask"; exit 1; }; \
+    echo "odoo $real, click-odoo-contrib, greenmask, wkhtmltopdf and the postgres client are all present"
 
 # Back to the unprivileged user the official image defines. Doblura's Official
 # flavour expects exactly this: user odoo, command `odoo`, entrypoint from the

@@ -69,6 +69,33 @@ func snapshotPodTemplate(snap *doblurav1alpha1.OdooSnapshot) corev1.PodTemplateS
 		}
 	}
 
+	// THE DESTINATION, which was never mounted.
+	//
+	// The upload step ends with `cp -r /scratch/dump/. /snapshot/`, and no volume
+	// was ever attached at /snapshot — so the copy landed on the container's own
+	// read-only root filesystem and every snapshot to a Volume destination failed
+	// at its last step, after copying production, neutralizing it, masking it and
+	// dumping it. The four expensive steps worked and the result went nowhere.
+	//
+	// On the upload container only. An init step that could write the destination
+	// could leave a partial dump there for something else to pick up as finished.
+	uploadMounts := mounts
+	if snap.Spec.To.Type == doblurav1alpha1.ProviderVolume && snap.Spec.To.Volume != nil {
+		vols = append(vols, corev1.Volume{
+			Name: "destination",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: snap.Spec.To.Volume.ClaimName,
+				},
+			},
+		})
+		uploadMounts = append(append([]corev1.VolumeMount{}, mounts...), corev1.VolumeMount{
+			Name:      "destination",
+			MountPath: doblurav1alpha1.SnapshotMountPath,
+			SubPath:   snap.Spec.To.Volume.SubPath,
+		})
+	}
+
 	inits := []corev1.Container{
 		step("1-copy", copyScript(work)),
 		step("2-neutralize", neutralizeScript(work, "/etc/doblura/odoo.conf")),
@@ -84,13 +111,21 @@ func snapshotPodTemplate(snap *doblurav1alpha1.OdooSnapshot) corev1.PodTemplateS
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
 			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot:   ptr(true),
-				RunAsUser:      ptr(int64(65532)),
+				RunAsNonRoot: ptr(true),
+				RunAsUser:    ptr(int64(65532)),
+				// So the destination volume is writable by that user. Without it
+				// the claim belongs to root and the upload fails with a permission
+				// error one layer below the one it looks like.
+				FSGroup:        ptr(int64(65532)),
 				SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 			},
 			InitContainers: inits,
-			Containers:     []corev1.Container{step("5-upload", uploadScript(snap))},
-			Volumes:        vols,
+			Containers: []corev1.Container{func() corev1.Container {
+				c := step("5-upload", uploadScript(snap))
+				c.VolumeMounts = uploadMounts
+				return c
+			}()},
+			Volumes: vols,
 		},
 	}
 }
@@ -129,11 +164,100 @@ echo ">> masked"`
 	}
 }
 
+// greenmaskPrune drops masking rules for tables this database does not have.
+//
+// greenmask treats a rule naming a missing table as FATAL — five of them, and it
+// refuses to dump at all. doblura's default rule set covers crm_lead,
+// hr_employee, mail_message and the rest, and plenty of real installations have
+// never installed CRM or HR. Without this, a snapshot of such a database could
+// never succeed, and the message would be about a table nobody wrote down.
+//
+// It happens HERE and not when the config is generated, because only the pod can
+// ask: the manager holds no database credential, and that is deliberate.
+//
+// It PRINTS what it dropped. A filter that quietly removes masking rules is a
+// filter that quietly stops anonymizing a column, and the whole point of this
+// pipeline is that somebody can say what was masked.
+const greenmaskPrune = `python3 - <<'PRUNE'
+import yaml, subprocess, sys
+
+cfg = "/etc/doblura/greenmask.yaml"
+with open(cfg) as fh:
+    doc = yaml.safe_load(fh)
+
+have = set(subprocess.run(
+    ["psql", "-tAX", "-c",
+     "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"],
+    capture_output=True, text=True, check=True).stdout.split())
+
+# Columns too, and for the same reason. Odoo's schema differs by version and by
+# which modules are installed: res_partner.email_normalized exists in some
+# majors and not others, and greenmask treats a rule naming an absent column as
+# fatal exactly as it does an absent table.
+cols = {}
+for line in subprocess.run(
+        ["psql", "-tAX", "-F", "\t", "-c",
+         "SELECT table_name, column_name FROM information_schema.columns "
+         "WHERE table_schema = 'public'"],
+        capture_output=True, text=True, check=True).stdout.splitlines():
+    if "\t" in line:
+        t, c = line.split("\t", 1)
+        cols.setdefault(t, set()).add(c)
+
+def wanted(tr, table):
+    """The columns one transformer touches: 'column', or 'columns[].name'."""
+    p = tr.get("params") or {}
+    if "column" in p:
+        return [p["column"]]
+    return [c.get("name") for c in (p.get("columns") or []) if isinstance(c, dict)]
+
+dropped_cols = []
+
+def prune_columns(rule):
+    table = rule.get("name")
+    kept = []
+    for tr in rule.get("transformers") or []:
+        missing = [c for c in wanted(tr, table) if c not in cols.get(table, set())]
+        if missing:
+            dropped_cols.extend(table + "." + c for c in missing)
+            continue
+        kept.append(tr)
+    rule["transformers"] = kept
+    return rule
+
+rules = doc.get("dump", {}).get("transformation") or []
+keep = [prune_columns(r) for r in rules if r.get("name") in have]
+keep = [r for r in keep if r.get("transformers")]
+gone = sorted({r.get("name") for r in rules if r.get("name") not in have})
+if gone:
+    print(">> not in this database, so not masked: " + ", ".join(gone))
+if dropped_cols:
+    print(">> columns not in this database, so not masked: " + ", ".join(sorted(dropped_cols)))
+if not keep and rules:
+    print("!! none of the tables this snapshot masks exist in the source database.",
+          file=sys.stderr)
+    print("!! that is not an anonymized dump, it is a dump. Refusing.", file=sys.stderr)
+    sys.exit(1)
+doc["dump"]["transformation"] = keep
+with open("/tmp/greenmask.yaml", "w") as fh:
+    yaml.safe_dump(doc, fh, sort_keys=False)
+PRUNE
+`
+
 func dumpScript(snap *doblurav1alpha1.OdooSnapshot, work string) string {
 	if snap.Spec.Mask.Engine == doblurav1alpha1.EngineGreenmask || snap.Spec.Mask.Engine == "" {
+		// The collection step is not `|| true`. It was, and it hid the only
+		// failure that matters here: if the dump is not where the next step looks,
+		// the snapshot reports success and produces nothing — the exact shape of
+		// silence this project keeps removing. greenmask writes one directory per
+		// dump under its storage path; the newest one is this run's.
 		return `echo ">> dumping with greenmask (masks on the fly)"
-greenmask --config /etc/doblura/greenmask.yaml dump
-cp -r "$(greenmask --config /etc/doblura/greenmask.yaml list-dumps --format=json | head -1)" /scratch/dump || true
+mkdir -p ` + greenmaskOut + `
+` + greenmaskPrune + `
+greenmask --config /tmp/greenmask.yaml dump
+d=$(ls -1dt ` + greenmaskOut + `/*/ 2>/dev/null | head -1)
+if [ -z "$d" ]; then echo "greenmask reported success and produced no dump" >&2; exit 1; fi
+mv "$d" /scratch/dump
 echo ">> dumped"`
 	}
 	// With SQL or Custom the database is already clean: a plain pg_dump, with the

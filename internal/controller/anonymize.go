@@ -16,6 +16,12 @@ import (
 // Generated rather than asked of the user on purpose: hand-writing rules for
 // seventy Odoo columns is where the mistakes that matter get made, and the
 // resulting YAML ends up in an auditable ConfigMap.
+// greenmaskOut is where greenmask puts what it produces, inside the pod's
+// scratch volume. Named once and used by both the config and the script that
+// collects the result: two places agreeing by coincidence is how the dump ends up
+// somewhere nobody looks.
+const greenmaskOut = "/scratch/greenmask"
+
 func greenmaskConfig(s *doblurav1alpha1.OdooSnapshotSpec, dbName string) string {
 	rules := s.RulesToApply()
 
@@ -42,6 +48,21 @@ func greenmaskConfig(s *doblurav1alpha1.OdooSnapshotSpec, dbName string) string 
 	// footgun that already cost an afternoon on the client/server mismatch, so
 	// greenmask finds the tools on PATH instead.
 	b.WriteString("  tmp_dir: \"/tmp\"\n")
+	// Where greenmask writes. Without it greenmask refuses to start:
+	//
+	//   directory storage config validation failed: path is required
+	//
+	// which arrives AFTER the pipeline has copied production, neutralized it and
+	// masked it — the three expensive steps — and was never seen because nothing
+	// had run the greenmask engine end to end. The config validator in
+	// hack/verify-greenmask-config.sh stops at the connection error, and greenmask
+	// checks its storage before it connects.
+	// TOP LEVEL, not under common: greenmask answers `'common' has invalid keys:
+	// storage`, which is the kind of thing only the tool itself will tell you.
+	b.WriteString("storage:\n")
+	b.WriteString("  type: \"directory\"\n")
+	b.WriteString("  directory:\n")
+	b.WriteString("    path: \"" + greenmaskOut + "\"\n")
 	b.WriteString("dump:\n")
 	b.WriteString("  pg_dump_options:\n")
 	b.WriteString("    dbname: \"" + dbName + "\"\n")
@@ -114,59 +135,102 @@ func greenmaskConfig(s *doblurav1alpha1.OdooSnapshotSpec, dbName string) string 
 
 // transformerYAML maps a MaskKind onto greenmask's concrete transformer.
 //
-// All of them with engine: hash, that is, DETERMINISTIC. It is the most
-// important decision in this file: if the same customer comes out with a
-// different name in every dump, QA cannot reproduce last week's bug report and
-// you cannot compare two rehearsals. Determinism is what keeps an anonymized
-// environment usable rather than merely lawful.
+// Every name and every parameter here was checked against the tool — `greenmask
+// list-transformers` and `show-transformer` — because the previous version was
+// checked against nothing. It named RandomStreetAddress, RandomCity and
+// RandomZipCode, none of which exist; it passed `engine` to transformers that
+// have no such parameter; and it gave RandomPerson a `column` when the parameter
+// is `columns`. greenmask refused the whole dump, which is the correct behaviour
+// and means the greenmask engine had never produced a single anonymized dump.
+//
+// The Go tests all passed throughout, because they asserted on substrings of a
+// string. A substring is not a schema.
+//
+// DETERMINISM, which is the decision this file turns on: if the same customer
+// comes out with a different name in every dump, QA cannot reproduce last week's
+// bug report and two rehearsals cannot be compared.
+//
+// It is achievable for the columns where it matters most and not for all of them,
+// and this is measured rather than assumed — each form below was run through
+// `greenmask validate` against a real database:
+//
+//	deterministic: RandomPerson and RandomEmail (engine: hash), and Hash, which
+//	               is deterministic by construction. Names, emails, tax IDs and
+//	               IBANs are what a person is correlated BY.
+//	not:           RandomPhoneNumber, RandomSentence, RandomURL and RealAddress
+//	               have no engine parameter in greenmask v0.2.22, so a phone
+//	               number or a city changes between two dumps of the same row.
+//
+// The gap is worth knowing about and is not worth closing by hashing those
+// columns instead: a hash in a city field is not a city, and the point of this
+// pipeline is realistic data.
 func transformerYAML(r doblurav1alpha1.MaskRule) string {
 	ind := "        "
-	head := ind + "- name: \""
-	// The closing quote lives here, and it went missing for the entire life of
-	// this function: every transformer came out as `- name: "RandomPerson` with no
-	// terminator, so the whole config was invalid YAML and greenmask would have
-	// refused to load it. Every test passed regardless, because they all asserted
-	// on substrings rather than parsing the result.
-	det := "\"\n" + ind + "  params:\n" + ind + "    column: \"" + r.Column + "\"\n" +
-		ind + "    engine: \"hash\"\n"
+	// one column, one transformer, deterministic where the transformer allows it
+	det := func(name, extra string) string {
+		return ind + "- name: \"" + name + "\"\n" +
+			ind + "  params:\n" +
+			ind + "    column: \"" + r.Column + "\"\n" +
+			ind + "    engine: \"hash\"\n" + extra
+	}
+	// and the same without an engine, for the ones that have no such parameter
+	plain := func(name, extra string) string {
+		return ind + "- name: \"" + name + "\"\n" +
+			ind + "  params:\n" +
+			ind + "    column: \"" + r.Column + "\"\n" + extra
+	}
+	// RandomPerson and RealAddress take `columns`: a list of column names each
+	// with a go template over the generated record. One entry, because a MaskRule
+	// is one column — the shape allows filling several columns from one generated
+	// person, which is worth having later and is not what the CRD expresses today.
+	templated := func(name, tpl, engine string) string {
+		return ind + "- name: \"" + name + "\"\n" +
+			ind + "  params:\n" +
+			ind + "    columns:\n" +
+			ind + "      - name: \"" + r.Column + "\"\n" +
+			ind + "        template: \"" + tpl + "\"\n" + engine
+	}
+	hashEngine := ind + "    engine: \"hash\"\n"
 
 	switch r.Kind {
 	case doblurav1alpha1.MaskName:
-		return head + "RandomPerson" + det + ind + "    attributes: [\"FirstName\", \"LastName\"]\n"
+		return templated("RandomPerson", "{{ .FirstName }} {{ .LastName }}", hashEngine)
 	case doblurav1alpha1.MaskFirstName:
-		return head + "RandomPerson" + det + ind + "    attributes: [\"FirstName\"]\n"
+		return templated("RandomPerson", "{{ .FirstName }}", hashEngine)
 	case doblurav1alpha1.MaskLastName:
-		return head + "RandomPerson" + det + ind + "    attributes: [\"LastName\"]\n"
+		return templated("RandomPerson", "{{ .LastName }}", hashEngine)
 	case doblurav1alpha1.MaskEmail:
-		// keep_original_domain false: keep the domain and four email addresses
-		// from a small company already tell you whose database this is.
-		return head + "RandomEmail" + det + ind + "    keep_original_domain: false\n"
+		// keep_original_domain false: keeping the domain, four addresses from a
+		// small company already tell you whose database this is.
+		return det("RandomEmail", ind+"    keep_original_domain: false\n")
 	case doblurav1alpha1.MaskPhone:
-		return head + "RandomPhoneNumber" + det
+		// No engine parameter on this one, measured against greenmask v0.2.22.
+		return plain("RandomPhoneNumber", "")
 	case doblurav1alpha1.MaskAddress:
-		return head + "RandomStreetAddress" + det
+		return templated("RealAddress", "{{ .Address }}", "")
 	case doblurav1alpha1.MaskCity:
-		return head + "RandomCity" + det
+		return templated("RealAddress", "{{ .City }}", "")
 	case doblurav1alpha1.MaskZip:
-		return head + "RandomZipCode" + det
+		return templated("RealAddress", "{{ .PostalCode }}", "")
 	case doblurav1alpha1.MaskVAT:
-		// There is no tax-ID transformer: a length-bounded hash is enough and it
-		// does not pretend to be valid, which is also the right behaviour.
-		return head + "Hash" + det + ind + "    function: \"sha1\"\n" + ind + "    max_length: 16\n"
+		// There is no tax-ID transformer, and a length-bounded hash does not
+		// pretend to be a valid one, which is also the right behaviour. Hash takes
+		// no engine: it is deterministic by construction.
+		return plain("Hash", ind+"    function: \"sha1\"\n"+ind+"    max_length: 16\n")
 	case doblurav1alpha1.MaskIBAN:
-		return head + "Hash" + det + ind + "    function: \"sha1\"\n" + ind + "    max_length: 24\n"
+		return plain("Hash", ind+"    function: \"sha1\"\n"+ind+"    max_length: 24\n")
 	case doblurav1alpha1.MaskURL:
-		return head + "RandomURL" + det
+		return plain("RandomURL", "")
 	case doblurav1alpha1.MaskText:
-		return head + "RandomSentence" + det
+		// Nor this one.
+		return plain("RandomSentence", "")
 	case doblurav1alpha1.MaskHash:
-		return head + "Hash" + det + ind + "    function: \"sha1\"\n"
+		return plain("Hash", ind+"    function: \"sha1\"\n")
 	case doblurav1alpha1.MaskNull:
-		// No engine: emptying a column has nothing random about it.
-		return ind + "- name: \"SetNull\"\n" + ind + "  params:\n" + ind + "    column: \"" + r.Column + "\"\n"
+		// Emptying a column has nothing random about it.
+		return plain("SetNull", "")
 	case doblurav1alpha1.MaskFixed:
-		return ind + "- name: \"Replace\"\n" + ind + "  params:\n" + ind + "    column: \"" + r.Column + "\"\n" +
-			ind + "    value: \"" + r.Value + "\"\n"
+		return plain("Replace", ind+"    value: \""+r.Value+"\"\n")
 	}
 	return ""
 }

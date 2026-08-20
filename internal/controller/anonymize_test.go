@@ -56,20 +56,51 @@ func TestTruncateDefaultsOffInGoToo(t *testing.T) {
 	}
 }
 
-// Deterministic or useless: if the same customer comes out different in every
-// dump, QA cannot reproduce last week's bug.
-func TestEveryTransformerIsDeterministic(t *testing.T) {
-	s := &doblurav1alpha1.OdooSnapshotSpec{}
-	cfg := greenmaskConfig(s, "work")
-
-	// Every data-generating transformer must carry engine: hash.
-	generators := strings.Count(cfg, "- name: \"Random")
-	hashes := strings.Count(cfg, "engine: \"hash\"")
-	if hashes < generators {
-		t.Errorf("there are %d Random* transformers and only %d with engine hash", generators, hashes)
+// Deterministic where greenmask can be, and nowhere pretending otherwise.
+//
+// The old version of this test counted `- name: "Random` and demanded an
+// `engine: "hash"` for each. It passed against a configuration greenmask refuses
+// to load — `engine` is not a parameter of RandomPhoneNumber, RandomSentence or
+// RandomURL at all, and passing it is a fatal validation error. Counting
+// substrings cannot tell a parameter that exists from one that does not.
+//
+// So this asserts the measured truth instead: the identity columns — the ones a
+// person is correlated BY — are deterministic, and the rest are not, because
+// greenmask v0.2.22 offers no way to make them so.
+func TestTheIdentityColumnsAreDeterministic(t *testing.T) {
+	rule := func(k doblurav1alpha1.MaskKind) string {
+		return transformerYAML(doblurav1alpha1.MaskRule{
+			Table: "res_partner", Column: "c", Kind: k, Value: "x",
+		})
 	}
-	if strings.Contains(cfg, "engine: \"random\"") {
-		t.Error("no transformer may use the random engine")
+	for _, k := range []doblurav1alpha1.MaskKind{
+		doblurav1alpha1.MaskName, doblurav1alpha1.MaskFirstName,
+		doblurav1alpha1.MaskLastName, doblurav1alpha1.MaskEmail,
+	} {
+		if !strings.Contains(rule(k), `engine: "hash"`) {
+			t.Errorf("%s must be deterministic: the same person has to come out the "+
+				"same in two dumps or nobody can reproduce a bug across them", k)
+		}
+	}
+	// And the ones with no engine parameter must not be given one: greenmask
+	// treats an unknown parameter as a fatal error and refuses the entire dump.
+	for _, k := range []doblurav1alpha1.MaskKind{
+		doblurav1alpha1.MaskPhone, doblurav1alpha1.MaskText, doblurav1alpha1.MaskURL,
+		doblurav1alpha1.MaskAddress, doblurav1alpha1.MaskCity, doblurav1alpha1.MaskZip,
+		doblurav1alpha1.MaskVAT, doblurav1alpha1.MaskIBAN, doblurav1alpha1.MaskHash,
+		doblurav1alpha1.MaskNull, doblurav1alpha1.MaskFixed,
+	} {
+		if strings.Contains(rule(k), "engine:") {
+			t.Errorf("%s takes no engine parameter in greenmask v0.2.22, and passing "+
+				"one is a fatal validation error that refuses the whole dump", k)
+		}
+	}
+	// Every transformer named here has to be one greenmask has. These three did
+	// not exist and the dump could never have run.
+	for _, gone := range []string{"RandomStreetAddress", "RandomCity", "RandomZipCode"} {
+		if strings.Contains(greenmaskConfig(&doblurav1alpha1.OdooSnapshotSpec{}, "work"), gone) {
+			t.Errorf("%s is not a greenmask transformer", gone)
+		}
 	}
 }
 

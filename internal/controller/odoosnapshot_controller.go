@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -74,6 +75,23 @@ func (r *OdooSnapshotReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			Reason: "CronJobCreated", Message: "CronJob " + snap.Name + " created",
 			ObservedGeneration: snap.Generation,
 		})
+	} else {
+		// No schedule: take one, once.
+		//
+		// Without this the object was inert and SILENT. A snapshot with no
+		// schedule produced a ConfigMap, a NetworkPolicy, a status with no phase
+		// and no message, and nothing that would ever run — so somebody asking for
+		// an anonymised copy got an object that looked accepted and did nothing,
+		// with no sentence anywhere saying why. It is the shape of defect this
+		// project keeps finding in itself, and it was in the one kind whose job is
+		// to produce the data everything else is tested against.
+		//
+		// Once, and never again: the Job is created if it is absent and is not
+		// recreated when it finishes. Re-running would read production a second
+		// time, unasked, and this is the most sensitive pod in the cluster.
+		if err := r.ensureJob(ctx, &snap, st); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	st.TablesTruncated = int32(len(snap.Spec.TablesToTruncate()))
@@ -187,10 +205,75 @@ func (r *OdooSnapshotReconciler) ensureCronJob(ctx context.Context, snap *doblur
 	return r.Patch(ctx, cj, client.Apply, fieldOwner, client.ForceOwnership)
 }
 
+// ensureJob is the one-off run, and the status that follows it.
+func (r *OdooSnapshotReconciler) ensureJob(
+	ctx context.Context,
+	snap *doblurav1alpha1.OdooSnapshot,
+	st *doblurav1alpha1.OdooSnapshotStatus,
+) error {
+	name := snap.Name + "-run"
+
+	var job batchv1.Job
+	err := r.Get(ctx, client.ObjectKey{Namespace: snap.Namespace, Name: name}, &job)
+	switch {
+	case apierrors.IsNotFound(err):
+		job = batchv1.Job{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: snap.Namespace},
+			Spec: batchv1.JobSpec{
+				// Zero retries, as for the CronJob: a second attempt is a second
+				// read of production, and whatever made the first one fail is
+				// still true.
+				BackoffLimit: ptr(int32(0)),
+				Template:     snapshotPodTemplate(snap),
+			},
+		}
+		if err := ctrl.SetControllerReference(snap, &job, r.Scheme); err != nil {
+			return err
+		}
+		if err := r.Create(ctx, &job); err != nil && !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		st.Phase = doblurav1alpha1.SnapCopying
+		st.Message = "taking a copy; no schedule was set, so this happens once"
+		return nil
+	case err != nil:
+		return err
+	}
+
+	switch {
+	case job.Status.Succeeded > 0:
+		st.Phase = doblurav1alpha1.SnapSucceeded
+		st.Message = "copy taken"
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
+			Type: "Taken", Status: metav1.ConditionTrue, Reason: "JobCompleted",
+			Message: "Job " + name + " completed", ObservedGeneration: snap.Generation,
+		})
+	case job.Status.Failed > 0:
+		st.Phase = doblurav1alpha1.SnapFailed
+		// Named, because the reason is in the pod and not in this object, and
+		// "failed" with nothing to open is a sentence nobody can act on.
+		st.Message = "the copy failed; check the logs of Job " + name
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{
+			Type: "Taken", Status: metav1.ConditionFalse, Reason: "JobFailed",
+			Message: "Job " + name + " failed", ObservedGeneration: snap.Generation,
+		})
+	default:
+		st.Phase = doblurav1alpha1.SnapCopying
+		st.Message = "taking a copy; no schedule was set, so this happens once"
+	}
+	return nil
+}
+
 func (r *OdooSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&doblurav1alpha1.OdooSnapshot{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&batchv1.CronJob{}).
+		// Without this the one-off Job would finish and the object would go on
+		// saying "taking a copy" until something else happened to wake the
+		// reconciler — and GenerationChangedPredicate above means a status change
+		// is not something else.
+		Owns(&batchv1.Job{}).
 		Named("odoosnapshot").
 		Complete(r)
 }
